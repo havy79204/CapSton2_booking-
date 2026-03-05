@@ -1,0 +1,28 @@
+{
+  "name": "my-nail-spa-backend",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "nodemon --exec \"node --openssl-legacy-provider\" src/index.js",
+    "start": "node src/index.js",
+    "db:test": "node tools/db-connect-test.js",
+    "seed": "node scripts/seed.js",
+    "db:schema": "node scripts/apply-schema.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "mssql": "^10.0.2",
+    "nodemailer": "^6.9.16",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

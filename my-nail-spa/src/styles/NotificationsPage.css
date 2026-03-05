@@ -1,0 +1,367 @@
+/* Notifications Page */
+.notificationsPage {
+  background: #faf8f6;
+  min-height: 100vh;
+  padding-top: 80px;
+  padding-bottom: 60px;
+}
+
+.notificationsHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 32px;
+  gap: 20px;
+}
+
+.notificationsHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.notificationsHeaderLeft h1 {
+  font-size: 32px;
+  font-weight: 700;
+  margin: 0;
+  color: #2d2d2d;
+}
+
+.notificationsSubtitle {
+  font-size: 14px;
+  color: #666;
+  margin: 4px 0 0 0;
+}
+
+.notificationsHeaderActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.notificationsContainer {
+  background: white;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+/* Tabs */
+.notificationsTabs {
+  display: flex;
+  border-bottom: 2px solid #f0f0f0;
+  background: #fafafa;
+  padding: 0 24px;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.notificationsTab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 500;
+  color: #666;
+  transition: all 0.2s;
+  white-space: nowrap;
+  position: relative;
+  margin-bottom: -2px;
+}
+
+.notificationsTab:hover {
+  color: #333;
+  background: #f5f5f5;
+}
+
+.notificationsTab.active {
+  color: #d4a574;
+  border-bottom-color: #d4a574;
+  background: white;
+}
+
+.tabCount {
+  background: #e8e8e8;
+  color: #666;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tabCount.unread {
+  background: #ff4d6d;
+  color: white;
+}
+
+.tabDivider {
+  width: 1px;
+  background: #e0e0e0;
+  margin: 8px 4px;
+}
+
+/* Content */
+.notificationsContent {
+  padding: 32px;
+  min-height: 400px;
+}
+
+.notificationsLoading {
+  text-align: center;
+  padding: 80px 20px;
+  color: #999;
+}
+
+.notificationsEmpty {
+  text-align: center;
+  padding: 80px 20px;
+  color: #999;
+}
+
+.notificationsEmpty svg {
+  color: #d0d0d0;
+  margin: 0 auto 24px;
+}
+
+.notificationsEmpty h3 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #666;
+  margin: 0 0 12px 0;
+}
+
+.notificationsEmpty p {
+  font-size: 15px;
+  color: #999;
+  margin: 0;
+}
+
+/* Notifications List */
+.notificationsList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.notificationCard {
+  display: flex;
+  gap: 16px;
+  padding: 20px;
+  background: #fafafa;
+  border: 2px solid #f0f0f0;
+  border-radius: 12px;
+  transition: all 0.2s;
+}
+
+.notificationCard:hover {
+  border-color: #e0e0e0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.notificationCard.unread {
+  background: #fffbf5;
+  border-color: #f5e6d3;
+}
+
+.notificationCard.unread:hover {
+  border-color: #d4a574;
+}
+
+.notificationIcon {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f5f5;
+  border-radius: 12px;
+  color: #666;
+  transition: all 0.2s ease;
+}
+
+/* Type-specific icon colors */
+.notificationCard[class*="unread"] .notificationIcon {
+  background: #fff8f0;
+  color: #c28451;
+}
+
+.notificationBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.notificationTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.notificationTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2d2d2d;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.unreadIndicator {
+  width: 8px;
+  height: 8px;
+  background: #ff4d6d;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.notificationActions {
+  display: flex;
+  gap: 8px;
+}
+
+.notificationActionBtn {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+}
+
+.notificationActionBtn:hover {
+  background: #f5f5f5;
+  border-color: #d4a574;
+  color: #d4a574;
+}
+
+.notificationActionBtn.danger:hover {
+  background: #fff5f5;
+  border-color: #ff4d6d;
+  color: #ff4d6d;
+}
+
+.notificationMessage {
+  font-size: 14px;
+  color: #666;
+  line-height: 1.6;
+  margin: 0 0 12px 0;
+}
+
+.notificationMeta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.notificationTime {
+  font-size: 13px;
+  color: #999;
+}
+
+.notificationBadge {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 12px;
+  text-transform: capitalize;
+}
+
+.notificationBadge.booking {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.notificationBadge.promotion {
+  background: #fff3e0;
+  color: #f57c00;
+}
+
+.notificationBadge.order {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.notificationBadge.reminder {
+  background: #e8f5e9;
+  color: #388e3c;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .notificationsPage {
+    padding-top: 70px;
+    padding-bottom: 80px;
+  }
+
+  .notificationsHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .notificationsHeaderLeft {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .notificationsHeaderLeft h1 {
+    font-size: 24px;
+  }
+
+  .notificationsHeaderActions {
+    width: 100%;
+  }
+
+  .notificationsHeaderActions button {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .notificationsTabs {
+    padding: 0 16px;
+    gap: 4px;
+  }
+
+  .notificationsTab {
+    padding: 12px 16px;
+    font-size: 14px;
+  }
+
+  .notificationsContent {
+    padding: 20px 16px;
+  }
+
+  .notificationCard {
+    padding: 16px;
+    gap: 12px;
+  }
+
+  .notificationIcon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .notificationTitle {
+    font-size: 15px;
+  }
+
+  .notificationMessage {
+    font-size: 13px;
+  }
+
+  .notificationActions {
+    flex-direction: column;
+  }
+}

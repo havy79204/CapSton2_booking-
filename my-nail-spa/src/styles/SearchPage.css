@@ -1,0 +1,150 @@
+html, body, #root { height: 100%; }
+.search-page { margin:0; padding:0; /* page takes full viewport height minus optional header */
+  height: calc(100vh - var(--header-height, 0px));
+  overflow: hidden; 
+}
+.search-page .container { display:flex; gap:0; max-width:none; padding:0; width:100%; box-sizing:border-box; margin:0; align-items:stretch; height:100%; overflow:hidden; }
+.search-page .layout { width:100%; padding-top:12px;height: 100%; display: flex; }
+.search-page .left-column { 
+  width: clamp(300px, 35vw, 400px); 
+  padding: 8px 18px 20px 0; 
+  box-sizing: border-box; 
+  display: flex; 
+  flex-direction: column; 
+  min-height: 0; 
+}
+
+@media (max-width: 1024px) {
+  .search-page .left-column {
+    width: 340px;
+  }
+}
+
+@media (max-width: 900px) {
+  .search-page .left-column {
+    width: 100%;
+    padding: 8px 8px 20px 8px;
+  }
+}
+
+.search-page .left-column > div { display:flex; flex-direction:column; min-height:0; flex:1 1 auto; }
+.search-page .right-column { flex:1; display:flex; flex-direction:column; gap:12px; padding:8px 0 20px 0; box-sizing:border-box; min-height:0; }
+.search-page .search-top-bar { display:none; }
+.card { background:#fff; border-radius:10px; box-shadow:0 6px 18px rgba(15,15,15,0.06); padding:14px; }
+.salonsToolbar { display:flex; gap:8px; align-items:center; }
+.salonsSearch { display:flex; align-items:center; gap:8px; flex:1; }
+.salonsSearch .input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid #e6e6e6; background:#fafafa; }
+.btn { padding:8px 12px; border-radius:8px; border:1px solid transparent; cursor:pointer; }
+.btn-primary { background:#ff4d6d; color:#fff; border-color:#ff4d6d; }
+
+.chip { border:1px solid #e6e6e6; padding:6px 10px; border-radius:16px; background:#fff; cursor:pointer; font-size:13px; }
+.chipActive { background:#fff0f3; border-color:#ffb0bf; }
+
+.map-container { height:420px; border-radius:10px; overflow:hidden; border:1px solid #e9e9e9; }
+.search-page .right-column #search-map { width:100%; height:100%; min-height:420px; }
+
+.map-unavailable-overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:linear-gradient(180deg, rgba(255,255,255,0.85), rgba(250,250,250,0.85)); z-index:2; }
+.map-unavailable-box { background:#fff; padding:18px; border-radius:8px; box-shadow:0 6px 18px rgba(15,15,15,0.08); text-align:center; max-width:320px; }
+.map-unavailable-box .muted { margin-bottom:8px; display:block; }
+.map-unavailable-box .btn { margin-top:8px; }
+
+/* Toggle toolbar below search */
+.search-toggle-toolbar { display:flex; align-items:center; gap:12px; }
+.search-toggle-toolbar .toggle-btn { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:8px; border:1px solid #eee; background:#fff; cursor:pointer; font-weight:600; height:36px; font-size:13px; }
+.search-toggle-toolbar .toggle-btn.active { background: #fff0f6; border-color: #ffb0bf; color: #e91e63; }
+.ranking-select { padding:6px 10px; border-radius:8px; border:1px solid #e6e6e6; background:#fafafa; height:36px; font-size:13px; }
+
+/* combined bottom row inside search card */
+.search-bottom-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.search-bottom-row .search-left-controls { display:flex; align-items:center; gap:8px; }
+.search-bottom-row .search-right-controls { display:flex; align-items:center; gap:8px; }
+.search-bottom-row .toggle-btn { padding:6px 10px; font-size:13px; height:36px; }
+.search-bottom-row .ranking-select { height:36px; }
+
+/* star rating filter */
+.star-filter { display:flex; align-items:center; gap:8px; }
+.star-btn { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; padding:4px; border-radius:8px; border:1px solid transparent; background:#fff; cursor:pointer; }
+.star-btn svg { display:block; }
+.star-btn.active { background:#fff7ed; border-color:#ffd8a8; }
+
+.salon-list { display:flex; flex-direction:column; gap:10px; }
+.salon-card { display:flex; gap:12px; padding:10px; align-items:center; border-radius:10px; border:1px solid #f3f3f3; background:#fff; }
+.salon-avatar { width:64px; height:64px; border-radius:8px; object-fit:cover; background:#f6f6f6; }
+.salon-details { flex:1; }
+.salon-name { font-weight:700; margin-bottom:4px; }
+.salon-address { color:#666; font-size:13px; margin-bottom:6px; }
+.salon-actions { display:flex; gap:8px; align-items:center; }
+
+.muted { color:#666; }
+
+/* Product card: mirror salon card appearance (thumbnail left, details center, price/actions right) */
+.productCard { display:flex; gap:12px; align-items:center; padding:12px; border-radius:10px; border:1px solid #f3f3f3; background:#fff; box-shadow:0 6px 18px rgba(15,15,15,0.03); transition:transform .12s ease, box-shadow .12s ease; }
+.productCard:hover { transform:translateY(-4px); box-shadow:0 12px 30px rgba(15,15,15,0.06); }
+.productCard img { width:64px; height:64px; border-radius:8px; object-fit:cover; background:#f6f6f6; }
+.productCard .productDesc { color:#666; font-size:13px; margin-top:6px; }
+.productCard .badge { margin-top:6px; }
+.productCard .productTitle { font-weight:800; }
+.productCard .productActions { display:flex; align-items:center; gap:8px; }
+
+
+@media (max-width: 900px) {
+  .search-page .container { 
+    flex-direction: column; 
+  }
+  .search-page .right-column { 
+    width: 100%; 
+  }
+  .map-container { 
+    height: 300px; 
+  }
+  .search-page .layout {
+    padding-top: 8px;
+  }
+}
+
+@media (max-width: 640px) {
+  .map-container {
+    height: 250px;
+  }
+  .search-bottom-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .search-bottom-row .search-left-controls,
+  .search-bottom-row .search-right-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* Force products into a full-width vertical list on the Search page */
+.search-page .grid.gridProducts,
+.search-page .gridProducts {
+  display: grid;
+  grid-template-columns: 1fr !important;
+  gap: 12px;
+}
+
+/* Make each product card take full width and show action buttons like salon cards */
+.search-page .productCard { width: 100%; }
+.search-page .productCard .btn { opacity: 1 !important; transform: none !important; }
+.search-page .productCard .thumbImg,
+.search-page .productCard .productThumb img { position: static !important; width:64px; height:64px; inset: auto; transform: none; }
+
+/* Left column scroll area (default view): only this column scrolls */
+.left-scroll { overflow-y: auto; flex: 1 1 auto; padding-right: 8px; min-height:0; }
+.left-scroll .card { margin-bottom: 12px; }
+.left-scroll::-webkit-scrollbar { width: 10px; }
+.left-scroll::-webkit-scrollbar-track { background: transparent; }
+.left-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.left-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.18); }
+.left-scroll { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.12) transparent; }
+
+/* List-view: stack everything and provide a single scroll area for salons + products */
+.search-page.list-view .container { flex-direction: column; width: 100%; height: auto; overflow: visible; }
+.search-page.list-view .left-column { width: 100%; padding: 8px 18px 20px 18px; }
+.search-page.list-view .right-column { display: none; }
+.search-page.list-view .left-scroll { max-height: calc(100vh - 160px); overflow-y: auto; }
+
+.search-page.list-view .left-scroll::-webkit-scrollbar { width: 10px; }
+.search-page.list-view .left-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius:8px; }
