@@ -1,0 +1,75 @@
+:root {
+  /* Typography */
+  --font-sans: Inter, Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji";
+
+  /* Base colors */
+  --bg: #F7F8FA;
+  --surface: #FFFFFF;
+  --text: #111827;
+  --muted: #6B7280;
+  --border: #E5E7EB;
+
+  /* Text & UI semantics */
+  --icon: rgba(17, 24, 39, 0.72);
+  --text-subtle: rgba(17, 24, 39, 0.72);
+  --text-softer: rgba(17, 24, 39, 0.62);
+
+  --surface-hover: rgba(17, 24, 39, 0.03);
+  --surface-tint: rgba(17, 24, 39, 0.02);
+  --surface-tint-2: rgba(17, 24, 39, 0.015);
+  --field-bg: rgba(107, 114, 128, 0.06);
+
+  --chart-gridline: rgba(107, 114, 128, 0.12);
+
+  --focus-outline: rgba(236, 72, 153, 0.9);
+  --focus-border: rgba(236, 72, 153, 0.45);
+  --focus-shadow: rgba(236, 72, 153, 0.10);
+
+  --overlay: rgba(15, 23, 42, 0.55);
+
+  /* Brand */
+  --primary: #EC4899;
+  --primary-2: #EC4899;
+  --primary-soft: rgba(236, 72, 153, 0.12);
+  --primary-border: rgba(236, 72, 153, 0.22);
+
+  /* Status */
+  --success: #16a34a;
+  --success-soft: rgba(22, 163, 74, 0.12);
+  --success-border: rgba(22, 163, 74, 0.22);
+  --warning: #f97316;
+  --warning-soft: rgba(249, 115, 22, 0.12);
+  --warning-border: rgba(249, 115, 22, 0.25);
+  --info: #2563eb;
+  --info-soft: rgba(37, 99, 235, 0.12);
+  --info-border: rgba(37, 99, 235, 0.20);
+  --purple: #7c3aed;
+  --purple-soft: rgba(124, 58, 237, 0.12);
+  --purple-border: rgba(124, 58, 237, 0.18);
+
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.12);
+
+  /* Sidebar */
+  --sidebar-bg: #0F172A;
+  --sidebar-bg-2: #0F172A;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-text: rgba(255, 255, 255, 0.78);
+  --sidebar-text-strong: rgba(255, 255, 255, 0.95);
+  --sidebar-surface: rgba(255, 255, 255, 0.04);
+  --sidebar-hover: rgba(255, 255, 255, 0.06);
+  --sidebar-active: rgba(255, 255, 255, 0.08);
+
+  /* Radii & shadows */
+  --radius-lg: 16px;
+  --radius-md: 14px;
+  --radius-sm: 12px;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 10px 24px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 2px 6px rgba(15, 23, 42, 0.10), 0 18px 44px rgba(15, 23, 42, 0.10);
+
+  /* Layout */
+  --sidebar-w: 270px;
+  --header-h: 74px;
+}

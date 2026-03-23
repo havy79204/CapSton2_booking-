@@ -1,0 +1,269 @@
+/* ===== HEADER ===== */
+.appointments-page .portal-pageHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+/* ===== BUTTON ===== */
+.appointments-page .portal-primaryBtn {
+  display: inline-flex;
+  align-items: center;    
+  justify-content: center; 
+  gap: 10px;
+  padding: 11px 22px;
+  border-radius: 999px;
+
+  /* lớp kính nhiều tầng */
+  background: linear-gradient(
+    195deg,
+    rgba(75, 66, 46, 0.816),
+    rgba(80, 35, 3, 0.13)
+  );
+
+  backdrop-filter: blur(14px) saturate(220%);
+  -webkit-backdrop-filter: blur(14px) saturate(220%);
+
+  border: 1px solid rgba(255, 235, 153, 0);
+
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.4),
+    inset 0 -2px 6px rgba(0,0,0,0.2),
+    0 10px 30px rgba(0,0,0,0.35);
+
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ===== SEARCH ===== */
+.appointments-page .portal-search {
+display: inline-flex;
+  align-items: center;    
+  justify-content: center; 
+  gap: 10px;
+  padding: 11px 22px;
+  border-radius: 999px;
+
+  /* lớp kính nhiều tầng */
+  background: linear-gradient(
+    195deg,
+    rgba(37, 21, 3, 0.741),
+    rgba(65, 65, 65, 0.225)
+  );
+
+  backdrop-filter: blur(14px) saturate(220%);
+  -webkit-backdrop-filter: blur(14px) saturate(220%);
+
+  border: 1px solid rgba(255, 235, 153, 0);
+
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.4),
+    inset 0 -2px 6px rgba(0,0,0,0.2),
+    0 10px 30px rgba(0,0,0,0.35);
+
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+
+
+}
+
+.appointments-page .portal-searchInput {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: rgb(15, 15, 15);
+  width: 100%;
+}
+
+/* ===== APPOINTMENT LIST ===== */
+.appointments-page .portal-apptItem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(30px);
+
+  border: 1px solid rgba(255,255,255,0.15);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  /* viền mờ */
+  border: 1px solid rgba(255, 255, 255, 0.15);
+
+  /* soft shadowềm */
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+}
+
+/* ===== DATE ===== */
+.appointments-page .portal-apptDate {
+  width: 60px;
+  text-align: center;
+  background: linear-gradient(135deg, #ffffff00, #ffffff00);
+}
+
+.appointments-page .portal-apptDay {
+  font-size: 20px;
+  font-weight: 900;
+  
+}
+
+.appointments-page .portal-apptMonth {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* ===== INFO ===== */
+.appointments-page .portal-apptName {
+  font-weight: 700;
+  color: black;
+}
+
+.appointments-page .portal-apptInfo {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.appointments-page .portal-apptMetaRow {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+  color: black;
+}
+
+.appointments-page .portal-apptMeta {
+  font-size: 13px;
+  opacity: 0.8;
+  color: black;
+}
+
+/* ===== SERVICE ===== */
+.appointments-page .portal-apptService {
+  margin-top: 6px;
+  font-size: 14px;
+  color: rgb(0, 0, 0);
+}
+
+/* ===== RIGHT ===== */
+.appointments-page .portal-apptRight {
+  margin-left: auto;
+  flex: 0 0 auto;
+  text-align: right;
+  color: black;
+  max-width: 100%;
+}
+
+.appointments-page .portal-apptPrice {
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: black;
+  white-space: nowrap;
+}
+
+.appointments-page .portal-apptActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* ===== ACTION ===== */
+.appointments-page .portal-ghostBtn {
+  display: inline-flex;
+  align-items: center;    
+  justify-content: center; 
+  gap: 10px;
+  padding: 11px 22px;
+  border-radius: 999px;
+
+  /* lớp kính nhiều tầng */
+  background: linear-gradient(
+    195deg,
+    rgba(75, 66, 46, 0.816),
+    rgba(80, 35, 3, 0.13)
+  );
+
+  backdrop-filter: blur(14px) saturate(220%);
+  -webkit-backdrop-filter: blur(14px) saturate(220%);
+
+  border: 1px solid rgba(255, 235, 153, 0);
+
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.4),
+    inset 0 -2px 6px rgba(0,0,0,0.2),
+    0 10px 30px rgba(0,0,0,0.35);
+
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.appointments-page .portal-ghostBtn.danger {
+  color: rgb(255, 255, 255);
+}
+
+/* ===== MODAL FORM ===== */
+.appointments-page .portal-field {
+  display: block;
+  margin-top: 12px;
+}
+
+.appointments-page .portal-label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.appointments-page .portal-input,
+.appointments-page .portal-select,
+.appointments-page .portal-textarea {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  outline: none;
+}
+
+/* ===== GRID FORM ===== */
+.appointments-page .portal-modalGrid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .appointments-page .portal-apptItem {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .appointments-page .portal-apptRight {
+    width: 100%;
+    margin-left: 0;
+    text-align: left;
+  }
+
+  .appointments-page .portal-apptActions {
+    justify-content: flex-start;
+  }
+}

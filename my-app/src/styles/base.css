@@ -1,0 +1,17 @@
+.portal {
+  min-height: 100vh;
+  color: #fff;
+  font-family: "Playfair Display", "Inter", serif;
+
+  background:
+    linear-gradient(
+      120deg,
+      rgba(0,0,0,0.45),
+      rgba(90,70,40,0.35)
+    ),
+    url("https://cdn.fondecranvip.com/2025/06/ulheVdfD-fond-decran-Beige-14.webp");
+
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}

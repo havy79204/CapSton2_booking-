@@ -1,0 +1,48 @@
+.portal-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.portal-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 14px;
+  font-weight: 850;
+}
+
+.portal-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.portal-navLink {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  text-decoration: none;
+  font-weight: 750;
+  transition: 0.2s;
+}
+
+.portal-navLinkActive {
+  position: relative;
+}
+
+.portal-navLinkActive::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #4e3106b8, var(--color-secondary));
+}

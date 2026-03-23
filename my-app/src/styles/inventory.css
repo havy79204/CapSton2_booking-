@@ -1,0 +1,69 @@
+/* .portal-invItemCard {
+  border-radius: 18px;
+  transition: 0.3s;
+  position: relative;
+}
+
+.portal-invItemCard:hover {
+  transform: translateY(-6px) scale(1.02);
+}
+
+.portal-invItemCard.low {
+  border: 1px solid rgba(255,120,0,0.6);
+}
+
+.portal-invItemCard::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: 0.4s;
+  pointer-events: none;
+}
+
+.portal-invItemCard:hover::before {
+  opacity: 1;
+} */
+
+.inventory-filterRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.inventory-filterField {
+  margin-top: 0;
+}
+
+.inventory-alertList {
+  margin: 0;
+  padding-left: 18px;
+  color: #374151;
+}
+
+.inventory-alertList li {
+  margin: 6px 0;
+}
+
+.inventory-muted {
+  color: #6b7280;
+}
+
+.inventory-pagination {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
+.inventory-paginationText {
+  color: #5b5b6e;
+  font-weight: 600;
+}
+
+.products-required {
+  color: #d9363e;
+  font-weight: 700;
+}

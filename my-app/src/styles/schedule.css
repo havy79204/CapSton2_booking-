@@ -1,0 +1,197 @@
+/* ===== HEADER ===== */
+.schedule-page .portal-pageHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+/* ===== BUTTON ===== */
+.schedule-page .portal-primaryBtn {
+  background: linear-gradient(135deg, #7f5539, #b08968);
+  border: none;
+  padding: 10px 16px;
+  border-radius: 10px;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ===== KPI GRID ===== */
+.schedule-page .portal-grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+/* ===== MINI KPI ===== */
+.schedule-page .portal-miniKpi {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.schedule-page .portal-miniKpiIcon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mini-bg);
+  color: var(--mini-fg);
+}
+
+.schedule-page .portal-miniKpiLabel {
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.schedule-page .portal-miniKpiValue {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+/* ===== WEEK NAV ===== */
+.schedule-page .portal-weekNav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.schedule-page .portal-weekNavCenter {
+  text-align: center;
+}
+
+.schedule-page .portal-weekRange {
+  font-weight: 700;
+}
+
+.schedule-page .portal-weekLabel {
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+/* ===== BUTTON OUTLINE ===== */
+.schedule-page .portal-outlineBtn {
+  border: 1px solid rgba(255,255,255,0.1);
+  background: transparent;
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+/* ===== TABLE ===== */
+.schedule-page .portal-scheduleWrap {
+  overflow-x: auto;
+}
+
+.schedule-page .portal-scheduleTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.schedule-page .portal-scheduleTh,
+.schedule-page .portal-scheduleTd {
+  padding: 12px;
+  text-align: center;
+}
+
+.schedule-page .portal-scheduleTh {
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.schedule-page .portal-scheduleThStaff {
+  text-align: left;
+  color: black;
+}
+
+.schedule-page .portal-scheduleTdStaff {
+  text-align: left;
+  
+}
+
+/* ===== STAFF CELL ===== */
+.schedule-page .portal-staffCell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.schedule-page .portal-staffAvatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #b08968;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: white;
+}
+
+.schedule-page .portal-staffName {
+  font-weight: 600;
+}
+
+.schedule-page .portal-staffRole {
+  font-size: 12px;
+  opacity: 0.6;
+  color: black;
+}
+
+/* ===== SHIFT ===== */
+.schedule-page .portal-shiftStack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.schedule-page .portal-shiftPill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0,0,0,0.3);
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.schedule-page .portal-shiftPillIcon {
+  display: flex;
+}
+
+/* ===== OFF ===== */
+.schedule-page .portal-off {
+  font-size: 12px;
+  opacity: 0.5;
+  color: black;
+}
+
+/* ===== MODAL ===== */
+.schedule-page .portal-field {
+  display: block;
+  margin-top: 12px;
+}
+
+.schedule-page .portal-label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.schedule-page .portal-input,
+.schedule-page .portal-select {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: none;
+  outline: none;
+}
+
+.schedule-page .portal-modalGrid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}

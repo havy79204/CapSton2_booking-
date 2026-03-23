@@ -1,0 +1,291 @@
+/* ===== REPORT PAGE ===== */
+
+.portal-reportsTabs {
+  margin: 20px 0;
+}
+
+.portal-seg {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.portal-segBtn {
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.25s ease;
+}
+
+.portal-segBtn.active {
+  display: inline-flex;
+  align-items: center;    
+  justify-content: center; 
+  gap: 10px;
+  padding: 11px 22px;
+  border-radius: 999px;
+
+  /* lớp kính nhiều tầng */
+  background: linear-gradient(
+    195deg,
+    rgba(75, 66, 46, 0.816),
+    rgba(80, 35, 3, 0.13)
+  );
+
+  backdrop-filter: blur(14px) saturate(220%);
+  -webkit-backdrop-filter: blur(14px) saturate(220%);
+
+  border: 1px solid rgba(255, 235, 153, 0);
+
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.4),
+    inset 0 -2px 6px rgba(0,0,0,0.2),
+    0 10px 30px rgba(0,0,0,0.35);
+
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ===== KPI ===== */
+.portal-kpi {
+}
+
+.portal-kpiValue {
+  font-size: 26px;
+  font-weight: 800;
+  margin-top: 6px;
+}
+
+.portal-kpiIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--kpi-icon-bg);
+  color: var(--kpi-accent);
+}
+
+/* ===== FILTER ===== */
+.portal-modalGrid2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+.portal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.portal-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.portal-input,
+.portal-select {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  outline: none;
+}
+
+/* ===== TABLE ===== */
+.portal-tableWrap {
+  overflow-x: auto;
+}
+
+.portal-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.portal-table th,
+.portal-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.portal-invName {
+  font-weight: 700;
+}
+
+.portal-invPill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+
+/* ===== BAR CHART ===== */
+.portal-reportBarCart {
+  display: flex;
+  align-items: flex-end;
+  gap: 20px;
+  height: 260px;
+}
+
+.portal-reportBarCol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.portal-reportBar,
+.portal-reportBarAlt {
+  width: 26px;
+  height: var(--bar-h);
+  border-radius: 8px;
+  background: var(--primary-2);
+}
+
+.portal-reportBarAlt {
+  background: var(--purple);
+}
+
+.portal-reportBarPair {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.portal-reportBarLabel {
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ===== STAFF LEGEND ===== */
+.portal-reportTitleRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.portal-reportLegend {
+  display: flex;
+  gap: 14px;
+}
+
+.portal-reportLegendItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.portal-reportSwatch {
+  width: 12px;
+  height: 12px;
+  background: var(--swatch);
+  border-radius: 3px;
+}
+
+/* ===== PIE CHART ===== */
+.portal-reportPayWrap {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+}
+
+.portal-reportPie {
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  position: relative;
+}
+
+.portal-reportPieHole {
+  width: 70px;
+  height: 70px;
+  background: var(--surface);
+  border-radius: 50%;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.portal-reportPieLabels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.portal-reportPieLabel {
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.portal-reportPieLabel::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  background: var(--c);
+  border-radius: 50%;
+}
+
+/* ===== PAYMENT DETAIL ===== */
+.portal-reportPayDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.portal-reportPayRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.portal-reportPayTop {
+  display: flex;
+  justify-content: space-between;
+}
+
+.portal-reportPayName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.portal-reportDot {
+  width: 10px;
+  height: 10px;
+  background: var(--dot);
+  border-radius: 50%;
+}
+
+.portal-reportPayTrack {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+
+.portal-reportPayFill {
+  height: 100%;
+  background: var(--fill);
+  border-radius: 999px;
+}
+
+/* ===== SPLIT ===== */
+.portal-reportsSplit {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
