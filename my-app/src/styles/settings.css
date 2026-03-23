@@ -1,0 +1,329 @@
+/* ===== SETTINGS PAGE (SCOPED) ===== */
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ===== TABS ===== */
+.settings-page .portal-settingsTabs {
+  margin-bottom: 10px;
+}
+
+/* reuse seg nhưng scope lại */
+.settings-page .portal-seg {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings-page .portal-segBtn {
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.25s ease;
+}
+
+.settings-page .portal-segBtn.active {
+  display: inline-flex;
+  align-items: center;    
+  justify-content: center; 
+  gap: 10px;
+  padding: 11px 22px;
+  border-radius: 999px;
+
+  /* lớp kính nhiều tầng */
+  background: linear-gradient(
+    195deg,
+    rgba(75, 66, 46, 0.816),
+    rgba(80, 35, 3, 0.13)
+  );
+
+  backdrop-filter: blur(14px) saturate(220%);
+  -webkit-backdrop-filter: blur(14px) saturate(220%);
+
+  border: 1px solid rgba(255, 235, 153, 0);
+
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.4),
+    inset 0 -2px 6px rgba(0,0,0,0.2),
+    0 10px 30px rgba(0,0,0,0.35);
+
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+
+
+}
+
+/* ===== CARD ===== */
+.settings-page .portal-settingsCard {
+  padding: 20px;
+}
+
+/* ===== SECTION TITLE ===== */
+.settings-page .portal-settingsSectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.settings-page .portal-settingsSectionIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: black;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-page .portal-settingsSectionText {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* ===== FORM ===== */
+.settings-page .portal-formGrid2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+.settings-page .portal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-page .portal-fieldFull {
+  grid-column: span 2;
+}
+
+.settings-page .portal-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-page .portal-input,
+.settings-page .portal-select {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  outline: none;
+}
+
+.settings-page .portal-inputWithIcon {
+  position: relative;
+}
+
+.settings-page .portal-inputIcon {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.6;
+}
+
+/* ===== PROFILE ===== */
+.settings-page .portal-profileTop {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.settings-page .portal-profileAvatar {
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  overflow: hidden;
+}
+
+.settings-page .portal-profileUpload {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-page .portal-profileHint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ===== DIVIDER ===== */
+.settings-page .portal-settingsDivider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
+}
+
+/* ===== SETTINGS LIST ===== */
+.settings-page .portal-settingsList {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-page .portal-settingsRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-page .portal-settingsRowNoBorder {
+  border-bottom: none;
+}
+
+.settings-page .portal-settingsRowTitle {
+  font-weight: 600;
+}
+
+.settings-page .portal-settingsRowSub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ===== SWITCH ===== */
+.settings-page .portal-switch {
+  width: 44px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--border);
+  position: relative;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.settings-page .portal-switch.on {
+  display: inline-flex;
+  align-items: center;    
+  justify-content: center; 
+  gap: 10px;
+  padding: 11px 22px;
+  border-radius: 999px;
+
+  /* lớp kính nhiều tầng */
+  background: linear-gradient(
+    195deg,
+    rgba(75, 66, 46, 0.816),
+    rgba(80, 35, 3, 0.13)
+  );
+
+  backdrop-filter: blur(14px) saturate(220%);
+  -webkit-backdrop-filter: blur(14px) saturate(220%);
+
+  border: 1px solid rgba(255, 235, 153, 0);
+
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.4),
+    inset 0 -2px 6px rgba(0,0,0,0.2),
+    0 10px 30px rgba(0,0,0,0.35);
+
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+
+
+}
+
+.settings-page .portal-switchKnob {
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  transition: all 0.25s ease;
+}
+
+.settings-page .portal-switch.on .portal-switchKnob {
+  left: 23px;
+}
+
+/* ===== ACTIONS ===== */
+.settings-page .portal-formActions {
+  margin-top: 16px;
+}
+
+.settings-page .portal-settingsActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+/* ===== BUTTON ===== */
+.settings-page .portal-primaryBtnCompact {
+  display: inline-flex;
+  align-items: center;    
+  justify-content: center; 
+  gap: 10px;
+  padding: 11px 22px;
+  border-radius: 999px;
+
+  /* lớp kính nhiều tầng */
+  background: linear-gradient(
+    195deg,
+    rgba(75, 66, 46, 0.816),
+    rgba(80, 35, 3, 0.13)
+  );
+
+  backdrop-filter: blur(14px) saturate(220%);
+  -webkit-backdrop-filter: blur(14px) saturate(220%);
+
+  border: 1px solid rgba(255, 235, 153, 0);
+
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,0.4),
+    inset 0 -2px 6px rgba(0,0,0,0.2),
+    0 10px 30px rgba(0,0,0,0.35);
+
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+
+
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 768px) {
+  .settings-page .portal-formGrid2 {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-page .portal-fieldFull {
+    grid-column: span 1;
+  }
+
+  .settings-page .portal-profileTop {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
