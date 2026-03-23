@@ -1,0 +1,22 @@
+/* scope toàn bộ dashboard */
+.dashboard-page .portal-cardInner {
+  
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(30px);
+
+  border: 1px solid rgba(255,255,255,0.15);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+
+
+}
+
+.dashboard-page .portal-grid4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+}
+
+.dashboard-page .portal-kpiValue {
+  font-size: 28px;
+  font-weight: 900;
+}

@@ -1,0 +1,36 @@
+/* .portal-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255,255,255,0.12);  
+  backdrop-filter: blur(6px); 
+  border: 1px solid rgba(166, 147, 103, 0.482);
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: none;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.portal-search:focus-within {
+  border-color: var(--focus-border);
+  box-shadow: 0 0 0 4px var(--focus-shadow);
+}
+
+.portal-searchIcon {
+  width: 18px;
+  height: 18px;
+  color: #fff;
+}
+
+.portal-searchInput {
+  border: 0;
+  outline: none;
+  background: transparent;
+  width: 100%;
+  font-size: 14px;
+  color: #fff;
+}
+.portal-searchInput::placeholder {
+  color: #fff;
+  opacity: 0.85;
+} */

@@ -1,0 +1,94 @@
+/* =========================
+   CUSTOMERS PAGE
+========================= */
+
+.customers-page .portal-customerGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+/* Card */
+.customers-page .portal-customerCard {
+  border-radius: 16px;
+  padding: 16px;
+  transition: 0.3s;
+}
+
+.customers-page .portal-customerCard:hover {
+  transform: translateY(-4px);
+}
+
+/* Top */
+.customers-page .portal-customerTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Avatar */
+.customers-page .portal-customerAvatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #e6c07b, #8a5a1f);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #fff;
+  
+}
+
+/* Name */
+.customers-page .portal-customerName {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 10px 0;
+  color: black;
+}
+
+/* Contact */
+.customers-page .portal-customerContacts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: black;
+}
+
+/* Note */
+.customers-page .portal-customerNote {
+  margin-top: 10px;
+  font-size: 13px;
+  opacity: 0.8;
+  background: rgba(255,255,255,0.05);
+  padding: 8px;
+  border-radius: 10px;
+}
+
+/* Divider */
+.customers-page .portal-staffDivider {
+  margin: 12px 0;
+}
+
+/* Stats */
+.customers-page .portal-customerStats {
+  display: flex;
+  justify-content: space-between;
+  color: black;
+}
+
+.customers-page .portal-customerStatLabel {
+  font-size: 12px;
+  opacity: 0.7;
+  color: black;
+}
+
+.customers-page .portal-customerStatValue {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.customers-page .portal-customerStatRight {
+  text-align: right;
+}
