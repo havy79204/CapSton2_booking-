@@ -1,0 +1,199 @@
+/* styles/orders.css */
+
+.orders-page .portal-invTableCard {
+  border-radius: 16px;
+  color: #301103;
+}
+
+.orders-page .portal-table th {
+  background: rgba(255, 255, 255, 0.05);
+  color: #301103;
+}
+
+.orders-page .portal-invPill {
+  background: rgba(91, 48, 3, 0.189);
+  padding: 4px 10px;
+  color: #301103;
+}
+
+.orders-page .portal-invName {
+  font-weight: 600;
+  color: #301103;
+}
+
+.orders-page .portal-orderFilters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.orders-page .portal-orderSummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 6px 0 10px;
+}
+
+.orders-page .portal-orderSummaryItem {
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(48, 17, 3, 0.15);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.orders-page .portal-orderSummaryItem span {
+  font-size: 0.84rem;
+  color: #6d4f35;
+}
+
+.orders-page .portal-orderSummaryItem b {
+  font-size: 1.05rem;
+  color: #301103;
+}
+
+.orders-page .orders-createItemRow {
+  display: grid;
+  grid-template-columns: 1.8fr 0.7fr 0.8fr auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 10px;
+}
+
+.orders-page .orders-createItemTotal {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  font-weight: 700;
+  color: #301103;
+}
+
+.orders-page .orders-createTotal {
+  margin-top: 12px;
+  text-align: right;
+  font-weight: 700;
+  color: #301103;
+}
+
+.orders-page .orders-createModal {
+  width: min(980px, 94vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.orders-page .orders-createModalBody {
+  overflow-y: auto;
+  max-height: calc(92vh - 142px);
+}
+
+.orders-page .orders-createModalFooter {
+  border-top: 1px solid rgba(48, 17, 3, 0.15);
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.orders-page .orders-createForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.orders-page .orders-createTopSection {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 6px 0 10px;
+  background: linear-gradient(180deg, rgba(236, 229, 214, 0.96), rgba(236, 229, 214, 0.88));
+  border-bottom: 1px solid rgba(48, 17, 3, 0.12);
+}
+
+.orders-page .orders-createProductsCard {
+  margin-top: 0;
+}
+
+.orders-page .orders-createProductsBox {
+  border: 1px solid rgba(48, 17, 3, 0.18);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.orders-page .orders-createProductsTableWrap {
+  max-height: 34vh;
+  overflow: auto;
+}
+
+.orders-page .orders-createProductsTable th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.orders-page .orders-createProductsTable td {
+  vertical-align: middle;
+}
+
+.orders-page .orders-createQtyInput {
+  width: 90px;
+}
+
+.orders-page .orders-createActions {
+  margin-top: 10px;
+}
+
+@media (max-width: 1200px) {
+  .orders-page .portal-orderFilters {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+}
+
+@media (max-width: 800px) {
+  .orders-page .portal-orderFilters {
+    grid-template-columns: repeat(1, minmax(140px, 1fr));
+  }
+
+  .orders-page .portal-orderSummary {
+    grid-template-columns: repeat(1, minmax(140px, 1fr));
+  }
+
+  .orders-page .orders-createItemRow {
+    grid-template-columns: 1fr;
+  }
+
+  .orders-page .orders-createItemTotal {
+    justify-content: flex-start;
+    height: auto;
+  }
+
+  .orders-page .orders-createModal {
+    width: min(98vw, 740px);
+    max-height: 94vh;
+  }
+
+  .orders-page .orders-createModalBody {
+    max-height: calc(94vh - 136px);
+  }
+
+  .orders-page .orders-createProductsTableWrap {
+    max-height: 38vh;
+  }
+
+  .orders-page .orders-createQtyInput {
+    width: 72px;
+  }
+}
+
+@media (max-width: 640px) {
+  .orders-page .orders-createTopSection {
+    position: static;
+    padding-top: 0;
+  }
+
+  .orders-page .orders-createProductsTableWrap {
+    max-height: 42vh;
+  }
+}

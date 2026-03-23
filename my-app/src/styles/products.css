@@ -1,0 +1,63 @@
+/* styles/products.css */
+
+.products-page .portal-invTableCard {
+  border-radius: 16px;
+  color: #301103;
+}
+
+.products-page .portal-table th {
+  background: rgba(255,255,255,0.05);
+  color: #301103;
+}
+
+.products-page .portal-invPill {
+  background: rgba(91, 48, 3, 0.189);
+  padding: 4px 10px;
+  color: #301103;
+}
+
+.products-page .portal-invName {
+  font-weight: 600;
+  color: #301103;
+}
+
+.products-filterRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.products-filterField {
+  margin-top: 0;
+}
+
+.products-pagination {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.products-paginationText {
+  color: #5b5b6e;
+  font-weight: 600;
+}
+
+.products-required {
+  color: #d9363e;
+  font-weight: 700;
+}
+
+.products-emptyRow {
+  text-align: center;
+  color: #6b7280;
+  padding: 22px 12px;
+}
+
+@media (max-width: 768px) {
+  .products-filterRow {
+    grid-template-columns: 1fr;
+  }
+}

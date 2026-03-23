@@ -1,0 +1,15 @@
+/* .portal-card {
+  border-radius: var(--radius-lg);
+  transition: 0.2s;
+}
+
+.portal-cardInner {
+  padding: 18px;
+  border-radius: 15px;
+  transition: 0.3s;
+}
+
+.portal-cardInner:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+} */

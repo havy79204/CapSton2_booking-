@@ -1,0 +1,17 @@
+.portal {
+ 
+  background-size: cover;
+  background-attachment: fixed;
+}
+
+.portal-card {
+  backdrop-filter: blur(10px);
+}
+
+.portal-sidebar {
+  backdrop-filter: blur(10px);
+}
+
+.portal-header {
+  backdrop-filter: blur(10px);
+}
