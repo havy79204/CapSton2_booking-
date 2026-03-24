@@ -33,6 +33,12 @@ function normalizeImageUrls(input) {
     .slice(0, 20)
 }
 
+function isForeignKeyConstraintError(err) {
+  if (!err) return false
+  const msg = String(err?.message || '').toLowerCase()
+  return err?.number === 547 || msg.includes('reference constraint') || msg.includes('foreign key')
+}
+
 async function columnExists(tableName, columnName) {
   const res = await query(
     `SELECT 1 AS ok
@@ -339,8 +345,26 @@ async function deleteService(serviceId) {
     throw err
   }
 
-  await query('DELETE FROM ServiceImages WHERE ServiceId = @serviceId', { serviceId })
-  await query('DELETE FROM Services WHERE ServiceId = @serviceId', { serviceId })
+  const hasStaffSkillsTable = await tableExists('StaffSkills')
+  if (hasStaffSkillsTable) {
+    const hasServiceIdInStaffSkills = await columnExists('StaffSkills', 'ServiceId')
+    if (hasServiceIdInStaffSkills) {
+      await query('DELETE FROM StaffSkills WHERE ServiceId = @serviceId', { serviceId })
+    }
+  }
+
+  try {
+    await query('DELETE FROM ServiceImages WHERE ServiceId = @serviceId', { serviceId })
+    await query('DELETE FROM Services WHERE ServiceId = @serviceId', { serviceId })
+  } catch (err) {
+    if (isForeignKeyConstraintError(err)) {
+      const conflict = new Error('Cannot delete service with existing booking or review history')
+      conflict.status = 409
+      throw conflict
+    }
+    throw err
+  }
+
   return { id: serviceId }
 }
 
