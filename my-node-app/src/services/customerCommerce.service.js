@@ -610,45 +610,50 @@ function mapCartItem(row) {
 
 async function getCart(userIdInput) {
   const userId = requireUserId(userIdInput)
-  const cartId = await ensureCart(userId)
+  
+  try {
+    const cartId = await ensureCart(userId)
+    const ctx = await getCustomerContext(userId)
 
-  const ctx = await getCustomerContext(userId)
+    const [itemsRes, defaultAddress] = await Promise.all([
+      query(
+        `SELECT
+            ci.CartItemId,
+            ci.CartId,
+            ci.ProductId,
+            ci.Quantity,
+            p.Name,
+            p.Description,
+            p.Price,
+            p.ImageUrl,
+            p.Stock,
+            p.CategoryId
+         FROM CartItems ci
+         LEFT JOIN Products p ON p.ProductId = ci.ProductId
+         WHERE ci.CartId = @cartId
+         ORDER BY ci.CartItemId DESC`,
+        { cartId }
+      ),
+      getDefaultAddress(userId),
+    ])
 
-  const [itemsRes, defaultAddress] = await Promise.all([
-    query(
-      `SELECT
-          ci.CartItemId,
-          ci.CartId,
-          ci.ProductId,
-          ci.Quantity,
-          p.Name,
-          p.Description,
-          p.Price,
-          p.ImageUrl,
-          p.Stock,
-          p.CategoryId
-       FROM CartItems ci
-       LEFT JOIN Products p ON p.ProductId = ci.ProductId
-       WHERE ci.CartId = @cartId
-       ORDER BY ci.CartItemId DESC`,
-      { cartId }
-    ),
-    getDefaultAddress(userId),
-  ])
+    const items = (itemsRes.recordset || []).map(mapCartItem)
+    const subtotal = items.reduce((sum, item) => sum + item.LineTotal, 0)
 
-  const items = (itemsRes.recordset || []).map(mapCartItem)
-  const subtotal = items.reduce((sum, item) => sum + item.LineTotal, 0)
-
-  return {
-    CartId: cartId,
-    Customer: ctx.user,
-    Items: items,
-    Summary: {
-      ItemCount: items.length,
-      QuantityCount: items.reduce((sum, item) => sum + item.Quantity, 0),
-      Subtotal: subtotal,
-    },
-    DefaultAddress: defaultAddress,
+    return {
+      CartId: cartId,
+      Customer: ctx.user,
+      Items: items,
+      Summary: {
+        ItemCount: items.length,
+        QuantityCount: items.reduce((sum, item) => sum + item.Quantity, 0),
+        Subtotal: subtotal,
+      },
+      DefaultAddress: defaultAddress,
+    }
+  } catch (err) {
+    console.error('Error in getCart:', err?.message)
+    throw err
   }
 }
 
@@ -1013,7 +1018,8 @@ async function listBookings(userIdInput, limit = 20) {
           bs.StaffId,
           COALESCE(bs.Price, s.Price) AS Price,
           s.Name AS ServiceName,
-          s.DurationMinutes
+          s.DurationMinutes,
+          s.ImageUrl
        FROM BookingServices bs
        LEFT JOIN Services s ON s.ServiceId = bs.ServiceId
        WHERE bs.BookingId = @bookingId
@@ -1028,6 +1034,7 @@ async function listBookings(userIdInput, limit = 20) {
       StaffId: s.StaffId || null,
       DurationMinutes: Number(s.DurationMinutes || 0),
       Price: Number(s.Price || 0),
+      ImageUrl: s.ImageUrl || null,
     }))
 
     results.push({

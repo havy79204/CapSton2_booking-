@@ -1,5 +1,6 @@
 const { asyncHandler } = require('../../utils/asyncHandler')
 const customersService = require('../../services/customers.service')
+const customerCommerceService = require('../../services/customerCommerce.service')
 
 const getCustomers = asyncHandler(async (req, res) => {
   const data = await customersService.listCustomers()
@@ -60,10 +61,34 @@ const deleteCustomer = asyncHandler(async (req, res) => {
   res.json({ ok: true, data })
 })
 
+const getCustomerBookings = asyncHandler(async (req, res) => {
+  const { id } = req.params || {}
+  if (!id) {
+    res.status(400).json({ ok: false, error: 'Missing id' })
+    return
+  }
+
+  const data = await customerCommerceService.listBookings(id)
+  res.json({ ok: true, data })
+})
+
+const getCustomerOrders = asyncHandler(async (req, res) => {
+  const { id } = req.params || {}
+  if (!id) {
+    res.status(400).json({ ok: false, error: 'Missing id' })
+    return
+  }
+
+  const data = await customerCommerceService.listOrders(id)
+  res.json({ ok: true, data })
+})
+
 module.exports = {
   getCustomers,
   getCustomerById,
   postCustomer,
   putCustomer,
   deleteCustomer,
+  getCustomerBookings,
+  getCustomerOrders,
 }
