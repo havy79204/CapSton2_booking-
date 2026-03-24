@@ -1,6 +1,8 @@
 const { query, newId } = require('../config/query')
 const { toAppointmentListItem } = require('../models/appointment.model')
 
+const ACTIVE_SERVICE_WHERE = `(Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) = 'active')`
+
 async function listAppointments() {
   const result = await query(
     `SELECT TOP 200
@@ -47,8 +49,19 @@ async function createAppointment(payload) {
     throw err
   }
 
-  const svc = await query('SELECT Price FROM Services WHERE ServiceId = @serviceId', { serviceId })
+  const svc = await query(
+    `SELECT TOP 1 Price
+     FROM Services
+     WHERE ServiceId = @serviceId
+       AND ${ACTIVE_SERVICE_WHERE}`,
+    { serviceId }
+  )
   const price = svc.recordset?.[0]?.Price
+  if (price === undefined) {
+    const err = new Error('Service not found')
+    err.status = 404
+    throw err
+  }
 
   const bookingId = newId()
   const bookingServiceId = newId()
@@ -137,7 +150,18 @@ async function updateAppointment(bookingId, payload) {
     throw err
   }
 
-  const svc = await query('SELECT Price FROM Services WHERE ServiceId = @serviceId', { serviceId })
+  const svc = await query(
+    `SELECT TOP 1 Price
+     FROM Services
+     WHERE ServiceId = @serviceId
+       AND ${ACTIVE_SERVICE_WHERE}`,
+    { serviceId }
+  )
+  if (!svc.recordset?.length) {
+    const err = new Error('Service not found')
+    err.status = 404
+    throw err
+  }
   const price = svc.recordset?.[0]?.Price ?? 0
 
   const bsRes = await query(

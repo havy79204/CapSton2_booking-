@@ -244,17 +244,6 @@ export default function OwnerInventoryPage() {
       }).length,
     [items]
   )
-
-  const staleInventory = useMemo(() => {
-    const now = new Date()
-    return items.filter((i) => {
-      const d = parseDmyString(i.lastIn)
-      if (!d) return false
-      const days = (now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24)
-      return days >= 60 && Number(i.stock || 0) > 0
-    })
-  }, [items])
-
   const totalImportVnd = useMemo(
     () => history.filter((h) => h.type === 'Stock In').reduce((sum, h) => sum + Number(h.totalVnd || 0), 0),
     [history]
@@ -744,20 +733,6 @@ export default function OwnerInventoryPage() {
     } catch (err) {
       console.error(err)
       setVariantsError(err?.message || 'Unable to delete variant')
-    }
-  }
-
-  async function onDeleteItem(item) {
-    if (!item?.id) return
-    const ok = window.confirm(`Delete "${item.name}"?`)
-    if (!ok) return
-
-    try {
-      await api.del(`/api/owner/inventory/items/${item.id}`)
-      await refreshInventory()
-    } catch (err) {
-      console.error(err)
-      setEditError(err?.message || 'Unable to delete item')
     }
   }
 
@@ -1480,20 +1455,6 @@ export default function OwnerInventoryPage() {
         </PortalCard>
       </div>
 
-      <PortalCard className="portal-invTableCard" title="Smart Alerts">
-        {staleInventory.length === 0 ? (
-          <div className="inventory-muted">No stale inventory detected.</div>
-        ) : (
-          <ul className="inventory-alertList">
-            {staleInventory.slice(0, 5).map((it) => (
-              <li key={it.id}>
-                {it.name} has not been restocked for over 60 days (stock: {it.stock})
-              </li>
-            ))}
-          </ul>
-        )}
-      </PortalCard>
-
       <div className="portal-invTabs">
         <div className="portal-seg" role="tablist" aria-label="Inventory tabs">
           <button
@@ -1692,18 +1653,8 @@ export default function OwnerInventoryPage() {
                       <td>{it.lastIn || '-'}</td>
                       <td>
                         <div className="portal-rowActions">
-                          <button
-                            type="button"
-                            className="portal-ghostBtn success"
-                            onClick={() => openStockFor(it)}
-                          >
-                            Stock In
-                          </button>
                           <button type="button" className="portal-ghostBtn" onClick={() => openEditFor(it)}>
                             Edit
-                          </button>
-                          <button type="button" className="portal-ghostBtn danger" onClick={() => onDeleteItem(it)}>
-                            Delete
                           </button>
                         </div>
                       </td>
