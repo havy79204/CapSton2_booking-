@@ -37,8 +37,15 @@ function roleNameFromKey(roleKey) {
 
 function shouldUseDevFallback(error) {
   if (!env.features?.quickLoginEnabled || !env.features?.quickLoginDbFallback) return false
+  
+  // Connection errors
   const code = error?.code || error?.originalError?.code
-  return ['ESOCKET', 'EINSTLOOKUP', 'ETIMEOUT', 'ECONNRESET', 'ECONNREFUSED'].includes(code)
+  if (['ESOCKET', 'EINSTLOOKUP', 'ETIMEOUT', 'ECONNRESET', 'ECONNREFUSED'].includes(code)) return true
+  
+  // Also fallback on 404 (user not found) in dev mode - likely because tables don't exist
+  if (error?.statusCode === 404 || error?.status === 404) return true
+  
+  return false
 }
 
 function createDevFallbackUser({ roleKey, email }) {
@@ -51,6 +58,38 @@ function createDevFallbackUser({ roleKey, email }) {
     roleKey,
     status: 'ACTIVE',
     createdAt: now,
+  }
+}
+
+async function ensureDevUserExists(devUser) {
+  try {
+    // Check if user already exists
+    const existing = await query(
+      `SELECT TOP 1 UserId FROM Users WHERE UserId = @userId`,
+      { userId: devUser.userId }
+    )
+    
+    if (existing?.recordset?.[0]) {
+      return // User already exists
+    }
+
+    // Insert dev user if not found
+    await query(
+      `INSERT INTO Users (UserId, Name, Email, Phone, RoleKey, Status, CreatedAt)
+       VALUES (@userId, @name, @email, @phone, @roleKey, @status, SYSUTCDATETIME())`,
+      {
+        userId: devUser.userId,
+        name: devUser.name,
+        email: devUser.email,
+        phone: devUser.phone || null,
+        roleKey: String(devUser.roleKey),
+        status: devUser.status,
+      }
+    )
+  } catch (err) {
+    // If insert fails (e.g., duplicate key), just continue
+    // The user might have been created by another request
+    console.warn(`Dev user ensure failed (continuing): ${err?.message}`)
   }
 }
 
@@ -120,6 +159,8 @@ async function quickLogin({ roleId, email } = {}) {
       `Quick login fallback enabled: DB unavailable (${error?.code || error?.originalError?.code || 'UNKNOWN'}).`,
     )
     user = createDevFallbackUser({ roleKey, email })
+    // Ensure the dev user exists in the database
+    await ensureDevUserExists(user)
   }
 
   const token = jwt.sign(
