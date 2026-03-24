@@ -16,10 +16,12 @@ import {
 import {
 } from '../lib/mockData';
 import { useProductReviews, useProducts } from '../hooks/useHomepage';
+import { resolveApiImageUrl } from '../lib/api.js';
 import { useCustomerCart } from '../hooks/useCustomerCommerce';
 import '../styles/ProductDetail.css';
+import '../styles/OwnerServiceDetail.css';
 
-const ProductDetailSection = ({ product, ratingSummary }) => {
+const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) => {
   const navigate = useNavigate();
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
@@ -31,9 +33,19 @@ const ProductDetailSection = ({ product, ratingSummary }) => {
     productVariants.length > 0 ? productVariants[0] : null
   );
 
-  const galleryImages = Array.isArray(product.Images) && product.Images.length > 0
-    ? product.Images
-    : [product.ImageUrl].filter(Boolean);
+  const galleryImages = (() => {
+    const normalize = (raw) => {
+      if (raw === undefined || raw === null) return ''
+      if (typeof raw === 'string') return resolveApiImageUrl(raw)
+      if (typeof raw === 'object') return resolveApiImageUrl(raw.url || raw.ImageUrl || '')
+      return ''
+    }
+
+    const images = Array.isArray(product.Images) ? product.Images.map((i) => normalize(i)).filter(Boolean) : []
+    if (images.length > 0) return images
+    const single = normalize(product.ImageUrl)
+    return single ? [single] : []
+  })();
 
   const averageRating = Number(ratingSummary?.AverageRating || 0).toFixed(1);
   const reviewCount = Number(ratingSummary?.ReviewCount || 0);
@@ -41,6 +53,10 @@ const ProductDetailSection = ({ product, ratingSummary }) => {
   const soldCount = Number(product.SoldCount || 0);
 
   const handleGoBack = () => {
+    if (isOwnerMode) {
+      navigate('/portals/owner/products');
+      return;
+    }
     navigate(-1);
   };
 
@@ -150,14 +166,14 @@ const ProductDetailSection = ({ product, ratingSummary }) => {
     <section className="product-detail-section">
       <div className="product-detail-container">
         <button className="back-btn" onClick={handleGoBack}>
-          <IoArrowBack /> Back to Shop
+          <IoArrowBack /> {isOwnerMode ? 'Back to Products' : 'Back to Shop'}
         </button>
 
         <div className="product-detail-content">
           <div className="product-detail-image-wrapper">
             <div className="product-detail-image">
-              {galleryImages[selectedImage] || product.ImageUrl ? (
-                <img src={galleryImages[selectedImage] || product.ImageUrl} alt={product.Name} />
+              {galleryImages[selectedImage] ? (
+                <img src={galleryImages[selectedImage]} alt={product.Name} />
               ) : (
                 <div className="service-image-placeholder"></div>
               )}
@@ -193,7 +209,6 @@ const ProductDetailSection = ({ product, ratingSummary }) => {
 
           <div className="product-detail-info">
             <h1 className="product-detail-title">{product.Name}</h1>
-            
             <div className="product-rating-section">
               <div className="rating-stars">
                 {renderStars(parseFloat(averageRating))}
@@ -220,7 +235,7 @@ const ProductDetailSection = ({ product, ratingSummary }) => {
               <p>{product.Description}</p>
             </div>
 
-            {productVariants.length > 0 && (
+            {!isOwnerMode && productVariants.length > 0 && (
               <div className="product-variants">
                 <label>Select Variant:</label>
                 <div className="variants-grid">
@@ -239,7 +254,7 @@ const ProductDetailSection = ({ product, ratingSummary }) => {
               </div>
             )}
 
-            {!isOutOfStock && (
+            {!isOwnerMode && !isOutOfStock && (
               <div className="quantity-section">
                 <label>Quantity:</label>
                 <div className="quantity-controls">
@@ -268,22 +283,24 @@ const ProductDetailSection = ({ product, ratingSummary }) => {
               </div>
             )}
 
-            <div className="product-actions">
-              {!isOutOfStock ? (
-                <>
-                  <button className="add-to-cart-btn" onClick={handleAddToCart} disabled={cartBusy}>
-                    <IoCartOutline /> Add to Cart
+            {!isOwnerMode ? (
+              <div className="product-actions">
+                {!isOutOfStock ? (
+                  <>
+                    <button className="add-to-cart-btn" onClick={handleAddToCart} disabled={cartBusy}>
+                      <IoCartOutline /> Add to Cart
+                    </button>
+                    <button className="buy-now-btn" onClick={handleBuyNow} disabled={cartBusy}>
+                      <IoFlashOutline /> Buy Now
+                    </button>
+                  </>
+                ) : (
+                  <button className="out-of-stock-btn" disabled>
+                    Out of Stock
                   </button>
-                  <button className="buy-now-btn" onClick={handleBuyNow} disabled={cartBusy}>
-                    <IoFlashOutline /> Buy Now
-                  </button>
-                </>
-              ) : (
-                <button className="out-of-stock-btn" disabled>
-                  Out of Stock
-                </button>
-              )}
-            </div>
+                )}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -291,7 +308,7 @@ const ProductDetailSection = ({ product, ratingSummary }) => {
   );
 };
 
-const ReviewSection = ({ productId, reviews, onSubmitReview, submitting }) => {
+const ReviewSection = ({ productId, reviews, onSubmitReview, submitting, allowWrite = true }) => {
   const [newReview, setNewReview] = useState({
     rating: 5,
     comment: '',
@@ -365,6 +382,13 @@ const ReviewSection = ({ productId, reviews, onSubmitReview, submitting }) => {
     return stars;
   };
 
+  const normalizeAvatar = (raw) => {
+    if (!raw) return '';
+    if (typeof raw === 'string') return resolveApiImageUrl(raw);
+    if (typeof raw === 'object') return resolveApiImageUrl(raw.url || raw.ImageUrl || '');
+    return '';
+  };
+
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     const options = { year: 'numeric', month: 'long', day: 'numeric' };
@@ -378,39 +402,41 @@ const ReviewSection = ({ productId, reviews, onSubmitReview, submitting }) => {
           <h2 className="section-title">Customer Reviews</h2>
         </div>
 
-        <div className="write-review-card">
-          <h3>Share Your Experience</h3>
-          <form onSubmit={handleSubmitReview}>
-            <div className="form-group">
-              <label>Your Rating</label>
-              <div className="rating-input">
-                {renderStars(newReview.rating, true)}
-                <span className="rating-value">{newReview.rating} {newReview.rating === 1 ? 'star' : 'stars'}</span>
+        {allowWrite ? (
+          <div className="write-review-card">
+            <h3>Share Your Experience</h3>
+            <form onSubmit={handleSubmitReview}>
+              <div className="form-group">
+                <label>Your Rating</label>
+                <div className="rating-input">
+                  {renderStars(newReview.rating, true)}
+                  <span className="rating-value">{newReview.rating} {newReview.rating === 1 ? 'star' : 'stars'}</span>
+                </div>
               </div>
-            </div>
 
-            <div className="form-group">
-              <label htmlFor="comment">Your Review</label>
-              <textarea
-                id="comment"
-                rows="5"
-                placeholder="Share your thoughts about this product..."
-                value={newReview.comment}
-                onChange={handleCommentChange}
-                required
-              />
-            </div>
+              <div className="form-group">
+                <label htmlFor="comment">Your Review</label>
+                <textarea
+                  id="comment"
+                  rows="5"
+                  placeholder="Share your thoughts about this product..."
+                  value={newReview.comment}
+                  onChange={handleCommentChange}
+                  required
+                />
+              </div>
 
-            <button type="submit" className="submit-review-btn" disabled={submitting}>
-              {submitting ? 'Submitting...' : 'Submit Review'}
-            </button>
-          </form>
-        </div>
+              <button type="submit" className="submit-review-btn" disabled={submitting}>
+                {submitting ? 'Submitting...' : 'Submit Review'}
+              </button>
+            </form>
+          </div>
+        ) : null}
 
         <div className="reviews-list">
           {reviews.length === 0 ? (
             <div className="no-reviews">
-              <p>No reviews yet. Be the first to share your experience!</p>
+              <p>{allowWrite ? 'No reviews yet. Be the first to share your experience!' : 'No customer reviews for this product yet.'}</p>
             </div>
           ) : (
             reviews.map((review) => (
@@ -418,7 +444,15 @@ const ReviewSection = ({ productId, reviews, onSubmitReview, submitting }) => {
                 <div className="review-header">
                   <div className="reviewer-info">
                     <div className="reviewer-avatar">
-                      {review.Avatar ? <img src={`${review.Avatar}${String(review.Avatar).includes('?') ? '&' : '?'}v=${review._avatarVersion || 1}`} alt={review.CustomerName} /> : <div className="service-image-placeholder"></div>}
+                      {review.Avatar ? (
+                        (() => {
+                          const avatarUrl = normalizeAvatar(review.Avatar);
+                          const suffix = avatarUrl && avatarUrl.includes('?') ? '&' : '?';
+                          return avatarUrl ? <img src={`${avatarUrl}${suffix}v=${review._avatarVersion || 1}`} alt={review.CustomerName} /> : <div className="service-image-placeholder"></div>
+                        })()
+                      ) : (
+                        <div className="service-image-placeholder"></div>
+                      )}
                     </div>
                     <div className="reviewer-details">
                       <h4 className="reviewer-name">{review.CustomerName}</h4>
@@ -578,9 +612,10 @@ const RelatedProductsSection = ({ products, currentProductId, categoryId }) => {
   );
 };
 
-const ProductDetail = () => {
+const ProductDetail = ({ ownerMode = false }) => {
   const { id } = useParams();
   const location = useLocation();
+  const isOwnerMode = ownerMode || location.pathname.startsWith('/portals/owner/')
   const passedProduct = location.state?.product;
   const { products: apiProducts, loading: productsLoading, error: productsError } = useProducts();
   const {
@@ -648,19 +683,22 @@ const ProductDetail = () => {
   }
 
   return (
-    <div className="product-detail-page">
-      <ProductDetailSection product={product} ratingSummary={ratingSummary} />
+    <div className={`product-detail-page ${isOwnerMode ? 'owner-product-detail-page' : ''}`.trim()}>
+      <ProductDetailSection product={product} ratingSummary={ratingSummary} isOwnerMode={isOwnerMode} />
       <ReviewSection
         productId={product.ProductId}
         reviews={Array.isArray(productReviews) ? productReviews : []}
         onSubmitReview={submitReview}
         submitting={reviewsLoading}
+        allowWrite={!isOwnerMode}
       />
-      <RelatedProductsSection 
-        products={Array.isArray(apiProducts) ? apiProducts : []}
-        currentProductId={product.ProductId} 
-        categoryId={product.CategoryId}
-      />
+      {!isOwnerMode ? (
+        <RelatedProductsSection 
+          products={Array.isArray(apiProducts) ? apiProducts : []}
+          currentProductId={product.ProductId} 
+          categoryId={product.CategoryId}
+        />
+      ) : null}
     </div>
   );
 };
