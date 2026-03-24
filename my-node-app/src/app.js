@@ -33,15 +33,35 @@ function createApp() {
 
   app.get('/health', async (req, res) => {
     let db = { ok: false }
+    const tables = {}
     try {
-      await getPool()
-      db = { ok: true }
+      const pool = await getPool()
+      const result = await pool.request().query('SELECT 1 as ok')
+      db = { ok: true, connection: 'verified' }
+      
+      // Check for required tables
+      const requiredTables = ['Users', 'Cart', 'CartItems', 'Products', 'Addresses', 'Orders', 'Appointments', 'Services']
+      for (const tableName of requiredTables) {
+        try {
+          const tableRes = await pool.request().query(
+            `SELECT 1 as ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName`,
+            { tableName }
+          )
+          tables[tableName] = tableRes.recordset?.length > 0 ? 'exists' : 'missing'
+        } catch (e) {
+          tables[tableName] = 'error'
+        }
+      }
+      
+      db.tables = tables
     } catch (err) {
       db = {
         ok: false,
         code: err?.code || err?.originalError?.code,
         message: err?.message,
+        originalError: err?.originalError?.message,
       }
+      console.error('Health check - Database connection failed:', db)
     }
 
     res.json({ ok: true, ts: new Date().toISOString(), db })
