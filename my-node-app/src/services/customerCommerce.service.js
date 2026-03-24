@@ -1,6 +1,7 @@
 const { query, newId } = require('../config/query')
 
 let _ordersChannelColumnPromise = null
+const ACTIVE_SERVICE_WHERE = `(Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) = 'active')`
 
 function requireUserId(userId) {
   const value = String(userId || '').trim()
@@ -366,6 +367,7 @@ async function listAvailableStaff(serviceIdsInput = []) {
         `SELECT DISTINCT CategoryId
          FROM Services
          WHERE ServiceId IN (${serviceParams.join(', ')})
+           AND ${ACTIVE_SERVICE_WHERE}
            AND CategoryId IS NOT NULL`,
         params
       )
@@ -488,6 +490,7 @@ async function getAutoAssignedStaffIdForService(serviceIdInput) {
        INNER JOIN StaffSkills ss ON ss.StaffId = s.StaffId
        INNER JOIN Services sv ON sv.ServiceId = @serviceId
          AND sv.CategoryId = ss.CategoryId
+         AND (sv.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), sv.Status)))) = 'active')
        LEFT JOIN BookingServices bs ON bs.StaffId = s.StaffId
        LEFT JOIN Bookings b ON b.BookingId = bs.BookingId
          AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, 'C')))) IN ('c', 'confirmed', 'booked')
@@ -547,7 +550,8 @@ async function staffSupportsService(staffIdInput, serviceIdInput) {
        FROM StaffSkills ss
        INNER JOIN Services s ON s.CategoryId = ss.CategoryId
        WHERE ss.StaffId = @staffId
-         AND s.ServiceId = @serviceId`,
+         AND s.ServiceId = @serviceId
+         AND (s.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), s.Status)))) = 'active')`,
       { staffId, serviceId }
     )
     return Boolean(res.recordset?.length)
@@ -1102,7 +1106,10 @@ async function createBooking(userIdInput, payload = {}) {
 
   for (const item of normalizedItems) {
     const svcRes = await query(
-      'SELECT TOP 1 ServiceId, Price FROM Services WHERE ServiceId = @serviceId',
+      `SELECT TOP 1 ServiceId, Price
+       FROM Services
+       WHERE ServiceId = @serviceId
+         AND ${ACTIVE_SERVICE_WHERE}`,
       { serviceId: item.serviceId }
     )
 

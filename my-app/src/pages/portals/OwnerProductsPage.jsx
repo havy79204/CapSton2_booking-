@@ -3,10 +3,17 @@ import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
 import { IconSearch } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
+import { useNavigate } from 'react-router-dom'
 import '../../styles/products.css'
 function formatVnd(value) {
   const n = Number(value || 0)
   return n.toLocaleString('en-US')
+}
+
+function formatAverageRating(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return '-'
+  return n.toFixed(1)
 }
 
 function digitsOnly(value) {
@@ -34,6 +41,7 @@ function resolveAssetUrl(url) {
 }
 
 export default function OwnerProductsPage() {
+  const navigate = useNavigate()
   const [items, setItems] = useState([])
   const [meta, setMeta] = useState({ kinds: [], statuses: [], categories: [] })
   const [query, setQuery] = useState('')
@@ -333,20 +341,7 @@ export default function OwnerProductsPage() {
     }
   }
 
-  async function onDeleteProduct(product) {
-    if (!product?.id) return
-    const ok = window.confirm(`Delete product "${product.name}"?`)
-    if (!ok) return
-
-    try {
-      await api.del(`/api/owner/retail/products/${product.id}`)
-      await load()
-      if (editing?.id === product.id) close()
-    } catch (err) {
-      console.error(err)
-      setError(err?.message || 'Unable to delete product')
-    }
-  }
+  // Delete functionality removed — products should be deactivated via Edit -> Status
 
   async function onCreateVariant(e) {
     e.preventDefault()
@@ -367,11 +362,24 @@ export default function OwnerProductsPage() {
       return
     }
 
-    const cap = Number(variantsFor?.stock ?? 0)
-    const nextTotal = Number(variantsTotalStock || 0) + normalizedStock
-    if (nextTotal > cap) {
-      setVariantsError('Insufficient stock')
-      return
+    // fetch authoritative product and variants totals from server to avoid race conditions
+    try {
+      const [serverVariants, serverProduct] = await Promise.all([
+        api.get(`/api/owner/retail/products/${variantsFor.id}/variants`),
+        api.get(`/api/owner/retail/products/${variantsFor.id}`),
+      ])
+
+      const serverTotal = Array.isArray(serverVariants)
+        ? serverVariants.reduce((s, v) => s + Number(digitsOnly(v?.stock ?? 0) || 0), 0)
+        : 0
+      const serverCap = Number(serverProduct?.stock ?? 0)
+      if (serverTotal + normalizedStock > serverCap) {
+        setVariantsError('Insufficient stock')
+        return
+      }
+    } catch (err) {
+      // if we can't validate server-side, continue but warn in console
+      console.error('Failed to validate stock with server', err)
     }
 
     try {
@@ -443,6 +451,25 @@ export default function OwnerProductsPage() {
     }
   }
 
+  function openDetail(product) {
+    if (!product?.id) return
+    navigate(`/portals/owner/products/${product.id}`, {
+      state: {
+        product: {
+          ProductId: product.id,
+          Name: product.name || '',
+          Price: Number(product.price || 0),
+          Stock: Number(product.stock || 0),
+          SoldCount: Number(product.soldCount || 0),
+          Description: product.description || '',
+          ImageUrl: Array.isArray(product.images) && product.images.length ? product.images[0] : product.imageUrl || '',
+          Images: Array.isArray(product.images) ? product.images : product.imageUrl ? [product.imageUrl] : [],
+          CategoryId: product.categoryId ?? product.categoryId,
+        },
+      },
+    })
+  }
+
   return (
     <div className="products-page">
       <div className="portal-pageHeader">
@@ -502,6 +529,8 @@ export default function OwnerProductsPage() {
                 <th>Category</th>
                 <th>Price</th>
                 <th>Stock</th>
+                <th>Sold</th>
+                <th>Rating</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -515,6 +544,8 @@ export default function OwnerProductsPage() {
                   </td>
                   <td>{formatVnd(p.price)} ₫</td>
                   <td>{p.stock ?? 0}</td>
+                  <td>{Number(p.soldCount ?? 0)}</td>
+                  <td>{formatAverageRating(p.averageRating)}</td>
                   <td>
                     <span className="portal-invPill">{p.status || '-'}</span>
                   </td>
@@ -526,16 +557,14 @@ export default function OwnerProductsPage() {
                       <button type="button" className="portal-ghostBtn" onClick={() => openVariantsForProduct(p)}>
                         Variants
                       </button>
-                      <button type="button" className="portal-ghostBtn danger" onClick={() => onDeleteProduct(p)}>
-                        Delete
-                      </button>
+                      {/* Delete removed: use Edit -> Status to deactivate products */}
                     </div>
                   </td>
                 </tr>
               ))}
               {pagedItems.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="products-emptyRow">No products found</td>
+                  <td colSpan={8} className="products-emptyRow">No products found</td>
                 </tr>
               ) : null}
             </tbody>
@@ -569,9 +598,22 @@ export default function OwnerProductsPage() {
         onClose={close}
         footer={
           <>
-            <button type="button" className="portal-modalBtn" onClick={close}>
-              Cancel
-            </button>
+            {editing?.id ? (
+              <button
+                type="button"
+                className="portal-modalBtn"
+                onClick={() => {
+                  openDetail(editing)
+                }}
+              >
+                Details
+              </button>
+            ) : null}
+            {editing?.id ? (
+              <button type="button" className="portal-modalBtn" onClick={close}>
+                Cancel
+              </button>
+            ) : null}
             <button type="submit" form="product-mgmt-form" className="portal-modalBtn portal-modalBtnPrimary">
               Save
             </button>

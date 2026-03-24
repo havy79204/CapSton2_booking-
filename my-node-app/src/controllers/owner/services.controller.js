@@ -2,7 +2,7 @@ const { asyncHandler } = require('../../utils/asyncHandler')
 const servicesService = require('../../services/services.service')
 
 const getServices = asyncHandler(async (req, res) => {
-  const data = await servicesService.listServicesGrouped()
+  const data = await servicesService.listServicesGrouped(true)
   res.json({ ok: true, data })
 })
 
@@ -40,7 +40,7 @@ const getServiceById = asyncHandler(async (req, res) => {
     return
   }
 
-  const data = await servicesService.getServiceById(id)
+  const data = await servicesService.getServiceById(id, true)
   if (!data) {
     res.status(404).json({ ok: false, error: 'Service not found' })
     return

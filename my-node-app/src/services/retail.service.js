@@ -55,12 +55,30 @@ async function getSchemaInfo() {
   if (_schemaInfoPromise) return _schemaInfoPromise
   _schemaInfoPromise = (async () => {
     await ensureProductImagesTable()
-    const [productsHasCategoryId, inventoryHasCategoryId, hasProductCategories, ordersHasChannel, ordersHasCannel] = await Promise.all([
+    const [
+      productsHasCategoryId,
+      inventoryHasCategoryId,
+      hasProductCategories,
+      ordersHasChannel,
+      ordersHasCannel,
+      hasOrderItems,
+      hasOrders,
+      ordersHasStatus,
+      hasSalonReviews,
+      salonReviewsHasProductId,
+      salonReviewsHasRating,
+    ] = await Promise.all([
       columnExists('Products', 'CategoryId'),
       columnExists('InventoryItems', 'CategoryId'),
       tableExists('ProductCategories'),
       columnExists('Orders', 'Channel'),
       columnExists('Orders', 'Cannel'),
+      tableExists('OrderItems'),
+      tableExists('Orders'),
+      columnExists('Orders', 'Status'),
+      tableExists('SalonReviews'),
+      columnExists('SalonReviews', 'ProductId'),
+      columnExists('SalonReviews', 'Rating'),
     ])
 
     const hasProductImages = await tableExists('ProductImages')
@@ -72,6 +90,12 @@ async function getSchemaInfo() {
       hasProductImages,
       ordersHasChannel,
       ordersHasCannel,
+      hasOrderItems,
+      hasOrders,
+      ordersHasStatus,
+      hasSalonReviews,
+      salonReviewsHasProductId,
+      salonReviewsHasRating,
     }
   })()
   return _schemaInfoPromise
@@ -414,6 +438,25 @@ async function getProduct(productId) {
         p.ImageUrl,
         p.Stock,
         p.Status,
+        ${schema.hasOrderItems
+          ? `(
+              SELECT COALESCE(SUM(oi.Quantity), 0)
+              FROM OrderItems oi
+              ${schema.hasOrders ? 'LEFT JOIN Orders o ON o.OrderId = oi.OrderId' : ''}
+              WHERE oi.ProductId = p.ProductId
+              ${schema.hasOrders && schema.ordersHasStatus
+                ? "AND (o.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), o.Status)))) NOT IN ('cancelled', 'canceled'))"
+                : ''}
+            )`
+          : 'CAST(0 AS INT)'} AS SoldCount,
+        ${schema.hasSalonReviews && schema.salonReviewsHasProductId && schema.salonReviewsHasRating
+          ? `(
+              SELECT AVG(CAST(sr.Rating AS FLOAT))
+              FROM SalonReviews sr
+              WHERE sr.ProductId = p.ProductId
+                AND sr.Rating IS NOT NULL
+            )`
+          : 'CAST(NULL AS FLOAT)'} AS AverageRating,
         p.CategoryId,
         c.Name AS CategoryName,
         c.Description AS CategoryDescription
@@ -452,6 +495,8 @@ async function getProduct(productId) {
     imageUrl: images[0] || row.ImageUrl || '',
     images,
     stock: Number(row.Stock || 0),
+    soldCount: Number(row.SoldCount || 0),
+    averageRating: row.AverageRating === null || row.AverageRating === undefined ? null : Number(row.AverageRating),
     status: row.Status ?? null,
     kind: categoryName,
     categoryId,
@@ -763,6 +808,25 @@ async function listRetailProducts() {
         p.ImageUrl,
         p.Stock,
         p.Status,
+        ${schema.hasOrderItems
+          ? `(
+              SELECT COALESCE(SUM(oi.Quantity), 0)
+              FROM OrderItems oi
+              ${schema.hasOrders ? 'LEFT JOIN Orders o ON o.OrderId = oi.OrderId' : ''}
+              WHERE oi.ProductId = p.ProductId
+              ${schema.hasOrders && schema.ordersHasStatus
+                ? "AND (o.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), o.Status)))) NOT IN ('cancelled', 'canceled'))"
+                : ''}
+            )`
+          : 'CAST(0 AS INT)'} AS SoldCount,
+        ${schema.hasSalonReviews && schema.salonReviewsHasProductId && schema.salonReviewsHasRating
+          ? `(
+              SELECT AVG(CAST(sr.Rating AS FLOAT))
+              FROM SalonReviews sr
+              WHERE sr.ProductId = p.ProductId
+                AND sr.Rating IS NOT NULL
+            )`
+          : 'CAST(NULL AS FLOAT)'} AS AverageRating,
         p.CategoryId,
         c.Name AS CategoryName,
         c.Description AS CategoryDescription
@@ -781,6 +845,8 @@ async function listRetailProducts() {
     description: row.Description || '',
     imageUrl: (imagesMap.get(row.ProductId)?.[0] || row.ImageUrl || ''),
     stock: Number(row.Stock || 0),
+    soldCount: Number(row.SoldCount || 0),
+    averageRating: row.AverageRating === null || row.AverageRating === undefined ? null : Number(row.AverageRating),
     status: row.Status ?? null,
     kind: row.CategoryName || '',
     categoryId: row.CategoryId ?? null,

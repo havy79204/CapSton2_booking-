@@ -18,6 +18,8 @@ function toServiceListItem(row) {
     duration: `${Number(row.DurationMinutes || 0)} min`,
     priceVnd: Number(row.Price || 0),
     price: formatVnd(row.Price),
+    totalBookings: Number(row.TotalBookings || 0),
+    averageRating: row.AverageRating === null || row.AverageRating === undefined ? null : Number(row.AverageRating),
     description: row.Description || '',
     status: row.Status || '',
   }

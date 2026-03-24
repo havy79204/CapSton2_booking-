@@ -27,6 +27,9 @@ const ProductCatalogPage = () => {
 
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
+      const status = String(product?.Status || product?.status || '').trim().toLowerCase()
+      const isActive = status === '' || status === 'active'
+      if (!isActive) return false
       const matchesSearch =
         String(product.Name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         String(product.Description || '').toLowerCase().includes(searchTerm.toLowerCase());
