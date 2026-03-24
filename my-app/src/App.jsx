@@ -1,14 +1,19 @@
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import LoginPage from './pages/LoginPage.jsx'
 import OwnerPortalLayout from './components/Layout portal/OwnerPortalLayout.jsx'
+import OwnerDashboardPage from './pages/portals/OwnerDashboardPage.jsx'
 import OwnerAppointmentsPage from './pages/portals/OwnerAppointmentsPage.jsx'
 import OwnerSchedulePage from './pages/portals/OwnerSchedulePage.jsx'
+import OwnerStaffPage from './pages/portals/OwnerStaffPage.jsx'
+import OwnerServicesPage from './pages/portals/OwnerServicesPage.jsx'
 import OwnerInventoryPage from './pages/portals/OwnerInventoryPage.jsx'
 import OwnerProductsPage from './pages/portals/OwnerProductsPage.jsx'
 import OwnerOrdersPage from './pages/portals/OwnerOrdersPage.jsx'
+import OwnerCustomersPage from './pages/portals/OwnerCustomersPage.jsx'
+import OwnerReportsPage from './pages/portals/OwnerReportsPage.jsx'
+import OwnerSettingsPage from './pages/portals/OwnerSettingsPage.jsx'
 import OwnerNotificationsPage from './pages/portals/OwnerNotificationsPage.jsx'
 import OwnerChatPage from './pages/portals/OwnerChatPage.jsx'
-import PortalPlaceholderPage from './pages/portals/PortalPlaceholderPage.jsx'
 import Header from './components/Header.jsx'
 import Footer from './components/Footer.jsx'
 import HomePage from './pages/HomePage.jsx'
@@ -80,19 +85,20 @@ function App() {
           </RequireAuth>
         }
       >
+        <Route path="dashboard" element={<OwnerDashboardPage />} />
         <Route path="appointments" element={<OwnerAppointmentsPage />} />
         <Route path="schedule" element={<OwnerSchedulePage />} />
-        <Route path="staff" element={<PortalPlaceholderPage />} />
-        <Route path="services" element={<PortalPlaceholderPage />} />
+        <Route path="staff" element={<OwnerStaffPage />} />
+        <Route path="services" element={<OwnerServicesPage />} />
         <Route path="inventory" element={<OwnerInventoryPage />} />
         <Route path="products" element={<OwnerProductsPage />} />
         <Route path="orders" element={<OwnerOrdersPage />} />
-        <Route path="customers" element={<PortalPlaceholderPage />} />
-        <Route path="reports" element={<PortalPlaceholderPage />} />
-        <Route path="settings" element={<PortalPlaceholderPage />} />
+        <Route path="customers" element={<OwnerCustomersPage />} />
+        <Route path="reports" element={<OwnerReportsPage />} />
+        <Route path="settings" element={<OwnerSettingsPage />} />
         <Route path="notifications" element={<OwnerNotificationsPage />} />
         <Route path="chat" element={<OwnerChatPage />} />
-        <Route index element={<Navigate to="/portals/owner/appointments" replace />} />
+        <Route index element={<Navigate to="/portals/owner/dashboard" replace />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/login" replace />} />
