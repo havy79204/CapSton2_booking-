@@ -14,6 +14,7 @@ import {
 } from './PortalIcons.jsx'
 
 const navItems = [
+  { to: '/portals/owner/dashboard', label: 'Dashboard', Icon: IconGrid },
   { to: '/portals/owner/customers', label: 'Customers', Icon: IconUser },
   { to: '/portals/owner/staff', label: 'Staff', Icon: IconUsers },
   { to: '/portals/owner/schedule', label: 'Schedule', Icon: IconClock },
