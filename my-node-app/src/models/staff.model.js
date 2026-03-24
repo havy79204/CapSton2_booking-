@@ -1,4 +1,14 @@
+const STAFF_HOURLY_RATE_VND = 25000
+
 function toStaffListItem(row) {
+  const totalBookings = Number(row.TotalBookings || 0)
+  const workingHours = Number(row.WorkingHours || 0)
+  const rating = Number(row.AverageRating || 0)
+  const totalTip = Number(row.TotalTip || 0)
+  const normalizedWorkingHours = Number.isFinite(workingHours) ? Math.round(workingHours * 100) / 100 : 0
+  const normalizedTip = Number.isFinite(totalTip) ? totalTip : 0
+  const totalSalary = (normalizedWorkingHours * STAFF_HOURLY_RATE_VND) + normalizedTip
+
   return {
     id: row.StaffId,
     userId: row.UserId || '',
@@ -6,9 +16,20 @@ function toStaffListItem(row) {
     phone: row.Phone || '',
     email: row.Email || '',
     avatarUrl: row.AvatarUrl || '',
+    address: row.Address || '',
+    hireDate: row.HireDate || null,
+    roleKey: String(row.RoleKey || '').trim(),
+    roleName: row.RoleName || '',
     specialty: row.Specialty || '',
-    status: row.StaffStatus || 'Working',
+    status: String(row.StaffStatus || '').trim(),
+    totalBookings: Number.isFinite(totalBookings) ? totalBookings : 0,
+    workingHours: normalizedWorkingHours,
+    totalSalary: Number.isFinite(totalSalary) ? Math.round(totalSalary) : 0,
+    totalTip: normalizedTip,
+    rating: Number.isFinite(rating) ? Math.round(rating * 10) / 10 : 0,
   }
 }
 
-module.exports = { toStaffListItem }
+module.exports = {
+  toStaffListItem,
+}
