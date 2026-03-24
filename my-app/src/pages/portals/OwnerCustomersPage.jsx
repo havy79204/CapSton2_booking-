@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
 import '../../styles/customers.css'
@@ -15,6 +16,7 @@ function initialOf(name) {
 }
 
 export default function OwnerCustomersPage() {
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [customers, setCustomers] = useState([])
   const [query, setQuery] = useState('')
@@ -23,7 +25,6 @@ export default function OwnerCustomersPage() {
     name: '',
     phone: '',
     email: '',
-    note: '',
   })
 
   useEffect(() => {
@@ -42,7 +43,7 @@ export default function OwnerCustomersPage() {
 
   function openCreate() {
     setEditing(null)
-    setForm({ name: '', phone: '', email: '', note: '' })
+    setForm({ name: '', phone: '', email: '' })
     setOpen(true)
   }
 
@@ -53,7 +54,6 @@ export default function OwnerCustomersPage() {
       name: customer.name || '',
       phone: customer.phone || '',
       email: customer.email || '',
-      note: customer.note || '',
     })
     setOpen(true)
   }
@@ -67,7 +67,6 @@ export default function OwnerCustomersPage() {
         name: form.name,
         phone: form.phone,
         email: form.email,
-        note: form.note,
       }
 
       if (editing?.id) {
@@ -79,7 +78,7 @@ export default function OwnerCustomersPage() {
       const fresh = await api.get('/api/owner/customers')
       if (Array.isArray(fresh)) setCustomers(fresh)
 
-      setForm({ name: '', phone: '', email: '', note: '' })
+      setForm({ name: '', phone: '', email: '' })
       close()
     } catch (err) {
       console.error(err)
@@ -156,16 +155,6 @@ export default function OwnerCustomersPage() {
               onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
             />
           </label>
-
-          <label className="portal-field">
-            <span className="portal-label">Notes</span>
-            <textarea
-              className="portal-textarea"
-              placeholder="Add notes about the customer"
-              value={form.note}
-              onChange={(e) => setForm((p) => ({ ...p, note: e.target.value }))}
-            />
-          </label>
         </form>
       </PortalModal>
 
@@ -190,9 +179,14 @@ export default function OwnerCustomersPage() {
                 {initialOf(c.name)}
               </div>
 
-              <button type="button" className="portal-ghostBtn portal-customerEdit" onClick={() => openEdit(c)}>
-                Edit
-              </button>
+              <div className="portal-customerActions">
+                <button type="button" className="portal-ghostBtn portal-customerEdit" onClick={() => openEdit(c)}>
+                  Edit
+                </button>
+                <button type="button" className="portal-ghostBtn portal-customerView" onClick={() => navigate(`/portals/owner/customers/${c.id || c.email}`)}>
+                  View
+                </button>
+              </div>
             </div>
 
             <div className="portal-customerName">{c.name}</div>
@@ -211,8 +205,6 @@ export default function OwnerCustomersPage() {
                 <span className="portal-staffContactText">{c.email}</span>
               </div>
             </div>
-
-            {c.note ? <div className="portal-customerNote">{c.note}</div> : null}
 
             <div className="portal-staffDivider" aria-hidden="true" />
 

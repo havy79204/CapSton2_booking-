@@ -5,42 +5,126 @@ const { toStaffListItem } = require('../models/staff.model')
 const STAFF_SKILL_CATEGORY_TABLES = ['ServiceCategories', 'ProductCategories', 'Categories']
 
 async function tableExists(tableName) {
-  const res = await query(
-    `SELECT 1 AS ok
-     FROM INFORMATION_SCHEMA.TABLES
-     WHERE TABLE_NAME = @tableName`,
-    { tableName }
-  )
-  return Boolean(res.recordset?.length)
+  try {
+    const res = await query(
+      `SELECT 1 AS ok
+       FROM INFORMATION_SCHEMA.TABLES
+       WHERE TABLE_NAME = @tableName`,
+      { tableName }
+    )
+    return Boolean(res.recordset?.length)
+  } catch (err) {
+    console.error(`[tableExists] Error checking table ${tableName}:`, err.message)
+    return false
+  }
 }
 
 async function columnExists(tableName, columnName) {
-  const res = await query(
-    `SELECT 1 AS ok
-     FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_NAME = @tableName
-       AND COLUMN_NAME = @columnName`,
-    { tableName, columnName }
-  )
-  return Boolean(res.recordset?.length)
+  try {
+    const res = await query(
+      `SELECT 1 AS ok
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_NAME = @tableName
+         AND COLUMN_NAME = @columnName`,
+      { tableName, columnName }
+    )
+    return Boolean(res.recordset?.length)
+  } catch (err) {
+    console.error(`[columnExists] Error checking column ${tableName}.${columnName}:`, err.message)
+    return false
+  }
 }
 
 async function identityColumnExists(tableName, columnName) {
-  const res = await query(
-    `SELECT 1 AS ok
-     FROM sys.columns c
-     INNER JOIN sys.tables t ON t.object_id = c.object_id
-     WHERE t.name = @tableName
-       AND c.name = @columnName
-       AND c.is_identity = 1`,
-    { tableName, columnName }
-  )
-  return Boolean(res.recordset?.length)
+  try {
+    const res = await query(
+      `SELECT 1 AS ok
+       FROM sys.columns c
+       INNER JOIN sys.tables t ON t.object_id = c.object_id
+       WHERE t.name = @tableName
+         AND c.name = @columnName
+         AND c.is_identity = 1`,
+      { tableName, columnName }
+    )
+    return Boolean(res.recordset?.length)
+  } catch (err) {
+    console.error(`[identityColumnExists] Error checking identity column ${tableName}.${columnName}:`, err.message)
+    return false
+  }
 }
 
 async function getStaffSkillSchema() {
-  const hasStaffSkills = await tableExists('StaffSkills')
-  if (!hasStaffSkills) {
+  try {
+    const hasStaffSkills = await tableExists('StaffSkills')
+    if (!hasStaffSkills) {
+      return {
+        enabled: false,
+        hasIdStaffSkill: false,
+        canWriteIdStaffSkill: false,
+        categoryTable: null,
+        categoryNameColumn: null,
+      }
+    }
+
+    const [hasStaffId, hasCategoryId, hasIdStaffSkill] = await Promise.all([
+      columnExists('StaffSkills', 'StaffId'),
+      columnExists('StaffSkills', 'CategoryId'),
+      columnExists('StaffSkills', 'IdStaffSkill'),
+    ])
+
+    const canWriteIdStaffSkill = hasIdStaffSkill
+      ? !(await identityColumnExists('StaffSkills', 'IdStaffSkill'))
+      : false
+
+    if (!hasStaffId || !hasCategoryId) {
+      return {
+        enabled: false,
+        hasIdStaffSkill,
+        canWriteIdStaffSkill,
+        categoryTable: null,
+        categoryNameColumn: null,
+      }
+    }
+
+    for (const tableName of STAFF_SKILL_CATEGORY_TABLES) {
+      const hasTable = await tableExists(tableName)
+      if (!hasTable) continue
+
+      const hasCategoryIdInTable = await columnExists(tableName, 'CategoryId')
+      if (!hasCategoryIdInTable) continue
+
+      const hasName = await columnExists(tableName, 'Name')
+      if (hasName) {
+        return {
+          enabled: true,
+          hasIdStaffSkill,
+          canWriteIdStaffSkill,
+          categoryTable: tableName,
+          categoryNameColumn: 'Name',
+        }
+      }
+
+      const hasCategoryName = await columnExists(tableName, 'CategoryName')
+      if (hasCategoryName) {
+        return {
+          enabled: true,
+          hasIdStaffSkill,
+          canWriteIdStaffSkill,
+          categoryTable: tableName,
+          categoryNameColumn: 'CategoryName',
+        }
+      }
+    }
+
+    return {
+      enabled: true,
+      hasIdStaffSkill,
+      canWriteIdStaffSkill,
+      categoryTable: null,
+      categoryNameColumn: null,
+    }
+  } catch (err) {
+    console.error('[getStaffSkillSchema] Error:', err.message)
     return {
       enabled: false,
       hasIdStaffSkill: false,
@@ -48,64 +132,6 @@ async function getStaffSkillSchema() {
       categoryTable: null,
       categoryNameColumn: null,
     }
-  }
-
-  const [hasStaffId, hasCategoryId, hasIdStaffSkill] = await Promise.all([
-    columnExists('StaffSkills', 'StaffId'),
-    columnExists('StaffSkills', 'CategoryId'),
-    columnExists('StaffSkills', 'IdStaffSkill'),
-  ])
-
-  const canWriteIdStaffSkill = hasIdStaffSkill
-    ? !(await identityColumnExists('StaffSkills', 'IdStaffSkill'))
-    : false
-
-  if (!hasStaffId || !hasCategoryId) {
-    return {
-      enabled: false,
-      hasIdStaffSkill,
-      canWriteIdStaffSkill,
-      categoryTable: null,
-      categoryNameColumn: null,
-    }
-  }
-
-  for (const tableName of STAFF_SKILL_CATEGORY_TABLES) {
-    const hasTable = await tableExists(tableName)
-    if (!hasTable) continue
-
-    const hasCategoryIdInTable = await columnExists(tableName, 'CategoryId')
-    if (!hasCategoryIdInTable) continue
-
-    const hasName = await columnExists(tableName, 'Name')
-    if (hasName) {
-      return {
-        enabled: true,
-        hasIdStaffSkill,
-        canWriteIdStaffSkill,
-        categoryTable: tableName,
-        categoryNameColumn: 'Name',
-      }
-    }
-
-    const hasCategoryName = await columnExists(tableName, 'CategoryName')
-    if (hasCategoryName) {
-      return {
-        enabled: true,
-        hasIdStaffSkill,
-        canWriteIdStaffSkill,
-        categoryTable: tableName,
-        categoryNameColumn: 'CategoryName',
-      }
-    }
-  }
-
-  return {
-    enabled: true,
-    hasIdStaffSkill,
-    canWriteIdStaffSkill,
-    categoryTable: null,
-    categoryNameColumn: null,
   }
 }
 
@@ -126,44 +152,49 @@ function normalizeCategoryIdsFromPayload(payload = {}) {
 }
 
 async function listStaffSkillCategories() {
-  const schema = await getStaffSkillSchema()
-  if (!schema.enabled) return []
+  try {
+    const schema = await getStaffSkillSchema()
+    if (!schema.enabled) return []
 
-  if (schema.categoryTable && schema.categoryNameColumn) {
+    if (schema.categoryTable && schema.categoryNameColumn) {
+      const rows = await query(
+        `SELECT
+            c.CategoryId,
+            c.${schema.categoryNameColumn} AS Name
+         FROM ${schema.categoryTable} c
+         WHERE c.CategoryId IS NOT NULL
+         ORDER BY c.${schema.categoryNameColumn} ASC`
+      )
+
+      return (rows.recordset || [])
+        .map((row) => ({
+          id: String(row.CategoryId || '').trim(),
+          name: String(row.Name || '').trim(),
+        }))
+        .filter((row) => row.id)
+    }
+
     const rows = await query(
-      `SELECT
-          c.CategoryId,
-          c.${schema.categoryNameColumn} AS Name
-       FROM ${schema.categoryTable} c
-       WHERE c.CategoryId IS NOT NULL
-       ORDER BY c.${schema.categoryNameColumn} ASC`
+      `SELECT DISTINCT
+          ss.CategoryId
+       FROM StaffSkills ss
+       WHERE ss.CategoryId IS NOT NULL
+       ORDER BY ss.CategoryId ASC`
     )
 
     return (rows.recordset || [])
-      .map((row) => ({
-        id: String(row.CategoryId || '').trim(),
-        name: String(row.Name || '').trim(),
-      }))
+      .map((row) => {
+        const id = String(row.CategoryId || '').trim()
+        return {
+          id,
+          name: id,
+        }
+      })
       .filter((row) => row.id)
+  } catch (err) {
+    console.error('[listStaffSkillCategories] Error:', err.message)
+    return []
   }
-
-  const rows = await query(
-    `SELECT DISTINCT
-        ss.CategoryId
-     FROM StaffSkills ss
-     WHERE ss.CategoryId IS NOT NULL
-     ORDER BY ss.CategoryId ASC`
-  )
-
-  return (rows.recordset || [])
-    .map((row) => {
-      const id = String(row.CategoryId || '').trim()
-      return {
-        id,
-        name: id,
-      }
-    })
-    .filter((row) => row.id)
 }
 
 async function getStaffSkillMap(staffIds, schema) {

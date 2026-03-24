@@ -1,0 +1,5 @@
+# Keep local env and config files from being overwritten during merges; prefer current branch's version
+c:\CapSton2_booking-\my-node-app/.env merge=ours
+c:\CapSton2_booking-\my-app/.env merge=ours
+**/config/** merge=ours
+*.local.js merge=ours

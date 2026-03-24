@@ -14,6 +14,7 @@ import OwnerReportsPage from './pages/portals/OwnerReportsPage.jsx'
 import OwnerSettingsPage from './pages/portals/OwnerSettingsPage.jsx'
 import OwnerNotificationsPage from './pages/portals/OwnerNotificationsPage.jsx'
 import OwnerChatPage from './pages/portals/OwnerChatPage.jsx'
+import OwnerCustomerDetailPage from './pages/portals/OwnerCustomerDetailPage.jsx'
 import Header from './components/Header.jsx'
 import Footer from './components/Footer.jsx'
 import HomePage from './pages/HomePage.jsx'
@@ -55,6 +56,24 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
 
       <Route
+        path="/portals/owner/services/:id"
+        element={
+          <RequireAuth>
+            <ServiceDetail ownerMode />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/portals/owner/products/:id"
+        element={
+          <RequireAuth>
+            <ProductDetail ownerMode />
+          </RequireAuth>
+        }
+      />
+
+      <Route
         path="/"
         element={
           <RequireAuth>
@@ -94,6 +113,7 @@ function App() {
         <Route path="products" element={<OwnerProductsPage />} />
         <Route path="orders" element={<OwnerOrdersPage />} />
         <Route path="customers" element={<OwnerCustomersPage />} />
+        <Route path="customers/:customerId" element={<OwnerCustomerDetailPage />} />
         <Route path="reports" element={<OwnerReportsPage />} />
         <Route path="settings" element={<OwnerSettingsPage />} />
         <Route path="notifications" element={<OwnerNotificationsPage />} />

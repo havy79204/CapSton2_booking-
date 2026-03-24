@@ -12,19 +12,27 @@ import {
 import { resolveApiImageUrl } from '../lib/api.js';
 import { useServiceReviews, useServices } from '../hooks/useHomepage';
 import '../styles/ServiceDetail.css';
+import '../styles/OwnerServiceDetail.css';
 
-const ServiceDetailSection = ({ service, reviews }) => {
+const ServiceDetailSection = ({ service, reviews, backTo = null, canBook = true }) => {
   const navigate = useNavigate();
   const [selectedImage, setSelectedImage] = useState(0);
 
   const galleryImages = useMemo(() => {
+    const normalize = (raw) => {
+      if (raw === undefined || raw === null) return ''
+      if (typeof raw === 'string') return resolveApiImageUrl(raw)
+      if (typeof raw === 'object') return resolveApiImageUrl(raw.url || raw.ImageUrl || '')
+      return ''
+    }
+
     const images = Array.isArray(service.Images)
-      ? service.Images.map((img) => resolveApiImageUrl(img)).filter(Boolean)
+      ? service.Images.map((img) => normalize(img)).filter(Boolean)
       : [];
     if (images.length > 0) return images;
-    const singleImage = resolveApiImageUrl(service.ImageUrl);
-    if (singleImage) return [singleImage];
-    return [];
+    const singleImage = normalize(service.ImageUrl)
+    if (singleImage) return [singleImage]
+    return []
   }, [service.Images, service.ImageUrl]);
 
   const averageRating = reviews.length > 0
@@ -52,11 +60,16 @@ const ServiceDetailSection = ({ service, reviews }) => {
   };
 
   const handleBookService = () => {
+    if (!canBook) return;
     navigate('/booking', { state: { serviceId: service.ServiceId } });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleGoBack = () => {
+    if (backTo) {
+      navigate(backTo);
+      return;
+    }
     navigate(-1);
   };
 
@@ -79,9 +92,6 @@ const ServiceDetailSection = ({ service, reviews }) => {
               ) : (
                 <div className="service-image-placeholder"></div>
               )}
-              <div className="image-badge">
-                <IoCheckmarkCircle /> Active Service
-              </div>
             </div>
 
             <div className="image-gallery-thumbnails">
@@ -104,7 +114,6 @@ const ServiceDetailSection = ({ service, reviews }) => {
 
           <div className="service-detail-info">
             <h1 className="service-detail-title">{service.Name}</h1>
-            
             <div className="service-rating-section">
               <div className="rating-stars">
                 {renderStars(parseFloat(averageRating))}
@@ -134,10 +143,11 @@ const ServiceDetailSection = ({ service, reviews }) => {
               <p className="short-description">{service.Description}</p>
             </div>
 
-
-            <button className="book-service-btn" onClick={handleBookService}>
-              Book This Service
-            </button>
+            {canBook ? (
+              <button className="book-service-btn" onClick={handleBookService}>
+                Book This Service
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -145,7 +155,7 @@ const ServiceDetailSection = ({ service, reviews }) => {
   );
 };
 
-const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting }) => {
+const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting, allowWrite = true }) => {
   const [newReview, setNewReview] = useState({
     rating: 5,
     comment: ''
@@ -233,34 +243,36 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting }) => {
           
         </div>
 
-        <div className="write-review-card">
-          <h3>Share Your Experience</h3>
-          <form onSubmit={handleSubmitReview}>
-            <div className="form-group">
-              <label>Your Rating</label>
-              <div className="rating-input">
-                {renderStars(newReview.rating, true)}
-                <span className="rating-value">{newReview.rating} {newReview.rating === 1 ? 'star' : 'stars'}</span>
+        {allowWrite ? (
+          <div className="write-review-card">
+            <h3>Share Your Experience</h3>
+            <form onSubmit={handleSubmitReview}>
+              <div className="form-group">
+                <label>Your Rating</label>
+                <div className="rating-input">
+                  {renderStars(newReview.rating, true)}
+                  <span className="rating-value">{newReview.rating} {newReview.rating === 1 ? 'star' : 'stars'}</span>
+                </div>
               </div>
-            </div>
 
-            <div className="form-group">
-              <label htmlFor="comment">Your Review</label>
-              <textarea
-                id="comment"
-                rows="5"
-                placeholder="Share your thoughts about this service..."
-                value={newReview.comment}
-                onChange={handleCommentChange}
-                required
-              />
-            </div>
+              <div className="form-group">
+                <label htmlFor="comment">Your Review</label>
+                <textarea
+                  id="comment"
+                  rows="5"
+                  placeholder="Share your thoughts about this service..."
+                  value={newReview.comment}
+                  onChange={handleCommentChange}
+                  required
+                />
+              </div>
 
-            <button type="submit" className="submit-review-btn" disabled={submitting}>
-              {submitting ? 'Submitting...' : 'Submit Review'}
-            </button>
-          </form>
-        </div>
+              <button type="submit" className="submit-review-btn" disabled={submitting}>
+                {submitting ? 'Submitting...' : 'Submit Review'}
+              </button>
+            </form>
+          </div>
+        ) : null}
 
         <div className="reviews-list">
           {reviews.length === 0 ? (
@@ -273,7 +285,15 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting }) => {
                 <div className="review-header">
                   <div className="reviewer-info">
                     <div className="reviewer-avatar">
-                      {review.Avatar ? <img src={`${review.Avatar}${String(review.Avatar).includes('?') ? '&' : '?'}v=${review._avatarVersion || 1}`} alt={review.CustomerName} /> : <div className="service-image-placeholder" />}
+                      {(() => {
+                        const raw = review?.Avatar
+                        const avatarUrl = typeof raw === 'string' ? raw : raw?.url || raw?.ImageUrl || ''
+                        if (avatarUrl) {
+                          const sep = String(avatarUrl).includes('?') ? '&' : '?'
+                          return <img src={`${avatarUrl}${sep}v=${review._avatarVersion || 1}`} alt={review.CustomerName} />
+                        }
+                        return <div className="service-image-placeholder" />
+                      })()}
                     </div>
                     <div className="reviewer-details">
                       <h4 className="reviewer-name">{review.CustomerName}</h4>
@@ -379,7 +399,12 @@ const RecommendedServicesSection = ({ currentServiceId }) => {
                 return (
                   <div key={slideIndex} className="recommended-slide">
                     {slideServices.map((service) => {
-                      const cardImage = resolveApiImageUrl(service.ImageUrl);
+                      const cardImage = (() => {
+                        if (!service) return ''
+                        if (typeof service.ImageUrl === 'string') return resolveApiImageUrl(service.ImageUrl)
+                        if (typeof service.ImageUrl === 'object') return resolveApiImageUrl(service.ImageUrl.url || service.ImageUrl.ImageUrl || '')
+                        return ''
+                      })();
                       return (
                         <div 
                           key={service.ServiceId} 
@@ -425,10 +450,11 @@ const RecommendedServicesSection = ({ currentServiceId }) => {
   );
 };
 
-const ServiceDetail = () => {
+const ServiceDetail = ({ ownerMode = false }) => {
   const { id } = useParams();
   const location = useLocation();
   const passedService = location.state?.service;
+  const isOwnerMode = ownerMode || location.pathname.startsWith('/portals/owner/');
   
   const { services, loading, error } = useServices();
   const {
@@ -483,15 +509,21 @@ const ServiceDetail = () => {
   }
 
   return (
-    <div className="service-detail-page">
-      <ServiceDetailSection service={serviceWithRating} reviews={serviceReviews} />
+    <div className={`service-detail-page ${isOwnerMode ? 'owner-service-detail-page' : ''}`.trim()}>
+      <ServiceDetailSection
+        service={serviceWithRating}
+        reviews={serviceReviews}
+        backTo={isOwnerMode ? '/portals/owner/services' : null}
+        canBook={!isOwnerMode}
+      />
       <ReviewSection
         serviceId={serviceWithRating.ServiceId}
         reviews={serviceReviews}
         onSubmitReview={submitReview}
         submitting={reviewsLoading}
+        allowWrite={!isOwnerMode}
       />
-      <RecommendedServicesSection currentServiceId={serviceWithRating.ServiceId} />
+      {!isOwnerMode ? <RecommendedServicesSection currentServiceId={serviceWithRating.ServiceId} /> : null}
     </div>
   );
 };
