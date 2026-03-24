@@ -1,9 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
-import { IconClock, IconSearch } from '../../components/Layout portal/PortalIcons.jsx'
+import { IconSearch } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
 import '../../styles/service.css'
+
+function formatVnd(value) {
+  const n = Number(value || 0)
+  return n.toLocaleString('en-US')
+}
+
+function formatAverageRating(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return '0.0'
+  return n.toFixed(1)
+}
 
 function digitsOnly(value) {
   const raw = String(value ?? '').trim()
@@ -29,11 +41,16 @@ function resolveAssetUrl(url) {
 }
 
 export default function OwnerServicesPage() {
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [openCategory, setOpenCategory] = useState(false)
   const [services, setServices] = useState([])
   const [categories, setCategories] = useState([])
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [page, setPage] = useState(1)
+  const pageSize = 10
   const [editing, setEditing] = useState(null)
   const [error, setError] = useState('')
   const [categoryError, setCategoryError] = useState('')
@@ -130,6 +147,29 @@ export default function OwnerServicesPage() {
       })
   }
 
+  function openDetail(service) {
+    if (!service?.id) return
+    navigate(`/portals/owner/services/${service.id}`, {
+      state: {
+        service: {
+          ServiceId: service.id,
+          Name: service.name || '',
+          Price: Number(service.priceVnd ?? digitsOnly(service.price) ?? 0),
+          DurationMinutes:
+            service.durationMinutes === null || service.durationMinutes === undefined
+              ? Number(digitsOnly(service.duration) || 0)
+              : Number(service.durationMinutes),
+          Description: service.description || '',
+          ImageUrl:
+            Array.isArray(service.images) && service.images.length
+              ? service.images[0]
+              : service.imageUrl || '',
+          Images: Array.isArray(service.images) ? service.images : service.imageUrl ? [service.imageUrl] : [],
+        },
+      },
+    })
+  }
+
   async function refresh() {
     const fresh = await api.get('/api/owner/services')
     if (Array.isArray(fresh)) setServices(fresh)
@@ -181,20 +221,7 @@ export default function OwnerServicesPage() {
     }
   }
 
-  async function onDelete() {
-    if (!editing?.id) return
-    const ok = window.confirm('Are you sure you want to delete this service?')
-    if (!ok) return
-    try {
-      setError('')
-      await api.del(`/api/owner/services/${editing.id}`)
-      await refresh()
-      close()
-    } catch (err) {
-      console.error(err)
-      setError(err?.message || 'Unable to delete service')
-    }
-  }
+  // Delete functionality removed — services must be deactivated via Edit -> Status
 
   async function onSubmit(e) {
     e.preventDefault()
@@ -232,26 +259,64 @@ export default function OwnerServicesPage() {
     }
   }
 
-  const filteredSections = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!Array.isArray(services)) return []
-    if (!q) return services
+  const categoriesById = useMemo(() => {
+    const map = new Map()
+    for (const c of categories || []) {
+      if (c && c.id !== undefined && c.id !== null) {
+        map.set(String(c.id), c)
+      }
+    }
+    return map
+  }, [categories])
 
-    return services
-      .map((section) => {
-        const group = String(section?.group || '').toLowerCase()
-        const items = Array.isArray(section?.items) ? section.items : []
-        const filteredItems = items.filter((s) => {
-          const name = String(s?.name || '').toLowerCase()
-          const tag = String(s?.tag || '').toLowerCase()
-          const status = String(s?.status || '').toLowerCase()
-            const category = String(s?.category || '').toLowerCase()
-            return name.includes(q) || tag.includes(q) || status.includes(q) || category.includes(q) || group.includes(q)
-        })
-        return { ...section, items: filteredItems }
-      })
-      .filter((section) => Array.isArray(section.items) && section.items.length > 0)
-  }, [services, query])
+  const flatServices = useMemo(() => {
+    if (!Array.isArray(services)) return []
+    const next = []
+    for (const section of services) {
+      if (section && Array.isArray(section.items)) {
+        for (const item of section.items) {
+          next.push({ ...item, __group: section.group || '' })
+        }
+        continue
+      }
+      if (section && typeof section === 'object' && section.id) {
+        next.push(section)
+      }
+    }
+    return next
+  }, [services])
+
+  const filteredServices = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return flatServices.filter((s) => {
+      const name = String(s?.name || '').toLowerCase()
+      const status = String(s?.status || '').toLowerCase()
+      const categoryId = String(s?.categoryId ?? s?.category?.id ?? '')
+      const categoryName = String(
+        s?.categoryName || s?.category || categoriesById.get(categoryId)?.name || s?.tag || s?.__group || ''
+      ).toLowerCase()
+
+      const queryMatched = !q || name.includes(q) || categoryName.includes(q) || status.includes(q)
+      const statusMatched = statusFilter === 'all' || status === statusFilter
+      const categoryMatched = categoryFilter === 'all' || categoryId === categoryFilter
+      return queryMatched && statusMatched && categoryMatched
+    })
+  }, [flatServices, query, statusFilter, categoryFilter, categoriesById])
+
+  const pagedServices = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return filteredServices.slice(start, start + pageSize)
+  }, [filteredServices, page])
+
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(filteredServices.length / pageSize)), [filteredServices.length])
+
+  useEffect(() => {
+    setPage(1)
+  }, [query, statusFilter, categoryFilter])
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages)
+  }, [page, totalPages])
 
   return (
     <div className="service-page">
@@ -283,14 +348,19 @@ export default function OwnerServicesPage() {
         bodyClassName="portal-serviceModalBody"
         footer={
           <>
+            {editing?.id ? (
+              <button
+                type="button"
+                className="portal-modalBtn"
+                onClick={() => openDetail(editing)}
+              >
+                Details
+              </button>
+            ) : null}
             <button type="button" className="portal-modalBtn" onClick={close}>
               Cancel
             </button>
-            {editing?.id ? (
-              <button type="button" className="portal-modalBtn danger" onClick={onDelete}>
-                Delete
-              </button>
-            ) : null}
+            {/* Delete removed: deactivation is done via Status field in the form */}
             <button type="submit" form="service-form" className="portal-modalBtn portal-modalBtnPrimary">
               {editing ? 'Save changes' : 'Add service'}
             </button>
@@ -477,50 +547,120 @@ export default function OwnerServicesPage() {
       </PortalModal>
 
       <div className="portal-search portal-searchFull" role="search">
-        <span className="portal-searchIcon" aria-hidden="true">
-          <IconSearch />
-        </span>
-        <input
-          className="portal-searchInput"
-          placeholder="Search by service name, category, or status..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+          <span className="portal-searchIcon" aria-hidden="true">
+            <IconSearch />
+          </span>
+          <input
+            className="portal-searchInput"
+            placeholder="Search by service name, category, or status..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
       </div>
 
-      {filteredSections.map((section) => (
-        <div key={section.group} className="portal-serviceSection">
-          <h2 className="portal-sectionTitle">{section.group}</h2>
+      <div className="service-filterRow">
+          <label className="portal-field service-filterField">
+            <span className="portal-label">Filter by status</span>
+            <select className="portal-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="all">All status</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </label>
 
-          <div className="portal-serviceGrid" role="list">
-            {section.items.map((s) => (
-              <PortalCard key={s.id || `${section.group}-${s.name}`} className="portal-serviceCard" role="listitem">
-                <div className="portal-serviceTop">
-                  <span className={`portal-serviceTag ${s.tag === 'Pedicure' ? 'pedicure' : ''}`.trim()}>
-                    {s.tag}
-                  </span>
-                  <button type="button" className="portal-ghostBtn portal-serviceEdit" onClick={() => openEdit(s)}>
-                    Edit
-                  </button>
-                </div>
+          <label className="portal-field service-filterField">
+            <span className="portal-label">Filter by category</span>
+            <select className="portal-select" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+              <option value="all">All categories</option>
+              {(categories || []).map((c) => (
+                <option key={String(c.id)} value={String(c.id)}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+      </div>
 
-                <div className="portal-serviceName">{s.name}</div>
+      <PortalCard className="portal-invTableCard" title="Service List">
+        <div className="portal-tableWrap">
+          <table className="portal-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Category</th>
+                <th>Duration</th>
+                <th>Price</th>
+                <th>Total Bookings</th>
+                <th>Rating</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pagedServices.map((s) => {
+                const categoryId = String(s?.categoryId ?? s?.category?.id ?? '')
+                const categoryName =
+                  s?.categoryName || s?.category || categoriesById.get(categoryId)?.name || s?.tag || s?.__group || '-'
+                const duration =
+                  s?.durationMinutes === undefined || s?.durationMinutes === null
+                    ? `${Number(digitsOnly(s?.duration) || 0)} min`
+                    : `${Number(s.durationMinutes || 0)} min`
+                const price = s?.priceVnd === undefined || s?.priceVnd === null ? digitsOnly(s?.price) : s.priceVnd
+                const totalBookings = Number(s?.totalBookings ?? s?.bookedCount ?? s?.bookingCount ?? 0)
+                const averageRating = s?.averageRating ?? s?.avgRating ?? s?.ratingAverage ?? null
 
-                <div className="portal-serviceMeta">
-                  <span className="portal-serviceMetaIcon" aria-hidden="true">
-                    <IconClock />
-                  </span>
-                  {s.duration}
-                </div>
-
-                <div className="portal-serviceDivider" aria-hidden="true" />
-
-                <div className="portal-servicePrice">{s.price}</div>
-              </PortalCard>
-            ))}
-          </div>
+                return (
+                  <tr key={s.id || `${categoryName}-${s.name}`}>
+                    <td className="portal-invName">{s.name || '-'}</td>
+                    <td>
+                      <span className="portal-invPill">{categoryName}</span>
+                    </td>
+                    <td>{duration}</td>
+                    <td>{formatVnd(price)} ₫</td>
+                    <td>{Number.isFinite(totalBookings) ? totalBookings : 0}</td>
+                    <td>{formatAverageRating(averageRating)}</td>
+                    <td>
+                      <span className="portal-invPill">{s.status || '-'}</span>
+                    </td>
+                    <td style={{ width: 180 }}>
+                      <div className="portal-rowActions">
+                        <button type="button" className="portal-ghostBtn" onClick={() => openEdit(s)}>
+                          Edit
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+              {pagedServices.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="service-emptyRow">No services found</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
-      ))}
+
+        <div className="service-pagination">
+          <button
+            type="button"
+            className="portal-ghostBtn"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Previous
+          </button>
+          <span className="service-paginationText">Page {page} / {totalPages}</span>
+          <button
+            type="button"
+            className="portal-ghostBtn"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          >
+            Next
+          </button>
+        </div>
+      </PortalCard>
     </div>
   )
 }

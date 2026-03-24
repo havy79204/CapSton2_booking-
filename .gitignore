@@ -1,0 +1,8 @@
+# Ignore environment files and local config
+*.env
+my-node-app/.env
+my-app/.env
+.env
+
+# Ignore local config variants
+**/config/local*

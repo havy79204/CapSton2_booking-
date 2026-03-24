@@ -8,6 +8,10 @@ const serviceSchemaState = {
   servicesHasCategoryId: false,
   servicesHasImageUrl: false,
   serviceImagesTableExists: false,
+  bookingServicesTableExists: false,
+  bookingsTableExists: false,
+  bookingsHasStatus: false,
+  salonReviewsTableExists: false,
 }
 
 function getServiceUploadDir() {
@@ -33,10 +37,18 @@ function normalizeImageUrls(input) {
     .slice(0, 20)
 }
 
+const ACTIVE_SERVICE_WHERE = `(s.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), s.Status)))) = 'active')`
+
 function isForeignKeyConstraintError(err) {
   if (!err) return false
-  const msg = String(err?.message || '').toLowerCase()
-  return err?.number === 547 || msg.includes('reference constraint') || msg.includes('foreign key')
+  const candidates = [err, err?.originalError, ...(Array.isArray(err?.precedingErrors) ? err.precedingErrors : [])]
+  for (const item of candidates) {
+    const msg = String(item?.message || '').toLowerCase()
+    if (item?.number === 547 || msg.includes('reference constraint') || msg.includes('foreign key')) {
+      return true
+    }
+  }
+  return false
 }
 
 async function columnExists(tableName, columnName) {
@@ -76,6 +88,12 @@ async function ensureServiceCategorySchema() {
   serviceSchemaState.servicesHasCategoryId = hasCategory
   serviceSchemaState.servicesHasImageUrl = await columnExists('Services', 'ImageUrl')
   serviceSchemaState.serviceImagesTableExists = await tableExists('ServiceImages')
+  serviceSchemaState.bookingServicesTableExists = await tableExists('BookingServices')
+  serviceSchemaState.bookingsTableExists = await tableExists('Bookings')
+  serviceSchemaState.bookingsHasStatus = serviceSchemaState.bookingsTableExists
+    ? await columnExists('Bookings', 'BookingStatus')
+    : false
+  serviceSchemaState.salonReviewsTableExists = await tableExists('SalonReviews')
   return serviceSchemaState
 }
 
@@ -169,8 +187,30 @@ async function replaceServiceImages(serviceId, imageUrls) {
   }
 }
 
-async function listServicesGrouped() {
+async function listServicesGrouped(includeInactive = false) {
   const schema = await ensureServiceCategorySchema()
+  const whereClause = includeInactive ? '1=1' : ACTIVE_SERVICE_WHERE
+  const totalBookingsSql = schema.bookingServicesTableExists
+    ? `(
+          SELECT COUNT(1)
+          FROM BookingServices bs
+          ${schema.bookingsTableExists ? 'LEFT JOIN Bookings b ON b.BookingId = bs.BookingId' : ''}
+          WHERE bs.ServiceId = s.ServiceId
+          ${schema.bookingsTableExists && schema.bookingsHasStatus
+            ? `AND (
+              b.BookingStatus IS NULL
+              OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.BookingStatus)))) NOT IN ('cancelled', 'canceled')
+            )`
+            : ''}
+        ) AS TotalBookings,`
+    : 'CAST(0 AS INT) AS TotalBookings,'
+  const averageRatingSql = schema.salonReviewsTableExists
+    ? `(
+          SELECT AVG(CAST(sr.Rating AS FLOAT))
+          FROM SalonReviews sr
+          WHERE sr.ServiceId = s.ServiceId
+        ) AS AverageRating,`
+    : 'CAST(NULL AS FLOAT) AS AverageRating,'
 
   const result = await query(
     `SELECT
@@ -180,11 +220,14 @@ async function listServicesGrouped() {
         s.DurationMinutes,
         s.Description,
         s.Status,
+        ${totalBookingsSql}
+        ${averageRatingSql}
         ${schema.servicesHasImageUrl ? 's.ImageUrl,' : 'CAST(NULL AS NVARCHAR(500)) AS ImageUrl,'}
         ${schema.servicesHasCategoryId ? 's.CategoryId,' : 'CAST(NULL AS NVARCHAR(50)) AS CategoryId,'}
         ${schema.servicesHasCategoryId ? 'sc.Name' : 'CAST(NULL AS NVARCHAR(200))'} AS CategoryName
       FROM Services s
       ${schema.servicesHasCategoryId ? 'LEFT JOIN ServiceCategories sc ON sc.CategoryId = s.CategoryId' : ''}
+      WHERE ${whereClause}
         ORDER BY ${schema.servicesHasCategoryId ? "COALESCE(sc.Name, N'Uncategorized')," : ''} s.Name`
   )
 
@@ -230,7 +273,7 @@ async function createService(payload) {
     price: Number.isFinite(price) ? price : 0,
     duration: Number.isFinite(duration) ? duration : null,
     description: description || null,
-    status: status || null,
+    status: status || 'active',
     categoryId,
   })
 
@@ -239,8 +282,31 @@ async function createService(payload) {
   return { id }
 }
 
-async function getServiceById(serviceId) {
+async function getServiceById(serviceId, includeInactive = false) {
   const schema = await ensureServiceCategorySchema()
+  const whereClause = includeInactive ? '1=1' : ACTIVE_SERVICE_WHERE
+  const totalBookingsSql = schema.bookingServicesTableExists
+    ? `(
+          SELECT COUNT(1)
+          FROM BookingServices bs
+          ${schema.bookingsTableExists ? 'LEFT JOIN Bookings b ON b.BookingId = bs.BookingId' : ''}
+          WHERE bs.ServiceId = s.ServiceId
+          ${schema.bookingsTableExists && schema.bookingsHasStatus
+            ? `AND (
+              b.BookingStatus IS NULL
+              OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.BookingStatus)))) NOT IN ('cancelled', 'canceled')
+            )`
+            : ''}
+        ) AS TotalBookings,`
+    : 'CAST(0 AS INT) AS TotalBookings,'
+  const averageRatingSql = schema.salonReviewsTableExists
+    ? `(
+          SELECT AVG(CAST(sr.Rating AS FLOAT))
+          FROM SalonReviews sr
+          WHERE sr.ServiceId = s.ServiceId
+        ) AS AverageRating,`
+    : 'CAST(NULL AS FLOAT) AS AverageRating,'
+
   const result = await query(
     `SELECT TOP 1
         s.ServiceId,
@@ -249,12 +315,15 @@ async function getServiceById(serviceId) {
         s.DurationMinutes,
         s.Description,
         s.Status,
+        ${totalBookingsSql}
+        ${averageRatingSql}
         ${schema.servicesHasImageUrl ? 's.ImageUrl,' : 'CAST(NULL AS NVARCHAR(500)) AS ImageUrl,'}
         ${schema.servicesHasCategoryId ? 's.CategoryId,' : 'CAST(NULL AS NVARCHAR(50)) AS CategoryId,'}
         ${schema.servicesHasCategoryId ? 'sc.Name' : 'CAST(NULL AS NVARCHAR(200))'} AS CategoryName
       FROM Services s
       ${schema.servicesHasCategoryId ? 'LEFT JOIN ServiceCategories sc ON sc.CategoryId = s.CategoryId' : ''}
-      WHERE s.ServiceId = @serviceId`,
+      WHERE s.ServiceId = @serviceId
+        AND ${whereClause}`,
     { serviceId }
   )
 
@@ -282,6 +351,8 @@ async function getServiceById(serviceId) {
     name: row.Name,
     priceVnd: Number(row.Price || 0),
     durationMinutes: row.DurationMinutes === null || row.DurationMinutes === undefined ? null : Number(row.DurationMinutes),
+    totalBookings: Number(row.TotalBookings || 0),
+    averageRating: row.AverageRating === null || row.AverageRating === undefined ? null : Number(row.AverageRating),
     description: row.Description || '',
     status: row.Status || '',
     images,
@@ -345,26 +416,10 @@ async function deleteService(serviceId) {
     throw err
   }
 
-  const hasStaffSkillsTable = await tableExists('StaffSkills')
-  if (hasStaffSkillsTable) {
-    const hasServiceIdInStaffSkills = await columnExists('StaffSkills', 'ServiceId')
-    if (hasServiceIdInStaffSkills) {
-      await query('DELETE FROM StaffSkills WHERE ServiceId = @serviceId', { serviceId })
-    }
-  }
-
-  try {
-    await query('DELETE FROM ServiceImages WHERE ServiceId = @serviceId', { serviceId })
-    await query('DELETE FROM Services WHERE ServiceId = @serviceId', { serviceId })
-  } catch (err) {
-    if (isForeignKeyConstraintError(err)) {
-      const conflict = new Error('Cannot delete service with existing booking or review history')
-      conflict.status = 409
-      throw conflict
-    }
-    throw err
-  }
-
+  await query('UPDATE Services SET Status = @status WHERE ServiceId = @serviceId', {
+    serviceId,
+    status: 'inactive',
+  })
   return { id: serviceId }
 }
 

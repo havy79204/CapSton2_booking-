@@ -169,16 +169,10 @@ async function getProducts() {
         pc.[Name] AS CategoryName,
         pi.[ImageId] AS ExtraImageId,
         pi.[ImageUrl] AS ExtraImageUrl,
-        pi.[SortOrder] AS ExtraSortOrder,
-        ISNULL(oq.[SoldCount], 0) AS SoldCount
+        pi.[SortOrder] AS ExtraSortOrder
       FROM [Products] p
       LEFT JOIN [ProductCategories] pc ON p.[CategoryId] = pc.[CategoryId]
       LEFT JOIN [ProductImages] pi ON p.[ProductId] = pi.[ProductId]
-      LEFT JOIN (
-        SELECT [ProductId], SUM([Quantity]) AS SoldCount
-        FROM [OrderItems]
-        GROUP BY [ProductId]
-      ) oq ON p.[ProductId] = oq.[ProductId]
       ORDER BY p.[CategoryId], p.[Name], ISNULL(pi.[SortOrder], 2147483647), pi.[ImageId]`
     : `SELECT
         p.[ProductId],
@@ -191,16 +185,9 @@ async function getProducts() {
         p.[CategoryId],
         pc.[Name] AS CategoryName,
         NULL AS ExtraImageId,
-        NULL AS ExtraImageUrl,
-        NULL AS ExtraSortOrder,
-        ISNULL(oq.[SoldCount], 0) AS SoldCount
+        NULL AS ExtraImageUrl
       FROM [Products] p
       LEFT JOIN [ProductCategories] pc ON p.[CategoryId] = pc.[CategoryId]
-      LEFT JOIN (
-        SELECT [ProductId], SUM([Quantity]) AS SoldCount
-        FROM [OrderItems]
-        GROUP BY [ProductId]
-      ) oq ON p.[ProductId] = oq.[ProductId]
       ORDER BY p.[CategoryId], p.[Name]`
   )
 
@@ -224,7 +211,6 @@ async function getProducts() {
         Status: row.Status,
         CategoryId: row.CategoryId,
         CategoryName: row.CategoryName,
-        SoldCount: row.SoldCount,
         Images: images
       })
     }
