@@ -18,6 +18,8 @@ import { useCustomerCart } from '../hooks/useCustomerCommerce';
 
 import '../styles/HomePage.css';
 
+const PREVIEW_ITEMS_COUNT = 8;
+
 const HeroSection = () => {
   const handleNavigation = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -57,8 +59,8 @@ const ServicesSection = () => {
     return <div className="loading">No services available</div>;
   }
 
-  const displayedServices = showAllServices ? services : services.slice(0, 5);
-  const hasMoreServices = services.length > 5;
+  const displayedServices = showAllServices ? services : services.slice(0, PREVIEW_ITEMS_COUNT);
+  const hasMoreServices = services.length > PREVIEW_ITEMS_COUNT;
 
   return (
     <section className="services" id="salons">
@@ -158,8 +160,8 @@ const ProductsSection = () => {
   }
 
   const filteredProducts = products;
-  const displayedProducts = showAllProducts ? filteredProducts : filteredProducts.slice(0, 5);
-  const hasMoreProducts = filteredProducts.length > 5;
+  const displayedProducts = showAllProducts ? filteredProducts : filteredProducts.slice(0, PREVIEW_ITEMS_COUNT);
+  const hasMoreProducts = filteredProducts.length > PREVIEW_ITEMS_COUNT;
 
   return (
     <section className="products" id="shop">

@@ -29,6 +29,9 @@ const ServiceCatalogPage = () => {
 
   const filteredServices = useMemo(() => {
     return serviceList.filter((service) => {
+      const status = String(service?.Status || service?.status || '').trim().toLowerCase()
+      const isActive = status === '' || status === 'active'
+      if (!isActive) return false
       const matchesSearch =
         String(service.Name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         String(service.Description || '').toLowerCase().includes(searchTerm.toLowerCase());

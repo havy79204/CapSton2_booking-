@@ -356,12 +356,6 @@ export default function OwnerChatPage() {
               Reload
             </button>
           </div>
-
-          <div className="owner-chatFilterTabs" role="tablist" aria-label="Conversation filters">
-            <button type="button" className="owner-chatFilterTab active">All</button>
-            <button type="button" className="owner-chatFilterTab">Unread</button>
-          </div>
-
           <div className="owner-chatThreadList">
             {loadingThreads ? <div className="owner-chatHint">Loading conversations...</div> : null}
             {!loadingThreads && !filteredThreads.length ? (

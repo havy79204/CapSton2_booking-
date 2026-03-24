@@ -55,6 +55,24 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
 
       <Route
+        path="/portals/owner/services/:id"
+        element={
+          <RequireAuth>
+            <ServiceDetail ownerMode />
+          </RequireAuth>
+        }
+      />
+
+      <Route
+        path="/portals/owner/products/:id"
+        element={
+          <RequireAuth>
+            <ProductDetail ownerMode />
+          </RequireAuth>
+        }
+      />
+
+      <Route
         path="/"
         element={
           <RequireAuth>

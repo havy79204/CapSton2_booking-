@@ -281,7 +281,7 @@ export default function OwnerOrdersPage() {
 
   return (
     <div className="orders-page">
-      <PortalCard className="portal-invTableCard" title="Retail Order Report Management">
+      <PortalCard className="portal-invTableCard">
         <div className="portal-orderFilters">
           <label className="portal-field">
             <span className="portal-label">Status</span>
@@ -352,10 +352,6 @@ export default function OwnerOrdersPage() {
           <div className="portal-orderSummaryItem">
             <span>Total items sold</span>
             <b>{Number(orderReport.summary?.totalQuantity || 0)}</b>
-          </div>
-          <div className="portal-orderSummaryItem">
-            <span>Total discount</span>
-            <b>{formatVnd(orderReport.summary?.totalDiscount || 0)} VND</b>
           </div>
           <div className="portal-orderSummaryItem">
             <span>Revenue</span>
