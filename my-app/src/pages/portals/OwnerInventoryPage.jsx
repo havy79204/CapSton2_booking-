@@ -61,6 +61,14 @@ function extractRetailProductId(value) {
   return raw
 }
 
+function resolveAssetUrl(url) {
+  const raw = String(url || '').trim()
+  if (!raw) return ''
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw
+  const base = String(import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/+$/, '')
+  return `${base}${raw.startsWith('/') ? '' : '/'}${raw}`
+}
+
 export default function OwnerInventoryPage() {
   const [tab, setTab] = useState('all')
   const [query, setQuery] = useState('')
@@ -91,6 +99,8 @@ export default function OwnerInventoryPage() {
   const [editFor, setEditFor] = useState(null)
   const [editForm, setEditForm] = useState({
     name: '',
+    group: 'service',
+    stock: '0',
     categoryId: '',
     category: '',
     kind: '',
@@ -100,10 +110,12 @@ export default function OwnerInventoryPage() {
     sellPriceVnd: '0',
     description: '',
     imageUrl: '',
+    images: [],
     status: '',
   })
 
   const editImageInputRef = useRef(null)
+  const dragIndexRef = useRef(null)
 
   function readFileAsDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -122,13 +134,62 @@ export default function OwnerInventoryPage() {
       setEditError('')
       const dataUrl = await readFileAsDataUrl(file)
       const uploaded = await api.post('/api/owner/retail/uploads/image', { dataUrl })
-      setEditForm((p) => ({ ...p, imageUrl: uploaded?.url || '' }))
+      setEditForm((p) => {
+        const current = Array.isArray(p.images) ? p.images : []
+        if (current.length >= 4) return p
+        const next = [...current, uploaded?.url || ''].filter(Boolean).slice(0, 4)
+        return {
+          ...p,
+          imageUrl: next[0] || '',
+          images: next,
+        }
+      })
     } catch (err) {
       console.error(err)
       setEditError(err?.message || 'Unable to upload image')
     } finally {
       if (e?.target) e.target.value = ''
     }
+  }
+
+  function onEditImageDragStart(index, e) {
+    dragIndexRef.current = index
+    try {
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', String(index))
+    } catch  {
+      // some browsers may throw when setting drag data for images
+    }
+  }
+
+  function onEditImageDragOver(index, e) {
+    e.preventDefault()
+    try {
+      e.dataTransfer.dropEffect = 'move'
+    } catch  {
+      // some browsers may throw when setting drag data for images
+    }
+  }
+
+  function onEditImageDrop(index, e) {
+    e.preventDefault()
+    const src = dragIndexRef.current
+    if (src === null || src === undefined) return
+    setEditForm((p) => {
+      const current = Array.isArray(p.images) ? [...p.images] : []
+      if (!current.length) return p
+      const s = Number(src)
+      const t = Number(index)
+      if (s === t) return p
+      const moved = current.splice(s, 1)[0]
+      current.splice(t, 0, moved)
+      return {
+        ...p,
+        images: current,
+        imageUrl: current[0] || '',
+      }
+    })
+    dragIndexRef.current = null
   }
 
   const [openVariants, setOpenVariants] = useState(false)
@@ -402,6 +463,8 @@ export default function OwnerInventoryPage() {
     setEditError('')
     setEditForm({
       name: item?.name || '',
+      group: item?.group || 'service',
+      stock: String(item?.stock ?? '0'),
       categoryId: findCategoryIdByName(item?.category || item?.kind || ''),
       category: item?.category || '',
       kind: item?.kind || '',
@@ -409,9 +472,10 @@ export default function OwnerInventoryPage() {
       minQty: String(item?.minQty ?? '0'),
       priceVnd: String(item?.priceVnd ?? '0'),
       sellPriceVnd: String(item?.sellPriceVnd ?? '0'),
-      description: '',
-      imageUrl: '',
-      status: '',
+      description: item?.description || '',
+      imageUrl: item?.imageUrl || '',
+      images: item?.imageUrl ? [item.imageUrl] : [],
+      status: item?.status || '',
     })
     setOpenEdit(true)
 
@@ -423,13 +487,15 @@ export default function OwnerInventoryPage() {
           if (!data || typeof data !== 'object') return
           setEditForm((p) => ({
             ...p,
+            stock: String(data.stock ?? p.stock ?? '0'),
             categoryId: data.categoryId !== undefined && data.categoryId !== null ? String(data.categoryId) : p.categoryId,
             category: data.categoryName ?? data.kind ?? p.category,
             kind: data.kind ?? p.kind,
             sellPriceVnd: String(data.price ?? p.sellPriceVnd ?? '0'),
             description: data.description ?? '',
-            imageUrl: data.imageUrl ?? '',
-            status: data.status ?? '',
+            imageUrl: data.imageUrl ?? p.imageUrl,
+            images: Array.isArray(data.images) ? data.images.slice(0, 4) : (p.imageUrl ? [p.imageUrl] : []),
+            status: data.status ?? p.status,
           }))
         })
         .catch((err) => {
@@ -438,19 +504,6 @@ export default function OwnerInventoryPage() {
     }
   }
 
-  function openVariantsForItem(item) {
-    if (!item) return
-    const productId = extractRetailProductId(item.id)
-    setVariantsError('')
-    setVariantsFor({ ...item, productId })
-    setOpenVariants(true)
-    Promise.resolve()
-      .then(() => refreshVariantsAndProduct(productId))
-      .catch((err) => {
-        console.error(err)
-        setVariantsError(err?.message || 'Unable to load variants')
-      })
-  }
 
   function openStockFor(item) {
     setStockForId(item?.id || '')
@@ -629,19 +682,25 @@ export default function OwnerInventoryPage() {
       if (editFor.group === 'retail') {
         await api.put(`/api/owner/inventory/items/${editFor.id}`, {
           name: normalizedName,
+          group: editForm.group,
+          stock: digitsOnly(editForm.stock),
           categoryId: editForm.categoryId,
-          priceVnd: digitsOnly(editForm.priceVnd),
           sellPriceVnd: digitsOnly(editForm.sellPriceVnd),
           description: editForm.description,
-          imageUrl: editForm.imageUrl,
-          status: editForm.status,
+          imageUrl: (Array.isArray(editForm.images) ? editForm.images[0] : '') || editForm.imageUrl,
+          images: Array.isArray(editForm.images) ? editForm.images.slice(0, 4) : [],
         })
       } else {
         await api.put(`/api/owner/inventory/items/${editFor.id}`, {
           name: normalizedName,
+          group: editForm.group,
+          stock: digitsOnly(editForm.stock),
           categoryId: editForm.categoryId,
           unit: editForm.unit,
           minQty: editForm.minQty,
+          priceVnd: digitsOnly(editForm.priceVnd),
+          description: editForm.description,
+          imageUrl: (Array.isArray(editForm.images) ? editForm.images[0] : '') || editForm.imageUrl,
         })
       }
 
@@ -651,6 +710,34 @@ export default function OwnerInventoryPage() {
       console.error(err)
       setEditError(err?.message || 'Something went wrong')
     }
+  }
+
+  async function onDeleteItem() {
+    const targetId = String(editFor?.id || '').trim()
+    if (!targetId) return
+    if (!window.confirm(`Delete ${editFor?.name || 'this item'}?`)) return
+
+    try {
+      setEditError('')
+      await api.del(`/api/owner/inventory/items/${targetId}`)
+      await refreshInventory()
+      closeEdit()
+    } catch (err) {
+      console.error(err)
+      setEditError(err?.message || 'Unable to delete item')
+    }
+  }
+
+  function onRemoveEditImageAt(index) {
+    setEditForm((p) => {
+      const current = Array.isArray(p.images) ? p.images : []
+      const next = current.filter((_, i) => i !== index)
+      return {
+        ...p,
+        images: next,
+        imageUrl: next[0] || '',
+      }
+    })
   }
 
   async function onCreateVariant(e) {
@@ -1085,8 +1172,15 @@ export default function OwnerInventoryPage() {
         open={openEdit}
         title="Edit Item"
         onClose={closeEdit}
+        modalClassName="inventory-editModal"
+        bodyClassName="inventory-editModalBody"
         footer={
           <>
+            {editFor?.id ? (
+              <button type="button" className="portal-modalBtn" onClick={onDeleteItem}>
+                Delete
+              </button>
+            ) : null}
             <button type="button" className="portal-modalBtn" onClick={closeEdit}>
               Cancel
             </button>
@@ -1136,58 +1230,105 @@ export default function OwnerInventoryPage() {
                 ))}
               </select>
             </label>
+
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Type</span>
+              <select
+                className="portal-select"
+                value={editForm.group || (editFor?.group || 'service')}
+                onChange={(e) => setEditForm((p) => ({ ...p, group: e.target.value }))}
+              >
+                <option value="service">Supplies</option>
+                <option value="retail">Retail</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="portal-modalGrid2">
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Stock</span>
+              <input
+                className="portal-input"
+                inputMode="numeric"
+                value={editForm.stock}
+                onChange={(e) => setEditForm((p) => ({ ...p, stock: digitsOnly(e.target.value) }))}
+              />
+            </label>
+
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Price (VND)</span>
+              <input
+                className="portal-input"
+                inputMode="numeric"
+                value={editFor?.group === 'retail' ? editForm.sellPriceVnd : editForm.priceVnd}
+                onChange={(e) => {
+                  const next = digitsOnly(e.target.value)
+                  setEditForm((p) =>
+                    editFor?.group === 'retail'
+                      ? { ...p, sellPriceVnd: next }
+                      : { ...p, priceVnd: next }
+                  )
+                }}
+              />
+            </label>
           </div>
 
           {editFor?.group === 'retail' ? (
             <>
-              <div className="portal-modalGrid2">
-                <label className="portal-field" style={{ marginTop: 12 }}>
-                  <span className="portal-label">Status <span className="products-required">*</span></span>
-                  <select
-                    className="portal-select"
-                    value={editForm.status || ''}
-                    onChange={(e) => setEditForm((p) => ({ ...p, status: e.target.value }))}
-                  >
-                    <option value="">-- Select status --</option>
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                    {editForm.status && editForm.status !== 'active' && editForm.status !== 'inactive' ? (
-                      <option value={editForm.status}>{editForm.status}</option>
-                    ) : null}
-                  </select>
-                </label>
-              </div>
-
-              <div className="portal-modalGrid2">
-                <label className="portal-field" style={{ marginTop: 12 }}>
-                  <span className="portal-label">Purchase Price (VND)</span>
-                  <input
-                    className="portal-input"
-                    inputMode="numeric"
-                    value={editForm.priceVnd}
-                    onChange={(e) => setEditForm((p) => ({ ...p, priceVnd: digitsOnly(e.target.value) }))}
-                  />
-                </label>
-
-                <label className="portal-field" style={{ marginTop: 12 }}>
-                  <span className="portal-label">Sell Price (VND)</span>
-                  <input
-                    className="portal-input"
-                    inputMode="numeric"
-                    value={editForm.sellPriceVnd}
-                    onChange={(e) => setEditForm((p) => ({ ...p, sellPriceVnd: digitsOnly(e.target.value) }))}
-                  />
-                </label>
-              </div>
-
               <label className="portal-field" style={{ marginTop: 12 }}>
-                <span className="portal-label">Image (URL)</span>
-                <input
-                  className="portal-input"
-                  placeholder="https://..."
-                  value={editForm.imageUrl}
-                  onChange={(e) => setEditForm((p) => ({ ...p, imageUrl: e.target.value }))}
-                />
+                <span className="portal-label">Image</span>
+                <div
+                  style={{
+                    border: '1px solid rgba(48,17,3,0.15)',
+                    borderRadius: 10,
+                    padding: 8,
+                    minHeight: 120,
+                    display: 'grid',
+                    placeItems: 'center',
+                    background: 'rgba(255,255,255,0.2)',
+                  }}
+                >
+                  {Array.isArray(editForm.images) && editForm.images.length ? (
+                    <div style={{ width: '100%', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+                      {editForm.images.map((url, idx) => (
+                        <div
+                          key={`${url}-${idx}`}
+                          draggable
+                          onDragStart={(e) => onEditImageDragStart(idx, e)}
+                          onDragOver={(e) => onEditImageDragOver(idx, e)}
+                          onDrop={(e) => onEditImageDrop(idx, e)}
+                          style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', cursor: 'grab' }}
+                        >
+                          <img
+                            src={resolveAssetUrl(url)}
+                            alt={`${editForm.name || 'product'}-${idx + 1}`}
+                            style={{ width: '100%', height: 110, objectFit: 'contain', display: 'block', background: '#fff' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => onRemoveEditImageAt(idx)}
+                            style={{
+                              position: 'absolute',
+                              top: 6,
+                              right: 6,
+                              width: 24,
+                              height: 24,
+                              borderRadius: '50%',
+                              border: 'none',
+                              background: 'rgba(0,0,0,0.65)',
+                              color: '#fff',
+                              cursor: 'pointer',
+                              fontWeight: 700,
+                            }}
+                            aria-label="Remove image"
+                          >
+                            x
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <span className="portal-pageSubtitle">No image</span>}
+                </div>
               </label>
 
               <div className="portal-rowActions" style={{ marginTop: 8 }}>
@@ -1201,9 +1342,10 @@ export default function OwnerInventoryPage() {
                 <button
                   type="button"
                   className="portal-ghostBtn"
+                  disabled={(editForm.images || []).length >= 4}
                   onClick={() => editImageInputRef.current?.click()}
                 >
-                  Add Image
+                  Add Image ({(editForm.images || []).length}/4)
                 </button>
               </div>
 
@@ -1216,12 +1358,6 @@ export default function OwnerInventoryPage() {
                   onChange={(e) => setEditForm((p) => ({ ...p, description: e.target.value }))}
                 />
               </label>
-
-              <div className="portal-rowActions" style={{ marginTop: 12 }}>
-                <button type="button" className="portal-ghostBtn" onClick={() => openVariantsForItem(editFor)}>
-                  Manage Variants
-                </button>
-              </div>
             </>
           ) : (
             <>
@@ -1241,6 +1377,90 @@ export default function OwnerInventoryPage() {
                   inputMode="numeric"
                   value={editForm.minQty}
                   onChange={(e) => setEditForm((p) => ({ ...p, minQty: digitsOnly(e.target.value) }))}
+                />
+              </label>
+
+              <label className="portal-field" style={{ marginTop: 12 }}>
+                <span className="portal-label">Image</span>
+                <div
+                  style={{
+                    border: '1px solid rgba(48,17,3,0.15)',
+                    borderRadius: 10,
+                    padding: 8,
+                    minHeight: 120,
+                    display: 'grid',
+                    placeItems: 'center',
+                    background: 'rgba(255,255,255,0.2)',
+                  }}
+                >
+                  {Array.isArray(editForm.images) && editForm.images.length ? (
+                    <div style={{ width: '100%', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+                      {editForm.images.map((url, idx) => (
+                        <div
+                          key={`${url}-${idx}`}
+                          draggable
+                          onDragStart={(e) => onEditImageDragStart(idx, e)}
+                          onDragOver={(e) => onEditImageDragOver(idx, e)}
+                          onDrop={(e) => onEditImageDrop(idx, e)}
+                          style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', cursor: 'grab' }}
+                        >
+                          <img
+                            src={resolveAssetUrl(url)}
+                            alt={`${editForm.name || 'item'}-${idx + 1}`}
+                            style={{ width: '100%', height: 110, objectFit: 'contain', display: 'block', background: '#fff' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => onRemoveEditImageAt(idx)}
+                            style={{
+                              position: 'absolute',
+                              top: 6,
+                              right: 6,
+                              width: 24,
+                              height: 24,
+                              borderRadius: '50%',
+                              border: 'none',
+                              background: 'rgba(0,0,0,0.65)',
+                              color: '#fff',
+                              cursor: 'pointer',
+                              fontWeight: 700,
+                            }}
+                            aria-label="Remove image"
+                          >
+                            x
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <span className="portal-pageSubtitle">No image</span>}
+                </div>
+              </label>
+
+              <div className="portal-rowActions" style={{ marginTop: 8 }}>
+                <input
+                  ref={editImageInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  style={{ display: 'none' }}
+                  onChange={onPickEditImage}
+                />
+                <button
+                  type="button"
+                  className="portal-ghostBtn"
+                  disabled={(editForm.images || []).length >= 4}
+                  onClick={() => editImageInputRef.current?.click()}
+                >
+                  Add Image ({(editForm.images || []).length}/4)
+                </button>
+              </div>
+
+              <label className="portal-field" style={{ marginTop: 12 }}>
+                <span className="portal-label">Description</span>
+                <textarea
+                  className="portal-textarea"
+                  placeholder="Item description (optional)"
+                  value={editForm.description}
+                  onChange={(e) => setEditForm((p) => ({ ...p, description: e.target.value }))}
                 />
               </label>
             </>
@@ -1418,7 +1638,7 @@ export default function OwnerInventoryPage() {
             </div>
           }
         >
-          <div className="portal-kpiValue">{formatVnd(totalImportVnd)} VND</div>
+          <div className="portal-kpiValue portal-kpiValueLong">{formatVnd(totalImportVnd)} VND</div>
         </PortalCard>
 
         <PortalCard
@@ -1434,7 +1654,7 @@ export default function OwnerInventoryPage() {
             </div>
           }
         >
-          <div className="portal-kpiValue">{formatVnd(totalStockOutVnd)} VND</div>
+          <div className="portal-kpiValue portal-kpiValueLong">{formatVnd(totalStockOutVnd)} VND</div>
         </PortalCard>
 
         <PortalCard
