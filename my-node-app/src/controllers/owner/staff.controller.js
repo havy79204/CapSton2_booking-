@@ -2,8 +2,7 @@ const { asyncHandler } = require('../../utils/asyncHandler')
 const staffService = require('../../services/staff.service')
 
 const getStaff = asyncHandler(async (req, res) => {
-  const { period, date } = req.query || {}
-  const data = await staffService.listStaff({ period, date })
+  const data = await staffService.listStaff(req.query || {})
   res.json({ ok: true, data })
 })
 

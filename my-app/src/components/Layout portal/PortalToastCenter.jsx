@@ -43,9 +43,15 @@ export default function PortalToastCenter() {
           key={toast.id}
           className={`portal-toast portal-toast-${toast.type === 'success' ? 'success' : 'error'}`}
           role="status"
-          aria-live="polite"
+          aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
         >
-          <span className="portal-toastMessage">{toast.message}</span>
+          <span className="portal-toastIcon" aria-hidden="true">
+            {toast.type === 'success' ? '✓' : '!'}
+          </span>
+          <div className="portal-toastBody">
+            <span className="portal-toastTitle">{toast.type === 'success' ? 'Success' : 'Error'}</span>
+            <span className="portal-toastMessage">{toast.message}</span>
+          </div>
           <button type="button" className="portal-toastClose" onClick={() => dismiss(toast.id)} aria-label="Close notification">
             ✕
           </button>
