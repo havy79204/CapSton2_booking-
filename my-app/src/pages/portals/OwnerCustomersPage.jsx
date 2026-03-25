@@ -1,18 +1,42 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
 import '../../styles/customers.css'
 import {
-  IconMail,
-  IconPhone,
   IconSearch,
 } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
 
-function initialOf(name) {
-  const parts = String(name).trim().split(/\s+/).filter(Boolean)
-  return (parts[0]?.[0] ?? '?').toUpperCase()
+function getAccountStatus(lastVisitDateString) {
+  // If never visited, return inactive
+  if (!lastVisitDateString || lastVisitDateString === 'Never' || lastVisitDateString === '') {
+    return { status: 'Inactive', color: '#dc3545' }
+  }
+
+  // Parse the date (assuming format like "10/3/2026" or "DD/MM/YYYY")
+  try {
+    const parts = String(lastVisitDateString).split('/')
+    if (parts.length < 3) {
+      return { status: 'Inactive', color: '#dc3545' }
+    }
+    
+    const day = parseInt(parts[0], 10)
+    const month = parseInt(parts[1], 10) - 1 // JS months are 0-indexed
+    const year = parseInt(parts[2], 10)
+    
+    const lastVisitDate = new Date(year, month, day)
+    const now = new Date()
+    const daysDifference = Math.floor((now - lastVisitDate) / (1000 * 60 * 60 * 24))
+    
+    // If last visit is within 90 days, mark as active
+    if (daysDifference <= 90) {
+      return { status: 'Active', color: '#28a745' }
+    } else {
+      return { status: 'Inactive', color: '#dc3545' }
+    }
+  } catch {
+    return { status: 'Unknown', color: '#6c757d' }
+  }
 }
 
 export default function OwnerCustomersPage() {
@@ -26,15 +50,20 @@ export default function OwnerCustomersPage() {
     phone: '',
     email: '',
   })
+  const [deletingId, setDeletingId] = useState('')
 
   useEffect(() => {
-    api
-      .get('/api/owner/customers')
-      .then((data) => {
-        if (Array.isArray(data)) setCustomers(data)
-      })
-      .catch((err) => console.error(err))
+    loadCustomers()
   }, [])
+
+  const loadCustomers = async () => {
+    try {
+      const data = await api.get('/api/owner/customers')
+      if (Array.isArray(data)) setCustomers(data)
+    } catch (err) {
+      console.error(err)
+    }
+  }
 
   function close() {
     setOpen(false)
@@ -75,13 +104,27 @@ export default function OwnerCustomersPage() {
         await api.post('/api/owner/customers', payload)
       }
 
-      const fresh = await api.get('/api/owner/customers')
-      if (Array.isArray(fresh)) setCustomers(fresh)
-
       setForm({ name: '', phone: '', email: '' })
       close()
+      await loadCustomers()
     } catch (err) {
       console.error(err)
+    }
+  }
+
+  async function onDeleteCustomer(customer) {
+    const customerId = customer?.id || customer?.email
+    if (!customerId) return
+    if (!window.confirm(`Delete customer ${customer.name}?`)) return
+
+    try {
+      setDeletingId(customerId)
+      await api.del(`/api/owner/customers/${customerId}`)
+      await loadCustomers()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setDeletingId('')
     }
   }
 
@@ -171,55 +214,54 @@ export default function OwnerCustomersPage() {
         />
       </div>
 
-      <div className="portal-customerGrid" role="list">
-        {filteredCustomers.map((c) => (
-          <PortalCard key={c.id || c.email || c.name} className="portal-customerCard" role="listitem">
-            <div className="portal-customerTop">
-              <div className="portal-customerAvatar" aria-hidden="true">
-                {initialOf(c.name)}
-              </div>
-
-              <div className="portal-customerActions">
-                <button type="button" className="portal-ghostBtn portal-customerEdit" onClick={() => openEdit(c)}>
-                  Edit
-                </button>
-                <button type="button" className="portal-ghostBtn portal-customerView" onClick={() => navigate(`/portals/owner/customers/${c.id || c.email}`)}>
-                  View
-                </button>
-              </div>
-            </div>
-
-            <div className="portal-customerName">{c.name}</div>
-
-            <div className="portal-customerContacts">
-              <div className="portal-staffContact">
-                <span className="portal-staffContactIcon" aria-hidden="true">
-                  <IconPhone />
-                </span>
-                <span className="portal-staffContactText">{c.phone}</span>
-              </div>
-              <div className="portal-staffContact">
-                <span className="portal-staffContactIcon" aria-hidden="true">
-                  <IconMail />
-                </span>
-                <span className="portal-staffContactText">{c.email}</span>
-              </div>
-            </div>
-
-            <div className="portal-staffDivider" aria-hidden="true" />
-
-            <div className="portal-customerStats">
-              <div>
-                <div className="portal-customerStatLabel">Visits</div>
-                <div className="portal-customerStatValue">{c.visits}</div>
-              </div>
-              <div className="portal-customerStatRight">
-                <div className="portal-customerStatLabel">Last visit</div>
-                <div className="portal-customerStatValue">{c.last}</div>
-              </div>
-            </div>
-          </PortalCard>
-        ))}
+      <div className="portal-tableWrap" style={{ marginTop: 8 }}>
+        <table className="portal-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Phone</th>
+              <th>Email</th>
+              <th>Account Status</th>
+              <th>Visits</th>
+              <th>Last visit</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredCustomers.length === 0 ? (
+              <tr>
+                <td colSpan={7}>No customers found.</td>
+              </tr>
+            ) : (
+              filteredCustomers.map((c) => (
+                <tr key={c.id || c.email || c.name}>
+                  <td>{c.name}</td>
+                  <td>{c.phone}</td>
+                  <td>{c.email}</td>
+                  <td><span style={{ color: getAccountStatus(c.last).color, fontWeight: '600' }}>{getAccountStatus(c.last).status}</span></td>
+                  <td>{c.visits}</td>
+                  <td>{c.last}</td>
+                  <td>
+                    <button type="button" className="portal-ghostBtn" onClick={() => openEdit(c)}>
+                      Edit
+                    </button>
+                    <button type="button" className="portal-ghostBtn" onClick={() => navigate(`/portals/owner/customers/${c.id || c.email}`)}>
+                      View
+                    </button>
+                    <button 
+                      type="button" 
+                      className="portal-ghostBtn" 
+                      onClick={() => onDeleteCustomer(c)}
+                      disabled={deletingId === (c.id || c.email)}
+                    >
+                      {deletingId === (c.id || c.email) ? 'Deleting...' : 'Delete'}
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
       </div>
     </div>
