@@ -221,7 +221,21 @@ export default function OwnerServicesPage() {
     }
   }
 
-  // Delete functionality removed — services must be deactivated via Edit -> Status
+  async function onDeleteService() {
+    const serviceId = String(editing?.id || '').trim()
+    if (!serviceId) return
+    if (!window.confirm(`Delete service ${editing?.name || serviceId}?`)) return
+
+    try {
+      setError('')
+      await api.del(`/api/owner/services/${serviceId}`)
+      await refresh()
+      close()
+    } catch (err) {
+      console.error(err)
+      setError(err?.message || 'Unable to delete service')
+    }
+  }
 
   async function onSubmit(e) {
     e.preventDefault()
@@ -297,9 +311,10 @@ export default function OwnerServicesPage() {
       ).toLowerCase()
 
       const queryMatched = !q || name.includes(q) || categoryName.includes(q) || status.includes(q)
+      const visibleMatched = status !== 'deleted' && status !== 'delete'
       const statusMatched = statusFilter === 'all' || status === statusFilter
       const categoryMatched = categoryFilter === 'all' || categoryId === categoryFilter
-      return queryMatched && statusMatched && categoryMatched
+      return visibleMatched && queryMatched && statusMatched && categoryMatched
     })
   }, [flatServices, query, statusFilter, categoryFilter, categoriesById])
 
@@ -357,10 +372,14 @@ export default function OwnerServicesPage() {
                 Details
               </button>
             ) : null}
+            {editing?.id ? (
+              <button type="button" className="portal-modalBtn" onClick={onDeleteService}>
+                Delete
+              </button>
+            ) : null}
             <button type="button" className="portal-modalBtn" onClick={close}>
               Cancel
             </button>
-            {/* Delete removed: deactivation is done via Status field in the form */}
             <button type="submit" form="service-form" className="portal-modalBtn portal-modalBtnPrimary">
               {editing ? 'Save changes' : 'Add service'}
             </button>
