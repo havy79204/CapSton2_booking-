@@ -38,6 +38,7 @@ function normalizeImageUrls(input) {
 }
 
 const ACTIVE_SERVICE_WHERE = `(s.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), s.Status)))) = 'active')`
+const NOT_DELETED_SERVICE_WHERE = `(s.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), s.Status)))) NOT IN ('deleted', 'delete'))`
 
 function isForeignKeyConstraintError(err) {
   if (!err) return false
@@ -189,7 +190,9 @@ async function replaceServiceImages(serviceId, imageUrls) {
 
 async function listServicesGrouped(includeInactive = false) {
   const schema = await ensureServiceCategorySchema()
-  const whereClause = includeInactive ? '1=1' : ACTIVE_SERVICE_WHERE
+  const whereClause = includeInactive
+    ? NOT_DELETED_SERVICE_WHERE
+    : `${NOT_DELETED_SERVICE_WHERE} AND ${ACTIVE_SERVICE_WHERE}`
   const totalBookingsSql = schema.bookingServicesTableExists
     ? `(
           SELECT COUNT(1)
@@ -284,7 +287,9 @@ async function createService(payload) {
 
 async function getServiceById(serviceId, includeInactive = false) {
   const schema = await ensureServiceCategorySchema()
-  const whereClause = includeInactive ? '1=1' : ACTIVE_SERVICE_WHERE
+  const whereClause = includeInactive
+    ? NOT_DELETED_SERVICE_WHERE
+    : `${NOT_DELETED_SERVICE_WHERE} AND ${ACTIVE_SERVICE_WHERE}`
   const totalBookingsSql = schema.bookingServicesTableExists
     ? `(
           SELECT COUNT(1)
@@ -418,7 +423,7 @@ async function deleteService(serviceId) {
 
   await query('UPDATE Services SET Status = @status WHERE ServiceId = @serviceId', {
     serviceId,
-    status: 'inactive',
+    status: 'deleted',
   })
   return { id: serviceId }
 }
