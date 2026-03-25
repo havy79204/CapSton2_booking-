@@ -819,8 +819,7 @@
 }
 
 .portal-apptItem:hover {
-  transform: translateY(-6px);
-  box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+  transform: none;
 }
 
 .portal-apptItem + .portal-apptItem {
@@ -2033,11 +2032,9 @@ position: relative;
   -webkit-backdrop-filter: blur(20px);
   /* viền mờ */
   border: 1px solid rgba(255, 255, 255, 0.15);
-  /* soft shadowềm */
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  /* màu chữ */
   color: white;
 }
 
@@ -2328,23 +2325,13 @@ position: relative;
   position: relative;
   padding: 24px;
   border-radius: 20px;
-
-  /* màu nền kính */
   background: rgba(54, 36, 2, 0.501);
-
-  /* hiệu ứng blur nền phía sau */
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-
-  /* viền mờ */
   border: 1px solid rgba(255, 255, 255, 0.15);
-
-  /* soft shadowềm */
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
-
-  /* màu chữ */
   color: white;
 }
 
@@ -2604,8 +2591,7 @@ position: relative;
   overflow: hidden;
 }
 .portal-ghostBtn:hover {
-  transform: translateY(-6px);
-  box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+  transform: none;
 }
 
 .portal-ghostBtn:disabled {
@@ -2698,7 +2684,7 @@ position: relative;
 } */
 
 .portal-card:hover {
-  transform: translateY(-1px);
+  transform: none;
   border-color: rgba(17, 24, 39, 0.14);
 }
 
@@ -2710,8 +2696,7 @@ position: relative;
   overflow: hidden;
 }
 .portal-cardInner:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+  transform: none;
 }
 .portal-cardInner.default {
   background: linear-gradient(
@@ -2788,19 +2773,21 @@ position: relative;
 }
 
 .portal-kpi {
+  position: relative;
   border-radius: 20px;
+  overflow: hidden;
 }
 
 .portal-kpi::before {
   content: "";
   position: absolute;
-  inset: 0;
+  left: 0;
   top: 0;
   bottom: 0;
   width: 4px;
-  border-radius: 20px;
+  border-radius: 0;
   background: var(--kpi-accent, var(--info));
-  overflow: hidden; /* QUAN TRỌNG */
+  pointer-events: none;
 }
 
 .portal-kpiRow {
@@ -3128,13 +3115,8 @@ position: relative;
 
 } */
 .portal-invItemCard:hover {
-  transform: translateY(-6px) scale(1.02);
-
+  transform: none;
   border-color: rgba(255,255,255,0.35);
-
-  box-shadow:
-    0 10px 30px rgba(0,0,0,0.3),
-    0 0 20px rgba(255,215,0,0.2);
 }
 .portal-invItemName {
   color: black;
