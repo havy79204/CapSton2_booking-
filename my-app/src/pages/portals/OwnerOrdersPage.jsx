@@ -77,6 +77,9 @@ export default function OwnerOrdersPage() {
   const [orderSaving, setOrderSaving] = useState(false)
   const [deletingOrderId, setDeletingOrderId] = useState('')
 
+  // Editable items when updating an order
+  const [editItems, setEditItems] = useState([])
+
   const [products, setProducts] = useState([])
   const [openCreateOrderModal, setOpenCreateOrderModal] = useState(false)
   const [createOrderForm, setCreateOrderForm] = useState(defaultCreateOrderForm)
@@ -150,9 +153,22 @@ export default function OwnerOrdersPage() {
     }, 0)
   }, [createItems, productsById])
 
+
   function resetCreateOrder() {
     setCreateOrderForm(defaultCreateOrderForm())
     setCreateItems([{ productId: '', quantity: '1' }])
+  }
+
+  // Edit-items helpers for Update Order modal
+  function addEditItemLine() {
+    setEditItems((prev) => [...prev, { orderItemId: '', productId: '', quantity: '1' }])
+  }
+
+  function removeEditItemLine(index) {
+    setEditItems((prev) => prev.filter((_, idx) => idx !== index))
+  }
+  function patchEditItemLine(index, patch) {
+    setEditItems((prev) => prev.map((line, idx) => (idx === index ? { ...line, ...patch } : line)))
   }
 
   function openCreateOrder() {
@@ -185,6 +201,15 @@ export default function OwnerOrdersPage() {
       paymentMethod: order.PaymentMethod || 'COD',
       status: normalizeDisplayStatus(order.Status) === '-' ? 'Pending' : normalizeDisplayStatus(order.Status),
     })
+    // initialize editable items from order items
+    setEditItems(
+      (order.Items || []).map((it) => ({
+        orderItemId: it.OrderItemId || '',
+        productId: String(it.ProductId || ''),
+        productName: it.ProductName || '',
+        quantity: String(Number(it.Quantity || 0) || 0),
+      }))
+    )
     setOpenOrderModal(true)
   }
 
@@ -194,12 +219,22 @@ export default function OwnerOrdersPage() {
 
     try {
       setOrderSaving(true)
+      // prepare items payload: include orderItemId when present so backend can update existing lines
+      const itemsPayload = (editItems || [])
+        .map((l) => ({
+          orderItemId: l.orderItemId || undefined,
+          productId: String(l.productId || '').trim(),
+          quantity: Number(l.quantity || 0) || 0,
+        }))
+        .filter((l) => l.productId && Number.isFinite(l.quantity) && l.quantity > 0)
+
       await api.put(`/api/owner/retail/orders/${orderEditing.OrderId}`, {
         customerName: orderForm.customerName,
         customerPhone: orderForm.customerPhone,
         customerAddress: orderForm.customerAddress,
         paymentMethod: orderForm.paymentMethod,
         status: orderForm.status,
+        items: itemsPayload,
       })
 
       setOpenOrderModal(false)
@@ -281,6 +316,20 @@ export default function OwnerOrdersPage() {
 
   return (
     <div className="orders-page">
+      <div className="portal-orderSummary">
+          <div className="portal-orderSummaryItem">
+            <span>Total orders</span>
+            <b>{Number(orderReport.summary?.totalOrders || 0)}</b>
+          </div>
+          <div className="portal-orderSummaryItem">
+            <span>Total items sold</span>
+            <b>{Number(orderReport.summary?.totalQuantity || 0)}</b>
+          </div>
+          <div className="portal-orderSummaryItem">
+            <span>Revenue</span>
+            <b>{formatVnd(orderReport.summary?.totalRevenue || 0)} VND</b>
+          </div>
+        </div>
       <PortalCard className="portal-invTableCard">
         <div className="portal-orderFilters">
           <label className="portal-field">
@@ -344,20 +393,6 @@ export default function OwnerOrdersPage() {
           </button>
         </div>
 
-        <div className="portal-orderSummary">
-          <div className="portal-orderSummaryItem">
-            <span>Total orders</span>
-            <b>{Number(orderReport.summary?.totalOrders || 0)}</b>
-          </div>
-          <div className="portal-orderSummaryItem">
-            <span>Total items sold</span>
-            <b>{Number(orderReport.summary?.totalQuantity || 0)}</b>
-          </div>
-          <div className="portal-orderSummaryItem">
-            <span>Revenue</span>
-            <b>{formatVnd(orderReport.summary?.totalRevenue || 0)} VND</b>
-          </div>
-        </div>
 
         {ordersError ? <div className="portal-formError" role="alert">{ordersError}</div> : null}
         {ordersLoading ? <div className="portal-pageSubtitle">Loading order report...</div> : null}
@@ -398,7 +433,7 @@ export default function OwnerOrdersPage() {
                     <td>{o.PaymentMethod || '-'}</td>
                     <td>
                       <button type="button" className="portal-ghostBtn" onClick={() => openEditOrder(o)}>
-                        Details
+                        Edit
                       </button>
                     </td>
                   </tr>
@@ -408,23 +443,22 @@ export default function OwnerOrdersPage() {
           </table>
         </div>
       </PortalCard>
-
       <PortalModal
         open={openOrderModal}
         title={orderEditing?.OrderId ? `Update order ${orderEditing.OrderCode || orderEditing.OrderId}` : 'Update order'}
         onClose={() => setOpenOrderModal(false)}
         footer={
           <>
-            <button type="button" className="portal-modalBtn" onClick={() => setOpenOrderModal(false)}>
-              Cancel
-            </button>
-            <button
+           <button
               type="button"
               className="portal-modalBtn"
               onClick={() => onDeleteOrder(orderEditing)}
               disabled={!orderEditing?.OrderId || deletingOrderId === orderEditing?.OrderId || orderSaving}
             >
-              {deletingOrderId === orderEditing?.OrderId ? 'Deleting...' : 'Delete order'}
+              {deletingOrderId === orderEditing?.OrderId ? 'Deleting...' : 'Delete'}
+            </button>
+            <button type="button" className="portal-modalBtn" onClick={() => setOpenOrderModal(false)}>
+              Cancel
             </button>
             <button type="submit" form="order-edit-form" className="portal-modalBtn portal-modalBtnPrimary" disabled={orderSaving}>
               {orderSaving ? 'Saving...' : 'Save changes'}
@@ -471,27 +505,78 @@ export default function OwnerOrdersPage() {
           </div>
 
           <PortalCard title="Product details" style={{ marginTop: 12 }}>
-            <div className="portal-tableWrap">
-              <table className="portal-table">
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>Quantity</th>
-                    <th>Unit price</th>
-                    <th>Line total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(orderEditing?.Items || []).map((item) => (
-                    <tr key={item.OrderItemId || `${item.ProductId}-${item.ProductName}`}>
-                      <td>{item.ProductName || item.ProductId}</td>
-                      <td>{Number(item.Quantity || 0)}</td>
-                      <td>{formatVnd(item.Price || 0)} VND</td>
-                      <td>{formatVnd(item.LineTotal || 0)} VND</td>
+            <div className="orders-createProductsBox">
+              <div className="portal-tableWrap orders-createProductsTableWrap">
+                <table className="portal-table orders-createProductsTable orders-editProductsTable">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th style={{ width: 90, textAlign: 'right' }}>Qty</th>
+                      <th style={{ width: 140, textAlign: 'right' }}>Unit price</th>
+                      <th style={{ width: 140, textAlign: 'right' }}>Line total</th>
+                      <th>Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {(editItems || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={5}>No products added.</td>
+                      </tr>
+                    ) : (
+                      (editItems || []).map((line, idx) => {
+                      const product = productsById.get(String(line.productId || ''))
+                      const qty = Number(line.quantity || 0)
+                      const unitPrice = Number(product?.price || 0)
+                      const lineTotal = product && Number.isFinite(qty) && qty > 0 ? qty * unitPrice : 0
+                      return (
+                        <tr key={`edit-line-${idx}`}>
+                          <td>
+                            <div className="product-select-plain">
+                              <select
+                                className="portal-select visually-hidden-select"
+                                value={line.productId}
+                                onChange={(e) => patchEditItemLine(idx, { productId: e.target.value })}
+                                aria-label="Select product"
+                              >
+                                <option value="">Select product</option>
+                                {(products || []).map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </td>
+                          <td>
+                            <input
+                              className="orders-createQtyInput"
+                              inputMode="numeric"
+                              value={line.quantity}
+                              onChange={(e) => patchEditItemLine(idx, { quantity: String(e.target.value || '').replace(/[^0-9]/g, '') })}
+                              style={{ width: 40, minWidth: 40, padding: '4px 6px', height: 30, fontSize: 14, lineHeight: '22px', borderRadius: 6, background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(48,17,3,0.06)', boxSizing: 'border-box', textAlign: 'center' }}
+                            />
+                          </td>
+                          <td data-numeric style={{ textAlign: 'right' }}>{formatVnd(unitPrice)} VND</td>
+                          <td data-numeric style={{ textAlign: 'right' }}>{formatVnd(lineTotal)} VND</td>
+                          <td>
+                            <button type="button" className="portal-ghostBtn mini danger" onClick={() => removeEditItemLine(idx)}>
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    }))}
+                  </tbody>
+                  <tfoot>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            <div className="portal-rowActions orders-createActions">
+              <button type="button" className="portal-ghostBtn" onClick={addEditItemLine}>
+                + Add product line
+              </button>
             </div>
           </PortalCard>
         </form>
@@ -562,11 +647,7 @@ export default function OwnerOrdersPage() {
               </label>
               <label className="portal-field">
                 <span className="portal-label">Order status</span>
-                <select
-                  className="portal-select"
-                  value={createOrderForm.status}
-                  onChange={(e) => setCreateOrderForm((p) => ({ ...p, status: e.target.value }))}
-                >
+                <select className="portal-select" value={createOrderForm.status} onChange={(e) => setCreateOrderForm((p) => ({ ...p, status: e.target.value }))}>
                   <option value="Pending">Pending</option>
                   <option value="Processing">Processing</option>
                   <option value="Shipping">Shipping</option>
@@ -598,33 +679,37 @@ export default function OwnerOrdersPage() {
                       return (
                         <tr key={`line-${idx}`}>
                           <td>
-                            <select
-                              className="portal-select"
-                              value={line.productId}
-                              onChange={(e) => patchCreateItemLine(idx, { productId: e.target.value })}
-                            >
-                              <option value="">Select product</option>
-                              {(products || [])
-                                .filter((p) => Number(p.stock || 0) > 0)
-                                .map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.name} - {formatVnd(p.price)} VND (stock: {p.stock})
-                                  </option>
-                                ))}
-                            </select>
+                            <div className="product-select-plain">
+                              <select
+                                className="portal-select visually-hidden-select"
+                                value={line.productId}
+                                onChange={(e) => patchCreateItemLine(idx, { productId: e.target.value })}
+                                aria-label="Select product"
+                              >
+                                <option value="">Select product</option>
+                                {(products || [])
+                                  .filter((p) => Number(p.stock || 0) > 0)
+                                  .map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.name}
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
                           </td>
                           <td>
                             <input
-                              className="portal-input orders-createQtyInput"
+                              className="orders-createQtyInput"
                               inputMode="numeric"
                               value={line.quantity}
                               onChange={(e) => patchCreateItemLine(idx, { quantity: String(e.target.value || '').replace(/[^0-9]/g, '') })}
+                              style={{ width: 40, minWidth: 40, padding: '4px 6px', height: 30, fontSize: 14, lineHeight: '22px', borderRadius: 6, background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(48,17,3,0.06)', boxSizing: 'border-box', textAlign: 'center' }}
                             />
                           </td>
-                          <td>{formatVnd(unitPrice)} VND</td>
-                          <td>{formatVnd(lineTotal)} VND</td>
+                          <td data-numeric>{formatVnd(unitPrice)} VND</td>
+                          <td data-numeric>{formatVnd(lineTotal)} VND</td>
                           <td>
-                            <button type="button" className="portal-ghostBtn danger" onClick={() => removeCreateItemLine(idx)}>
+                            <button type="button" className="portal-ghostBtn mini danger" onClick={() => removeCreateItemLine(idx)}>
                               Remove
                             </button>
                           </td>
