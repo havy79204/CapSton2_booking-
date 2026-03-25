@@ -1418,7 +1418,7 @@ export default function OwnerInventoryPage() {
             </div>
           }
         >
-          <div className="portal-kpiValue">{formatVnd(totalImportVnd)} VND</div>
+          <div className="portal-kpiValue portal-kpiValueLong">{formatVnd(totalImportVnd)} VND</div>
         </PortalCard>
 
         <PortalCard
@@ -1434,7 +1434,7 @@ export default function OwnerInventoryPage() {
             </div>
           }
         >
-          <div className="portal-kpiValue">{formatVnd(totalStockOutVnd)} VND</div>
+          <div className="portal-kpiValue portal-kpiValueLong">{formatVnd(totalStockOutVnd)} VND</div>
         </PortalCard>
 
         <PortalCard

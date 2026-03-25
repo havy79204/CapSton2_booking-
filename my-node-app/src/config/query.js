@@ -1,23 +1,13 @@
 const { getPool, sql } = require('./db')
 
 async function query(text, bind = {}) {
-  try {
-    const pool = await getPool()
-    const req = pool.request()
-    for (const [key, value] of Object.entries(bind || {})) {
-      req.input(key, value)
-    }
-    const result = await req.query(text)
-    return result
-  } catch (err) {
-    console.error('Database query error:', {
-      error: err?.message,
-      code: err?.code,
-      sqlMessage: err?.originalError?.message,
-      query: text.substring(0, 100),
-    })
-    throw err
+  const pool = await getPool()
+  const req = pool.request()
+  for (const [key, value] of Object.entries(bind || {})) {
+    req.input(key, value)
   }
+  const result = await req.query(text)
+  return result
 }
 
 function nowUtcIso() {
