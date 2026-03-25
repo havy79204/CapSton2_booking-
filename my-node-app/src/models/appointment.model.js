@@ -2,34 +2,37 @@ const { formatHm, formatVnd } = require('../utils/format')
 
 function toAppointmentListItem(row) {
   const d = row.BookingTime ? new Date(row.BookingTime) : null
-  const day = d && !Number.isNaN(d.getTime()) ? String(d.getDate()) : ''
-  const month = d && !Number.isNaN(d.getTime()) ? `Month ${d.getMonth() + 1}` : ''
-  const status = row.BookingStatus || 'Booked'
-  const iso = d && !Number.isNaN(d.getTime()) ? d.toISOString() : null
-  const date = iso ? iso.slice(0, 10) : ''
-  const timeValue = iso ? iso.slice(11, 16) : ''
+
+  let timeValue = "09:00"
+  let dateValue = ""
+
+  if (d && !isNaN(d.getTime())) {
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mm = String(d.getMinutes()).padStart(2, '0')
+    timeValue = `${hh}:${mm}`
+
+    const yyyy = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    dateValue = `${yyyy}-${month}-${day}`
+  }
 
   return {
     id: row.BookingId,
-    customerUserId: row.CustomerUserId || '',
-    serviceId: row.ServiceId || '',
-    staffId: row.StaffId || row.StaffIdResolved || '',
-    bookingTime: iso,
-    date,
-    timeValue,
-    day,
-    month,
-    customer: row.CustomerName || '',
-    customerAvatarUrl: row.CustomerAvatarUrl || '',
-    status,
-    time: formatHm(row.BookingTime),
-    duration: `${Number(row.DurationMinutes || 0)} min`,
-    staff: row.StaffName || '',
-    staffAvatarUrl: row.StaffAvatarUrl || '',
-    service: row.ServiceName || '',
-    price: formatVnd(row.Price),
-    priceVnd: Number(row.Price || 0),
+    customerUserId: row.CustomerUserId,
+    staffId: row.StaffIdResolved,
+
+    service: row.AllServices || 'No Service',
+    duration: Number(row.TotalDuration || 30),
+
+    customer: row.CustomerName || 'Khách hàng',
+    staff: row.StaffName || 'Nhân viên',
+    status: (row.BookingStatus || 'pending').toLowerCase(),
     note: row.Notes || '',
+
+    time: timeValue,
+    date: dateValue,
+    bookingTime: row.BookingTime
   }
 }
 

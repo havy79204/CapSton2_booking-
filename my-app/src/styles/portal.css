@@ -2093,7 +2093,7 @@ position: relative;
 }
 
 .portal-modal {
-  width: min(560px, 92vw); 
+  width: min(560px, 92vw);
   gap: 10px;
   padding: 11px 22px;
   border-radius: 9px;
