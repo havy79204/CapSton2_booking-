@@ -43,6 +43,43 @@ function mapOrderStatusClass(status) {
   return 'status-processing'
 }
 
+function getAccountStatus(lastVisitDateString, isDisabled) {
+  // If manually disabled, return inactive
+  if (isDisabled) {
+    return { status: 'Inactive', color: '#dc3545', icon: '✕' }
+  }
+
+  // If never visited, return inactive
+  if (!lastVisitDateString || lastVisitDateString === 'Never' || lastVisitDateString === '') {
+    return { status: 'Inactive', color: '#dc3545', icon: '✕' }
+  }
+
+  // Parse the date (assuming format like "10/3/2026" or "DD/MM/YYYY")
+  try {
+    const parts = String(lastVisitDateString).split('/')
+    if (parts.length < 3) {
+      return { status: 'Inactive', color: '#dc3545', icon: '✕' }
+    }
+    
+    const day = parseInt(parts[0], 10)
+    const month = parseInt(parts[1], 10) - 1 // JS months are 0-indexed
+    const year = parseInt(parts[2], 10)
+    
+    const lastVisitDate = new Date(year, month, day)
+    const now = new Date()
+    const daysDifference = Math.floor((now - lastVisitDate) / (1000 * 60 * 60 * 24))
+    
+    // If last visit is within 90 days, mark as active
+    if (daysDifference <= 90) {
+      return { status: 'Active', color: '#28a745', icon: '✓' }
+    } else {
+      return { status: 'Inactive', color: '#dc3545', icon: '✕' }
+    }
+  } catch {
+    return { status: 'Unknown', color: '#6c757d', icon: '?' }
+  }
+}
+
 export default function OwnerCustomerDetailPage() {
   const navigate = useNavigate()
   const { customerId } = useParams()
@@ -51,6 +88,7 @@ export default function OwnerCustomerDetailPage() {
   const [orders, setOrders] = useState([])
   const [activeBookingTab, setActiveBookingTab] = useState('All')
   const [activeOrderTab, setActiveOrderTab] = useState('All')
+  const [isAccountDisabled, setIsAccountDisabled] = useState(false)
   const [form, setForm] = useState({
     name: '',
     phone: '',
@@ -118,6 +156,10 @@ export default function OwnerCustomerDetailPage() {
 
   function openEditForm() {
     setOpenEdit(true)
+  }
+
+  function toggleAccountStatus() {
+    setIsAccountDisabled(!isAccountDisabled)
   }
 
   async function onSubmitEdit(e) {
@@ -286,9 +328,31 @@ export default function OwnerCustomerDetailPage() {
                 <div className="portal-statValue">{customer.last || 'Never'}</div>
               </div>
               <div className="portal-statCard">
-                <div className="portal-statLabel">Account Status</div>
-                <div className="portal-statValue" style={{ color: '#28a745' }}>Active</div>
+                <div className="portal-statLabel">Order Tracking</div>
+                <div className="portal-statValue">{orders.length || 0}</div>
               </div>
+            </div>
+
+            <div style={{ marginTop: 16, padding: '12px', backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <div>
+                <div style={{ fontSize: '13px', color: '#666', marginBottom: '4px' }}>Account Status</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '20px', color: getAccountStatus(customer.last, isAccountDisabled).color }}>
+                    {getAccountStatus(customer.last, isAccountDisabled).icon}
+                  </span>
+                  <span style={{ fontSize: '16px', fontWeight: '600', color: getAccountStatus(customer.last, isAccountDisabled).color }}>
+                    {getAccountStatus(customer.last, isAccountDisabled).status}
+                  </span>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                className="portal-ghostBtn"
+                onClick={toggleAccountStatus}
+                style={{ padding: '8px 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
+              >
+                {isAccountDisabled ? 'Reactivate' : 'Disable'}
+              </button>
             </div>
           </div>
         </div>
