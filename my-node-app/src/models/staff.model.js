@@ -1,5 +1,22 @@
 const STAFF_HOURLY_RATE_VND = 25000
 
+function formatDateOnly(value) {
+  if (!value) return null
+
+  if (typeof value === 'string') {
+    const dateOnly = value.match(/^(\d{4}-\d{2}-\d{2})$/)
+    if (dateOnly) return dateOnly[1]
+  }
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+
+  const yyyy = parsed.getFullYear()
+  const mm = String(parsed.getMonth() + 1).padStart(2, '0')
+  const dd = String(parsed.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
 function toStaffListItem(row) {
   const totalBookings = Number(row.TotalBookings || 0)
   const workingHours = Number(row.WorkingHours || 0)
@@ -17,7 +34,7 @@ function toStaffListItem(row) {
     email: row.Email || '',
     avatarUrl: row.AvatarUrl || '',
     address: row.Address || '',
-    hireDate: row.HireDate || null,
+    hireDate: formatDateOnly(row.HireDate),
     roleKey: String(row.RoleKey || '').trim(),
     roleName: row.RoleName || '',
     specialty: row.Specialty || '',
@@ -31,5 +48,6 @@ function toStaffListItem(row) {
 }
 
 module.exports = {
+  formatDateOnly,
   toStaffListItem,
 }

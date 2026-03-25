@@ -1,12 +1,181 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
 import '../../styles/staff.css'
 import '../../styles/staff-specialty.css'
 import {
+  IconCalendar,
+  IconDollar,
   IconSearch,
+  IconUsers,
 } from '../../components/Layout portal/PortalIcons.jsx'
 import { api, resolveApiImageUrl } from '../../lib/api.js'
+
+function emitPortalToast({ type, message, timeoutMs }) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(
+    new CustomEvent('portal:toast', {
+      detail: { type, message, timeoutMs },
+    })
+  )
+}
+
+const ADD_STAFF_NAME_MAX_LENGTH = 150
+const ADD_STAFF_PHONE_MAX_LENGTH = 15
+const ADD_STAFF_EMAIL_MAX_LENGTH = 254
+const ADD_STAFF_ADDRESS_MAX_LENGTH = 400
+const ADD_STAFF_NAME_REGEX = /^[\p{L}][\p{L}\p{M}\s.'-]*$/u
+const ADD_STAFF_PHONE_REGEX = /^0(3|5|7|8|9)\d{8}$/
+const ADD_STAFF_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const STAFF_PERIOD_OPTIONS = new Set(['all', 'day', 'week', 'month', 'year'])
+const STAFF_SORT_OPTIONS = new Set([
+  'name_asc',
+  'name_desc',
+  'hours_asc',
+  'hours_desc',
+  'bookings_asc',
+  'bookings_desc',
+  'salary_asc',
+  'salary_desc',
+  'tip_asc',
+  'tip_desc',
+])
+
+function normalizeInputText(value) {
+  const cleaned = Array.from(String(value || ''))
+    .filter((ch) => ch >= ' ' && ch !== '\u007F')
+    .join('')
+  return cleaned.replace(/\s+/g, ' ').trim()
+}
+
+function sanitizeInputText(value) {
+  return normalizeInputText(value).replace(/[<>]/g, '')
+}
+
+function normalizeInputPhone(value) {
+  const raw = String(value || '').replace(/[^\d+]/g, '').trim()
+  if (!raw) return ''
+
+  if (raw.startsWith('+84')) {
+    return `0${raw.slice(3).replace(/\D/g, '')}`
+  }
+
+  const digits = raw.replace(/\D/g, '')
+  if (digits.startsWith('84') && digits.length === 11) {
+    return `0${digits.slice(2)}`
+  }
+
+  return digits
+}
+
+function isIsoDateString(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim())
+}
+
+function isBeforeToday(value) {
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return false
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+  return date.getTime() < now.getTime()
+}
+
+function validateAddStaffForm(formState) {
+  const errors = {}
+
+  const normalizedName = sanitizeInputText(formState?.name)
+  const normalizedPhone = normalizeInputPhone(formState?.phone)
+  const normalizedEmail = normalizeInputText(formState?.email).toLowerCase()
+  const normalizedAddress = sanitizeInputText(formState?.address)
+  const hireDate = String(formState?.hireDate || '').trim()
+
+  if (!normalizedName) {
+    errors.name = 'Full name is required.'
+  } else if (normalizedName.length > ADD_STAFF_NAME_MAX_LENGTH) {
+    errors.name = `Full name must be at most ${ADD_STAFF_NAME_MAX_LENGTH} characters.`
+  } else if (!ADD_STAFF_NAME_REGEX.test(normalizedName)) {
+    errors.name = 'Full name contains invalid characters.'
+  }
+
+  if (!normalizedPhone) {
+    errors.phone = 'Phone number is required.'
+  } else if (normalizedPhone.length > ADD_STAFF_PHONE_MAX_LENGTH) {
+    errors.phone = `Phone number must be at most ${ADD_STAFF_PHONE_MAX_LENGTH} characters.`
+  } else if (!ADD_STAFF_PHONE_REGEX.test(normalizedPhone)) {
+    errors.phone = 'Phone number format is invalid.'
+  }
+
+  if (!normalizedEmail) {
+    errors.email = 'Email is required.'
+  } else if (normalizedEmail.length > ADD_STAFF_EMAIL_MAX_LENGTH) {
+    errors.email = `Email must be at most ${ADD_STAFF_EMAIL_MAX_LENGTH} characters.`
+  } else if (!ADD_STAFF_EMAIL_REGEX.test(normalizedEmail)) {
+    errors.email = 'Email format is invalid.'
+  }
+
+  if (!hireDate) {
+    errors.hireDate = 'Hire date is required.'
+  } else if (!isIsoDateString(hireDate)) {
+    errors.hireDate = 'Hire date format is invalid.'
+  } else if (isBeforeToday(hireDate)) {
+    errors.hireDate = 'Hire date cannot be earlier than today.'
+  }
+
+  if (!normalizedAddress) {
+    errors.address = 'Address is required.'
+  } else if (normalizedAddress.length > ADD_STAFF_ADDRESS_MAX_LENGTH) {
+    errors.address = `Address must be at most ${ADD_STAFF_ADDRESS_MAX_LENGTH} characters.`
+  }
+
+  return {
+    errors,
+    payload: {
+      name: normalizedName,
+      phone: normalizedPhone,
+      email: normalizedEmail,
+      address: normalizedAddress,
+      hireDate,
+      status: 'Active',
+      specialtyCategoryIds: Array.isArray(formState?.specialtyCategoryIds)
+        ? formState.specialtyCategoryIds
+        : [],
+    },
+  }
+}
+
+function validateDetailStaffForm(formState) {
+  const errors = {}
+
+  const normalizedName = sanitizeInputText(formState?.name)
+  const normalizedPhone = normalizeInputPhone(formState?.phone)
+  const normalizedEmail = normalizeInputText(formState?.email).toLowerCase()
+  const normalizedAddress = sanitizeInputText(formState?.address)
+  const hireDate = String(formState?.hireDate || '').trim()
+
+  if (!normalizedAddress) {
+    errors.address = 'Address is required.'
+  } else if (normalizedAddress.length > ADD_STAFF_ADDRESS_MAX_LENGTH) {
+    errors.address = `Address must be at most ${ADD_STAFF_ADDRESS_MAX_LENGTH} characters.`
+  }
+
+  if (!hireDate) {
+    errors.hireDate = 'Hire date is required.'
+  } else if (!isIsoDateString(hireDate)) {
+    errors.hireDate = 'Hire date format is invalid.'
+  }
+
+  return {
+    errors,
+    payload: {
+      name: normalizedName,
+      phone: normalizedPhone,
+      email: normalizedEmail,
+      address: normalizedAddress,
+      hireDate,
+    },
+  }
+}
 
 function initialsOf(name) {
   const parts = String(name).trim().split(/\s+/).filter(Boolean)
@@ -50,7 +219,7 @@ function todayDateInputValue() {
 function formatDateInputValue(value) {
   if (!value) return ''
   const text = String(value)
-  const isoDateMatch = text.match(/^(\d{4}-\d{2}-\d{2})/)
+  const isoDateMatch = text.match(/^(\d{4}-\d{2}-\d{2})$/)
   if (isoDateMatch) return isoDateMatch[1]
 
   const parsed = new Date(text)
@@ -62,19 +231,58 @@ function formatDateInputValue(value) {
 }
 
 export default function OwnerStaffPage() {
-  const PAGE_SIZE = 8
+  const LOAD_BATCH_SIZE = 10
+  const STAFF_FETCH_SIZE = 1000
+  const navigate = useNavigate()
+  const location = useLocation()
+  const closingDetailRef = useRef(false)
+  const initialUrlStateRef = useRef(null)
+
+  const parseListStateFromSearch = useCallback((search) => {
+    const params = new URLSearchParams(search)
+    const keyword = String(params.get('keyword') || '').trim()
+    const periodRaw = String(params.get('period') || '').trim().toLowerCase()
+    const period = STAFF_PERIOD_OPTIONS.has(periodRaw) ? periodRaw : 'all'
+
+    const dateRaw = String(params.get('date') || '').trim()
+    const date = isIsoDateString(dateRaw) ? dateRaw : todayDateInputValue()
+
+    const sortByRaw = String(params.get('sortBy') || '').trim()
+    const sortByValue = STAFF_SORT_OPTIONS.has(sortByRaw) ? sortByRaw : 'name_asc'
+
+    const visibleRaw = Number.parseInt(String(params.get('visible') || ''), 10)
+    const visibleValue = Number.isFinite(visibleRaw) && visibleRaw > 0
+      ? Math.max(LOAD_BATCH_SIZE, visibleRaw)
+      : LOAD_BATCH_SIZE
+
+    return {
+      keyword,
+      period,
+      date,
+      sortBy: sortByValue,
+      visibleCount: visibleValue,
+    }
+  }, [LOAD_BATCH_SIZE])
+
+  if (!initialUrlStateRef.current) {
+    initialUrlStateRef.current = parseListStateFromSearch(location.search)
+  }
   const [open, setOpen] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailMode, setDetailMode] = useState('view')
   const [selectedStaff, setSelectedStaff] = useState(null)
   const [staffMembers, setStaffMembers] = useState([])
+  const [staffSummary, setStaffSummary] = useState({ totalStaff: 0, totalBookings: 0, totalSalary: 0 })
+  const [staffLoading, setStaffLoading] = useState(false)
+  const [staffError, setStaffError] = useState('')
   const [specialtyCategories, setSpecialtyCategories] = useState([])
-  const [query, setQuery] = useState('')
-  const [timePeriod, setTimePeriod] = useState('all')
-  const [selectedDate, setSelectedDate] = useState(todayDateInputValue)
-  const [sortBy, setSortBy] = useState('name_asc')
-  const [page, setPage] = useState(1)
+  const [query, setQuery] = useState(() => initialUrlStateRef.current?.keyword || '')
+  const [debouncedQuery, setDebouncedQuery] = useState(() => initialUrlStateRef.current?.keyword || '')
+  const [timePeriod, setTimePeriod] = useState(() => initialUrlStateRef.current?.period || 'all')
+  const [selectedDate, setSelectedDate] = useState(() => initialUrlStateRef.current?.date || todayDateInputValue())
+  const [sortBy, setSortBy] = useState(() => initialUrlStateRef.current?.sortBy || 'name_asc')
+  const [visibleCount, setVisibleCount] = useState(() => initialUrlStateRef.current?.visibleCount || LOAD_BATCH_SIZE)
 
   function getSortDirection(field) {
     if (sortBy === `${field}_asc`) return 'asc'
@@ -84,7 +292,7 @@ export default function OwnerStaffPage() {
 
   function setSortField(field, direction) {
     setSortBy(`${field}_${direction}`)
-    setPage(1)
+    setVisibleCount(LOAD_BATCH_SIZE)
   }
 
   function toggleSortField(field) {
@@ -114,9 +322,10 @@ export default function OwnerStaffPage() {
     email: '',
     address: '',
     hireDate: todayDateInputValue(),
-    status: 'Active',
     specialtyCategoryIds: [],
   })
+  const [formErrors, setFormErrors] = useState({})
+  const [, setFormSubmitError] = useState('')
 
   const [detailForm, setDetailForm] = useState({
     name: '',
@@ -128,26 +337,93 @@ export default function OwnerStaffPage() {
     status: 'Active',
     specialtyCategoryIds: [],
   })
+  const [detailErrors, setDetailErrors] = useState({})
 
-  async function fetchStaffMembers() {
-    const params = new URLSearchParams({ period: timePeriod, date: selectedDate })
-    const staffData = await api.get(`/api/owner/staff?${params.toString()}`)
-    return Array.isArray(staffData) ? staffData : []
-  }
+  const fetchStaffMembers = useCallback(async (signal) => {
+    const params = new URLSearchParams({
+      period: timePeriod,
+      date: selectedDate,
+      keyword: debouncedQuery.trim(),
+      page: '1',
+      pageSize: String(STAFF_FETCH_SIZE),
+      sortBy,
+    })
+    const staffData = await api.get(`/api/owner/staff?${params.toString()}`, { signal })
+    return staffData && typeof staffData === 'object' ? staffData : {}
+  }, [timePeriod, selectedDate, debouncedQuery, sortBy, STAFF_FETCH_SIZE])
 
-  async function loadStaffMembers() {
-    const staffData = await fetchStaffMembers()
-    setStaffMembers(staffData)
-  }
+  const loadStaffMembers = useCallback(async (signal) => {
+    setStaffLoading(true)
+    setStaffError('')
+
+    try {
+      const payload = await fetchStaffMembers(signal)
+      setStaffMembers(Array.isArray(payload.items) ? payload.items : [])
+      setStaffSummary(payload.summary && typeof payload.summary === 'object'
+        ? {
+          totalStaff: Number(payload.summary.totalStaff || 0),
+          totalBookings: Number(payload.summary.totalBookings || 0),
+          totalSalary: Number(payload.summary.totalSalary || 0),
+        }
+        : { totalStaff: 0, totalBookings: 0, totalSalary: 0 })
+    } catch (err) {
+      if (err?.name === 'AbortError') return
+      console.error(err)
+      setStaffError(err?.message || 'Unable to load staff')
+      setStaffMembers([])
+      setStaffSummary({ totalStaff: 0, totalBookings: 0, totalSalary: 0 })
+    } finally {
+      setStaffLoading(false)
+    }
+  }, [fetchStaffMembers])
 
   useEffect(() => {
-    const params = new URLSearchParams({ period: timePeriod, date: selectedDate })
-    api.get(`/api/owner/staff?${params.toString()}`)
-      .then((staffData) => {
-        setStaffMembers(Array.isArray(staffData) ? staffData : [])
-      })
-      .catch((err) => console.error(err))
-  }, [timePeriod, selectedDate])
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  useEffect(() => {
+    const next = parseListStateFromSearch(location.search)
+    setQuery((prev) => (prev === next.keyword ? prev : next.keyword))
+    setDebouncedQuery((prev) => (prev === next.keyword ? prev : next.keyword))
+    setTimePeriod((prev) => (prev === next.period ? prev : next.period))
+    setSelectedDate((prev) => (prev === next.date ? prev : next.date))
+    setSortBy((prev) => (prev === next.sortBy ? prev : next.sortBy))
+    setVisibleCount((prev) => (prev === next.visibleCount ? prev : next.visibleCount))
+  }, [location.search, parseListStateFromSearch])
+
+  useEffect(() => {
+    const currentParams = new URLSearchParams(location.search)
+    const currentStaffId = String(currentParams.get('staffId') || '').trim()
+
+    const nextParams = new URLSearchParams()
+    nextParams.set('keyword', debouncedQuery.trim())
+    nextParams.set('period', timePeriod)
+    nextParams.set('date', selectedDate)
+    nextParams.set('sortBy', sortBy)
+    nextParams.set('visible', String(Math.max(LOAD_BATCH_SIZE, Number(visibleCount || LOAD_BATCH_SIZE))))
+    if (currentStaffId) nextParams.set('staffId', currentStaffId)
+
+    const currentSearch = currentParams.toString()
+    const nextSearch = nextParams.toString()
+    if (currentSearch === nextSearch) return
+
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextSearch ? `?${nextSearch}` : '',
+      },
+      { replace: true }
+    )
+  }, [debouncedQuery, timePeriod, selectedDate, sortBy, visibleCount, LOAD_BATCH_SIZE, location.pathname, location.search, navigate])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    loadStaffMembers(controller.signal)
+    return () => controller.abort()
+  }, [loadStaffMembers])
 
   useEffect(() => {
     api.get('/api/owner/staff/skill-categories')
@@ -165,20 +441,73 @@ export default function OwnerStaffPage() {
 
   function close() {
     setOpen(false)
+    setFormErrors({})
+    setFormSubmitError('')
   }
 
-  function closeDetail() {
+  function openAddModal() {
+    setForm({
+      name: '',
+      phone: '',
+      email: '',
+      address: '',
+      hireDate: todayDateInputValue(),
+      specialtyCategoryIds: [],
+    })
+    setFormErrors({})
+    setFormSubmitError('')
+    setOpen(true)
+  }
+
+  function updateAddFormField(field, value) {
+    setForm((prev) => ({ ...prev, [field]: value }))
+    setFormErrors((prev) => {
+      if (!prev[field]) return prev
+      const next = { ...prev }
+      delete next[field]
+      return next
+    })
+    setFormSubmitError('')
+  }
+
+  const setDetailStaffIdInUrl = useCallback((staffId) => {
+    const params = new URLSearchParams(location.search)
+    const normalizedId = String(staffId || '').trim()
+
+    if (normalizedId) {
+      params.set('staffId', normalizedId)
+    } else {
+      params.delete('staffId')
+    }
+
+    const nextSearch = params.toString()
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextSearch ? `?${nextSearch}` : '',
+      },
+      { replace: true }
+    )
+  }, [location.pathname, location.search, navigate])
+
+  const closeDetail = useCallback(() => {
+    closingDetailRef.current = true
+    setDetailStaffIdInUrl('')
     setDetailOpen(false)
     setDetailLoading(false)
     setSelectedStaff(null)
     setDetailMode('view')
-  }
+    setDetailErrors({})
+  }, [setDetailStaffIdInUrl])
 
-  async function openDetail(member, mode = 'view') {
+  const openDetail = useCallback(async (member, mode = 'view') => {
     if (!member?.id) return
+    setDetailStaffIdInUrl(member.id)
     setDetailLoading(true)
     setDetailMode(mode)
     setDetailOpen(true)
+    setDetailErrors({})
+
 
     try {
       const detail = await api.get(`/api/owner/staff/${member.id}`)
@@ -214,7 +543,25 @@ export default function OwnerStaffPage() {
     } finally {
       setDetailLoading(false)
     }
-  }
+  }, [setDetailStaffIdInUrl])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const staffIdFromUrl = String(params.get('staffId') || '').trim()
+    if (!staffIdFromUrl) {
+      closingDetailRef.current = false
+      return
+    }
+
+    if (closingDetailRef.current) return
+
+    const currentSelectedId = String(selectedStaff?.id || '').trim()
+    if (detailOpen && currentSelectedId === staffIdFromUrl) return
+    if (detailLoading) return
+
+    const staffFromList = staffMembers.find((x) => String(x?.id || '').trim() === staffIdFromUrl)
+    openDetail(staffFromList || { id: staffIdFromUrl }, 'view')
+  }, [location.search, detailOpen, detailLoading, selectedStaff?.id, staffMembers, openDetail])
 
   function toggleCategoryInForm(categoryId) {
     setForm((prev) => {
@@ -241,6 +588,16 @@ export default function OwnerStaffPage() {
           ? prev.specialtyCategoryIds.filter((x) => x !== id)
           : [...prev.specialtyCategoryIds, id],
       }
+    })
+  }
+
+  function updateDetailFormField(field, value) {
+    setDetailForm((prev) => ({ ...prev, [field]: value }))
+    setDetailErrors((prev) => {
+      if (!prev[field]) return prev
+      const next = { ...prev }
+      delete next[field]
+      return next
     })
   }
 
@@ -277,18 +634,17 @@ export default function OwnerStaffPage() {
 
   async function onSubmit(e) {
     e.preventDefault()
-    if (!form.name) return
+    const { errors, payload } = validateAddStaffForm(form)
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors)
+      setFormSubmitError('')
+      return
+    }
 
     try {
-      await api.post('/api/owner/staff', {
-        name: form.name,
-        phone: form.phone,
-        email: form.email,
-        address: form.address,
-        hireDate: form.hireDate,
-        status: form.status,
-        specialtyCategoryIds: form.specialtyCategoryIds,
-      })
+      setFormErrors({})
+      setFormSubmitError('')
+      await api.post('/api/owner/staff', payload)
 
       await loadStaffMembers()
 
@@ -298,22 +654,26 @@ export default function OwnerStaffPage() {
         email: '',
         address: '',
         hireDate: todayDateInputValue(),
-        status: 'Active',
         specialtyCategoryIds: [],
       })
+      setFormErrors({})
+      setFormSubmitError('')
+      emitPortalToast({ type: 'success', message: 'Staff added successfully' })
       close()
     } catch (err) {
       console.error(err)
+      setFormSubmitError(err?.message || 'Unable to add staff. Please check your input and try again.')
     }
   }
 
   async function onDeleteStaff(member, options = {}) {
     if (!member?.id) return
-    const accepted = window.confirm(`Delete staff "${member.name || member.id}"?`)
+    const accepted = window.confirm(`Are you sure you want to delete employee "${member.name || member.id}"?`)
     if (!accepted) return
     try {
       await api.delete(`/api/owner/staff/${member.id}`)
       await loadStaffMembers()
+      emitPortalToast({ type: 'success', message: 'Employee removal successful.' })
       if (options.closeAfterDelete) {
         closeDetail()
       }
@@ -325,88 +685,54 @@ export default function OwnerStaffPage() {
   async function onDetailSubmit(e) {
     e.preventDefault()
     if (!selectedStaff?.id || detailMode !== 'edit') return
-    if (!detailForm.name) return
+
+    const { errors, payload } = validateDetailStaffForm(detailForm)
+    if (Object.keys(errors).length > 0) {
+      setDetailErrors(errors)
+      return
+    }
 
     try {
-      await api.put(`/api/owner/staff/${selectedStaff.id}`, {
-        name: detailForm.name,
-        phone: detailForm.phone,
-        email: detailForm.email,
-        address: detailForm.address,
-        hireDate: detailForm.hireDate,
-        specialtyCategoryIds: detailForm.specialtyCategoryIds,
-      })
+      setDetailErrors({})
+      const sourceName = sanitizeInputText(selectedStaff?.name)
+      const sourcePhone = normalizeInputPhone(selectedStaff?.phone)
+      const sourceEmail = normalizeInputText(selectedStaff?.email).toLowerCase()
+      const sourceAddress = sanitizeInputText(selectedStaff?.address)
+      const sourceHireDate = formatDateInputValue(selectedStaff?.hireDate)
+      const sourceSpecialtyIds = Array.isArray(selectedStaff?.specialtyCategoryIds)
+        ? selectedStaff.specialtyCategoryIds.map((x) => String(x)).filter(Boolean).sort()
+        : []
+      const currentSpecialtyIds = Array.isArray(detailForm.specialtyCategoryIds)
+        ? detailForm.specialtyCategoryIds.map((x) => String(x)).filter(Boolean).sort()
+        : []
+
+      const updatePayload = {}
+      if (payload.name !== sourceName) updatePayload.name = payload.name
+      if (payload.phone !== sourcePhone) updatePayload.phone = payload.phone
+      if (payload.email !== sourceEmail) updatePayload.email = payload.email
+      if (payload.address !== sourceAddress) updatePayload.address = payload.address
+      if (payload.hireDate !== sourceHireDate) updatePayload.hireDate = payload.hireDate
+      if (JSON.stringify(currentSpecialtyIds) !== JSON.stringify(sourceSpecialtyIds)) {
+        updatePayload.specialtyCategoryIds = detailForm.specialtyCategoryIds
+      }
+
+      if (Object.keys(updatePayload).length === 0) {
+        setDetailMode('view')
+        return
+      }
+
+      await api.put(`/api/owner/staff/${selectedStaff.id}`, updatePayload)
 
       await loadStaffMembers()
+  emitPortalToast({ type: 'success', message: 'Staff updated successfully' })
       await openDetail({ id: selectedStaff.id }, 'view')
     } catch (err) {
       console.error(err)
     }
   }
 
-  const filteredAndSortedStaff = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const filtered = staffMembers.filter((m) => {
-      const status = String(m?.status || '').trim().toLowerCase()
-      if (status === 'inactive') return false
-
-      const name = String(m?.name || '').toLowerCase()
-      const phone = String(m?.phone || '').toLowerCase()
-      const email = String(m?.email || '').toLowerCase()
-      const specialty = String(m?.specialty || '').toLowerCase()
-      const roleName = String(m?.roleName || m?.roleKey || '').toLowerCase()
-      const matchesText = (
-        name.includes(q) ||
-        phone.includes(q) ||
-        email.includes(q) ||
-        specialty.includes(q) ||
-        roleName.includes(q)
-      )
-
-      return matchesText
-    })
-
-    const sorted = [...filtered]
-    sorted.sort((a, b) => {
-      if (sortBy === 'name_desc') return String(b.name || '').localeCompare(String(a.name || ''))
-      if (sortBy === 'bookings_desc') return Number(b.totalBookings || 0) - Number(a.totalBookings || 0)
-      if (sortBy === 'bookings_asc') return Number(a.totalBookings || 0) - Number(b.totalBookings || 0)
-      if (sortBy === 'salary_desc') return Number(b.totalSalary || 0) - Number(a.totalSalary || 0)
-      if (sortBy === 'salary_asc') return Number(a.totalSalary || 0) - Number(b.totalSalary || 0)
-      if (sortBy === 'tip_desc') return Number(b.totalTip || 0) - Number(a.totalTip || 0)
-      if (sortBy === 'tip_asc') return Number(a.totalTip || 0) - Number(b.totalTip || 0)
-      if (sortBy === 'hours_desc') return Number(b.workingHours || 0) - Number(a.workingHours || 0)
-      if (sortBy === 'hours_asc') return Number(a.workingHours || 0) - Number(b.workingHours || 0)
-      return String(a.name || '').localeCompare(String(b.name || ''))
-    })
-
-    return sorted
-  }, [staffMembers, query, sortBy])
-
-  const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(filteredAndSortedStaff.length / PAGE_SIZE)),
-    [filteredAndSortedStaff.length]
-  )
-
-  const currentPage = Math.min(page, totalPages)
-
-  const pagedStaff = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE
-    return filteredAndSortedStaff.slice(start, start + PAGE_SIZE)
-  }, [filteredAndSortedStaff, currentPage])
-
-  const dashboard = useMemo(() => {
-    const total = staffMembers.length
-
-    const totalBookings = staffMembers.reduce((sum, x) => sum + Number(x?.totalBookings || 0), 0)
-    const totalSalary = staffMembers.reduce((sum, x) => sum + Number(x?.totalSalary || 0), 0)
-
-    return {
-      total,
-      totalBookings,
-      totalSalary,
-    }
-  }, [staffMembers])
+  const visibleStaffMembers = staffMembers.slice(0, Math.max(LOAD_BATCH_SIZE, visibleCount))
+  const hasMoreStaff = visibleStaffMembers.length < staffMembers.length
 
   const detailStatusValue = String(detailForm.status || 'Active')
   const detailStatusClassName = detailStatusValue.toLowerCase() === 'inactive'
@@ -417,13 +743,28 @@ export default function OwnerStaffPage() {
     <div className="staff-page">
       <div className="staff-dashboardGrid">
         <PortalCard className="staff-dashboardCard" title="Total Staff">
-          <div className="staff-dashboardValue">{dashboard.total}</div>
+          <div className="staff-dashboardStatRow">
+            <div className="staff-dashboardValue">{Number(staffSummary.totalStaff || 0)}</div>
+            <div className="staff-dashboardIcon" aria-hidden="true">
+              <IconUsers />
+            </div>
+          </div>
         </PortalCard>
         <PortalCard className="staff-dashboardCard" title="Total Booking">
-          <div className="staff-dashboardValue">{dashboard.totalBookings}</div>
+          <div className="staff-dashboardStatRow">
+            <div className="staff-dashboardValue">{Number(staffSummary.totalBookings || 0)}</div>
+            <div className="staff-dashboardIcon" aria-hidden="true">
+              <IconCalendar />
+            </div>
+          </div>
         </PortalCard>
         <PortalCard className="staff-dashboardCard" title="Total Salary">
-          <div className="staff-dashboardValue">{formatMoney(dashboard.totalSalary)}</div>
+          <div className="staff-dashboardStatRow">
+            <div className="staff-dashboardValue">{formatMoney(staffSummary.totalSalary)}</div>
+            <div className="staff-dashboardIcon" aria-hidden="true">
+              <IconDollar />
+            </div>
+          </div>
         </PortalCard>
       </div>
 
@@ -454,8 +795,9 @@ export default function OwnerStaffPage() {
                   className="portal-input"
                   placeholder="Enter full name"
                   value={form.name}
-                  onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                  onChange={(e) => updateAddFormField('name', e.target.value)}
                 />
+                {formErrors.name ? <span className="staff-fieldErrorText">{formErrors.name}</span> : null}
               </label>
 
               <label className="portal-field">
@@ -464,8 +806,9 @@ export default function OwnerStaffPage() {
                   className="portal-input"
                   placeholder="Enter phone number"
                   value={form.phone}
-                  onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
+                  onChange={(e) => updateAddFormField('phone', e.target.value)}
                 />
+                {formErrors.phone ? <span className="staff-fieldErrorText">{formErrors.phone}</span> : null}
               </label>
 
               <label className="portal-field">
@@ -474,8 +817,9 @@ export default function OwnerStaffPage() {
                   className="portal-input"
                   placeholder="Enter email"
                   value={form.email}
-                  onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                  onChange={(e) => updateAddFormField('email', e.target.value)}
                 />
+                {formErrors.email ? <span className="staff-fieldErrorText">{formErrors.email}</span> : null}
               </label>
 
               <label className="portal-field">
@@ -484,21 +828,11 @@ export default function OwnerStaffPage() {
                   type="date"
                   className="portal-input"
                   value={form.hireDate}
-                  onChange={(e) => setForm((p) => ({ ...p, hireDate: e.target.value }))}
+                  onChange={(e) => updateAddFormField('hireDate', e.target.value)}
                 />
+                {formErrors.hireDate ? <span className="staff-fieldErrorText">{formErrors.hireDate}</span> : null}
               </label>
 
-              <label className="portal-field staff-detailFieldFull">
-                <span className="portal-label">Status</span>
-                <select
-                  className="portal-select"
-                  value={form.status}
-                  onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
-                >
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
-              </label>
             </div>
           </div>
 
@@ -510,8 +844,9 @@ export default function OwnerStaffPage() {
                 className="portal-input staff-detailTextarea"
                 placeholder="Enter address"
                 value={form.address}
-                onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
+                onChange={(e) => updateAddFormField('address', e.target.value)}
               />
+              {formErrors.address ? <span className="staff-fieldErrorText">{formErrors.address}</span> : null}
             </label>
           </div>
 
@@ -554,7 +889,12 @@ export default function OwnerStaffPage() {
               <button
                 type="button"
                 className="portal-modalBtn portal-modalBtnPrimary"
-                onClick={() => setDetailMode('edit')}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setDetailMode('edit')
+                  setDetailErrors({})
+                }}
                 disabled={detailLoading}
               >
                 Edit
@@ -596,9 +936,10 @@ export default function OwnerStaffPage() {
                   <input
                     className="portal-input"
                     value={detailForm.name}
-                    disabled={detailMode !== 'edit'}
-                    onChange={(e) => setDetailForm((p) => ({ ...p, name: e.target.value }))}
+                    readOnly={detailMode !== 'edit'}
+                    onChange={(e) => updateDetailFormField('name', e.target.value)}
                   />
+                  {detailErrors.name ? <span className="staff-fieldErrorText">{detailErrors.name}</span> : null}
                 </label>
 
                 <label className="portal-field">
@@ -606,9 +947,10 @@ export default function OwnerStaffPage() {
                   <input
                     className="portal-input"
                     value={detailForm.phone}
-                    disabled={detailMode !== 'edit'}
-                    onChange={(e) => setDetailForm((p) => ({ ...p, phone: e.target.value }))}
+                    readOnly={detailMode !== 'edit'}
+                    onChange={(e) => updateDetailFormField('phone', e.target.value)}
                   />
+                  {detailErrors.phone ? <span className="staff-fieldErrorText">{detailErrors.phone}</span> : null}
                 </label>
 
                 <label className="portal-field">
@@ -616,9 +958,10 @@ export default function OwnerStaffPage() {
                   <input
                     className="portal-input"
                     value={detailForm.email}
-                    disabled={detailMode !== 'edit'}
-                    onChange={(e) => setDetailForm((p) => ({ ...p, email: e.target.value }))}
+                    readOnly={detailMode !== 'edit'}
+                    onChange={(e) => updateDetailFormField('email', e.target.value)}
                   />
+                  {detailErrors.email ? <span className="staff-fieldErrorText">{detailErrors.email}</span> : null}
                 </label>
 
                 <label className="portal-field">
@@ -627,9 +970,10 @@ export default function OwnerStaffPage() {
                     type="date"
                     className="portal-input"
                     value={detailForm.hireDate}
-                    disabled={detailMode !== 'edit'}
-                    onChange={(e) => setDetailForm((p) => ({ ...p, hireDate: e.target.value }))}
+                    readOnly={detailMode !== 'edit'}
+                    onChange={(e) => updateDetailFormField('hireDate', e.target.value)}
                   />
+                  {detailErrors.hireDate ? <span className="staff-fieldErrorText">{detailErrors.hireDate}</span> : null}
                 </label>
               </div>
             </div>
@@ -641,9 +985,10 @@ export default function OwnerStaffPage() {
                 <textarea
                   className="portal-input staff-detailTextarea"
                   value={detailForm.address}
-                  disabled={detailMode !== 'edit'}
-                  onChange={(e) => setDetailForm((p) => ({ ...p, address: e.target.value }))}
+                  readOnly={detailMode !== 'edit'}
+                  onChange={(e) => updateDetailFormField('address', e.target.value)}
                 />
+                {detailErrors.address ? <span className="staff-fieldErrorText">{detailErrors.address}</span> : null}
               </label>
             </div>
 
@@ -677,7 +1022,7 @@ export default function OwnerStaffPage() {
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value)
-                setPage(1)
+                setVisibleCount(LOAD_BATCH_SIZE)
               }}
             />
           </div>
@@ -690,7 +1035,7 @@ export default function OwnerStaffPage() {
             value={timePeriod}
             onChange={(e) => {
               setTimePeriod(e.target.value)
-              setPage(1)
+              setVisibleCount(LOAD_BATCH_SIZE)
             }}
           >
             <option value="all">All</option>
@@ -709,13 +1054,14 @@ export default function OwnerStaffPage() {
             value={selectedDate}
             onChange={(e) => {
               setSelectedDate(e.target.value || todayDateInputValue())
-              setPage(1)
+              setTimePeriod('day')
+              setVisibleCount(LOAD_BATCH_SIZE)
             }}
           />
         </label>
 
         <div className="staff-filterAction">
-          <button type="button" className="portal-primaryBtn staff-filterAddBtn" onClick={() => setOpen(true)}>
+          <button type="button" className="portal-primaryBtn staff-filterAddBtn" onClick={openAddModal}>
             <span className="portal-primaryBtnIcon staff-filterAddBtnIcon" aria-hidden="true">
               +
             </span>
@@ -725,6 +1071,8 @@ export default function OwnerStaffPage() {
       </div>
 
       <PortalCard className="portal-invTableCard" title="Staff Table">
+        {staffError ? <div className="portal-formError" role="alert">{staffError}</div> : null}
+        {staffLoading ? <div className="portal-pageSubtitle">Loading staff...</div> : null}
         <div className="portal-tableWrap">
           <table className="portal-table staff-table">
             <thead>
@@ -764,7 +1112,7 @@ export default function OwnerStaffPage() {
               </tr>
             </thead>
             <tbody>
-              {pagedStaff.map((m) => {
+              {visibleStaffMembers.map((m) => {
                 const avatar = resolveApiImageUrl(m.avatarUrl)
                 return (
                   <tr key={m.id || m.email || m.name}>
@@ -796,7 +1144,7 @@ export default function OwnerStaffPage() {
                 )
               })}
 
-              {pagedStaff.length === 0 ? (
+              {visibleStaffMembers.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="staff-emptyRow">No staff found</td>
                 </tr>
@@ -805,29 +1153,18 @@ export default function OwnerStaffPage() {
           </table>
         </div>
 
-        <div className="staff-pagination">
-          <button
-            type="button"
-            className="portal-ghostBtn staff-paginationBtn"
-            aria-label="Previous page"
-            disabled={currentPage <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            ‹
-          </button>
-
-          <span className="staff-paginationText">{currentPage} / {totalPages}</span>
-
-          <button
-            type="button"
-            className="portal-ghostBtn staff-paginationBtn"
-            aria-label="Next page"
-            disabled={currentPage >= totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          >
-            ›
-          </button>
-        </div>
+        {hasMoreStaff ? (
+          <div className="staff-pagination">
+            <button
+              type="button"
+              className="portal-ghostBtn staff-loadMoreBtn"
+              disabled={staffLoading}
+              onClick={() => setVisibleCount((prev) => prev + LOAD_BATCH_SIZE)}
+            >
+              Load more
+            </button>
+          </div>
+        ) : null}
       </PortalCard>
     </div>
   )
