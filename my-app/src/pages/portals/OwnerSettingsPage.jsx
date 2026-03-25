@@ -741,9 +741,8 @@
 //     </div>
 //   )
 // }
-
-
 import React from 'react'
+
 export default function OwnerSettingsPage() {
   return (
     <div style={{ padding: 20 }}>

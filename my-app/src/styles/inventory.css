@@ -67,3 +67,27 @@
   color: #d9363e;
   font-weight: 700;
 }
+
+.inventory-editModal {
+  width: min(760px, 94vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.inventory-editModalBody {
+  overflow-y: auto;
+  max-height: calc(92vh - 150px);
+  padding-bottom: 6px;
+}
+
+@media (max-width: 768px) {
+  .inventory-editModal {
+    width: min(98vw, 740px);
+    max-height: 94vh;
+  }
+
+  .inventory-editModalBody {
+    max-height: calc(94vh - 142px);
+  }
+}

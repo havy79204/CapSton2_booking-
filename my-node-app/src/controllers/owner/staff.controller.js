@@ -2,7 +2,7 @@ const { asyncHandler } = require('../../utils/asyncHandler')
 const staffService = require('../../services/staff.service')
 
 const getStaff = asyncHandler(async (req, res) => {
-  const data = await staffService.listStaff()
+  const data = await staffService.listStaff(req.query || {})
   res.json({ ok: true, data })
 })
 
@@ -66,6 +66,18 @@ const deleteStaff = asyncHandler(async (req, res) => {
   res.json({ ok: true, data })
 })
 
+const postStaffAvatar = asyncHandler(async (req, res) => {
+  const { id } = req.params || {}
+  if (!id) {
+    res.status(400).json({ ok: false, error: 'Missing id' })
+    return
+  }
+
+  const { dataUrl } = req.body || {}
+  const data = await staffService.uploadStaffAvatarFromDataUrl(id, { dataUrl })
+  res.json({ ok: true, data })
+})
+
 module.exports = {
   getStaff,
   getStaffSkillCategories,
@@ -73,4 +85,5 @@ module.exports = {
   postStaff,
   putStaff,
   deleteStaff,
+  postStaffAvatar,
 }

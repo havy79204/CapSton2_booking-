@@ -29,16 +29,38 @@ async function tableExists(tableName) {
 async function getSchemaInfo() {
   if (_schemaInfoPromise) return _schemaInfoPromise
   _schemaInfoPromise = (async () => {
-    const [productsHasCategoryId, inventoryHasCategoryId, hasProductCategories] = await Promise.all([
+    const [
+      productsHasCategoryId,
+      inventoryHasCategoryId,
+      hasProductCategories,
+      productsHasStatus,
+      inventoryHasStatus,
+      productsHasImageUrl,
+      inventoryHasImageUrl,
+      inventoryHasDescription,
+      hasProductImages,
+    ] = await Promise.all([
       columnExists('Products', 'CategoryId'),
       columnExists('InventoryItems', 'CategoryId'),
       tableExists('ProductCategories'),
+      columnExists('Products', 'Status'),
+      columnExists('InventoryItems', 'Status'),
+      columnExists('Products', 'ImageUrl'),
+      columnExists('InventoryItems', 'ImageUrl'),
+      columnExists('InventoryItems', 'Description'),
+      tableExists('ProductImages'),
     ])
 
     return {
       productsHasCategoryId,
       inventoryHasCategoryId,
       hasProductCategories,
+      productsHasStatus,
+      inventoryHasStatus,
+      productsHasImageUrl,
+      inventoryHasImageUrl,
+      inventoryHasDescription,
+      hasProductImages,
     }
   })()
   return _schemaInfoPromise
@@ -149,11 +171,42 @@ function parseOptionalString(value) {
   return s ? s : null
 }
 
+function normalizeImageUrls(input) {
+  const arr = Array.isArray(input) ? input : []
+  return arr
+    .map((x) => (x === undefined || x === null ? '' : String(x).trim()))
+    .filter(Boolean)
+    .slice(0, 4)
+}
+
+async function replaceProductImages(productId, images) {
+  const schema = await getSchemaInfo()
+  if (!schema.hasProductImages) return
+
+  const urls = normalizeImageUrls(images)
+  await query('DELETE FROM ProductImages WHERE ProductId = @productId', { productId })
+
+  for (let i = 0; i < urls.length; i += 1) {
+    const url = urls[i]
+    await query(
+      `INSERT INTO ProductImages (ImageId, ProductId, ImageUrl, SortOrder)
+       VALUES (@id, @productId, @url, @sortOrder)`,
+      {
+        id: newId(),
+        productId,
+        url,
+        sortOrder: i,
+      }
+    )
+  }
+}
+
 function retailShadowId(productId) {
   return `retail_${String(productId ?? '').trim()}`
 }
 
 async function resolveSkuKind(sku) {
+  const schema = await getSchemaInfo()
   const { hint, id } = parseSku(sku)
   if (!id) return null
 
@@ -161,21 +214,53 @@ async function resolveSkuKind(sku) {
   const hintIsProduct = hint === 'retail' || hint === 'product'
 
   if (hintIsInventory) {
-    const inv = await query('SELECT TOP 1 InventoryItemId FROM InventoryItems WHERE InventoryItemId = @id', { id })
+    const inv = await query(
+      `SELECT TOP 1 InventoryItemId
+       FROM InventoryItems
+       WHERE InventoryItemId = @id
+         ${schema.inventoryHasStatus
+          ? "AND (Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) NOT IN ('deleted', 'delete'))"
+          : "AND COALESCE(ItemGroup, 'service') <> 'deleted'"}`,
+      { id }
+    )
     if (inv.recordset?.length) return { kind: 'inventory', id }
     return null
   }
 
   if (hintIsProduct) {
-    const prod = await query('SELECT TOP 1 ProductId FROM Products WHERE ProductId = @id', { id })
+    const prod = await query(
+      `SELECT TOP 1 ProductId
+       FROM Products
+       WHERE ProductId = @id
+         ${schema.productsHasStatus
+          ? "AND (Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) NOT IN ('deleted', 'delete'))"
+          : ''}`,
+      { id }
+    )
     if (prod.recordset?.length) return { kind: 'product', id }
     return null
   }
 
-  const inv = await query('SELECT TOP 1 InventoryItemId FROM InventoryItems WHERE InventoryItemId = @id', { id })
+  const inv = await query(
+    `SELECT TOP 1 InventoryItemId
+     FROM InventoryItems
+     WHERE InventoryItemId = @id
+       ${schema.inventoryHasStatus
+        ? "AND (Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) NOT IN ('deleted', 'delete'))"
+        : "AND COALESCE(ItemGroup, 'service') <> 'deleted'"}`,
+    { id }
+  )
   if (inv.recordset?.length) return { kind: 'inventory', id }
 
-  const prod = await query('SELECT TOP 1 ProductId FROM Products WHERE ProductId = @id', { id })
+  const prod = await query(
+    `SELECT TOP 1 ProductId
+     FROM Products
+     WHERE ProductId = @id
+       ${schema.productsHasStatus
+        ? "AND (Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) NOT IN ('deleted', 'delete'))"
+        : ''}`,
+    { id }
+  )
   if (prod.recordset?.length) return { kind: 'product', id }
 
   return null
@@ -189,6 +274,12 @@ async function getInventory() {
   const retailKindExpr = hasCategoryMapping
     ? 'COALESCE(pcRetail.Name, pcShadow.Name, CAST(NULL AS NVARCHAR(100)))'
     : 'CAST(NULL AS NVARCHAR(100))'
+  const serviceVisibleWhere = schema.inventoryHasStatus
+    ? "AND (i.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), i.Status)))) NOT IN ('deleted', 'delete'))"
+    : "AND COALESCE(i.ItemGroup, 'service') <> 'deleted'"
+  const retailVisibleWhere = schema.productsHasStatus
+    ? "(p.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), p.Status)))) NOT IN ('deleted', 'delete'))"
+    : '1=1'
 
   const itemsResult = await query(
     `SELECT
@@ -214,6 +305,7 @@ async function getInventory() {
           AND t.Type = 'IN'
       ) txInfo
       WHERE COALESCE(i.ItemGroup, 'service') = 'service'
+      ${serviceVisibleWhere}
 
       UNION ALL
 
@@ -240,7 +332,8 @@ async function getInventory() {
         FROM InventoryTransactions t
         WHERE t.InventoryItemId = CONCAT('retail_', p.ProductId)
           AND t.Type = 'IN'
-      ) txInfoRetail`
+      ) txInfoRetail
+      WHERE ${retailVisibleWhere}`
   )
 
   const items = (itemsResult.recordset || []).map(toInventoryItem)
@@ -490,7 +583,7 @@ async function updateItem(itemId, payload) {
     throw err
   }
 
-  const { name, unit, minQty, priceVnd, sellPriceVnd, description, imageUrl, status } = payload || {}
+  const { name, unit, minQty, priceVnd, sellPriceVnd, description, imageUrl, status, stock, group, images } = payload || {}
   const { category } = payload || {}
   const schema = await getSchemaInfo()
   const categoryId = await resolveCategoryIdFromPayload(payload)
@@ -525,8 +618,28 @@ async function updateItem(itemId, payload) {
 
   if (kind.kind === 'inventory') {
     const min = minQty !== undefined ? Number(minQty) : null
+    const qty = stock !== undefined ? Number(stock) : null
+    const parsedPrice = parseMoneyVnd(priceVnd)
+    const parsedGroup = group !== undefined ? String(group || '').trim().toLowerCase() : null
+    const desc = parseOptionalString(description)
+    const img = parseOptionalString(imageUrl)
     if (min !== null && !Number.isFinite(min)) {
       const err = new Error('Invalid minQty')
+      err.status = 400
+      throw err
+    }
+    if (qty !== null && (!Number.isFinite(qty) || qty < 0)) {
+      const err = new Error('Invalid stock')
+      err.status = 400
+      throw err
+    }
+    if (parsedPrice !== null && (!Number.isFinite(parsedPrice) || parsedPrice < 0)) {
+      const err = new Error('Invalid priceVnd')
+      err.status = 400
+      throw err
+    }
+    if (parsedGroup !== null && parsedGroup !== 'service' && parsedGroup !== 'inventory') {
+      const err = new Error('Invalid type for supplies')
       err.status = 400
       throw err
     }
@@ -536,22 +649,31 @@ async function updateItem(itemId, payload) {
       err.status = 400
       throw err
     }
-    await query(
-      `UPDATE InventoryItems
+    const updateSql = `UPDATE InventoryItems
        SET
          Name = COALESCE(@name, Name),
          CategoryId = COALESCE(@categoryId, CategoryId),
          Unit = COALESCE(@unit, Unit),
-         ReorderLevel = COALESCE(@reorder, ReorderLevel)
-       WHERE InventoryItemId = @id;`,
-      {
-        id: kind.id,
-        name: name !== undefined ? String(name).trim() : null,
-        categoryId,
-        unit: unit !== undefined ? (String(unit).trim() || null) : null,
-        reorder: min !== null ? min : null,
-      }
-    )
+         Quantity = COALESCE(@qty, Quantity),
+         ReorderLevel = COALESCE(@reorder, ReorderLevel),
+         PriceVnd = COALESCE(@priceVnd, PriceVnd),
+         ItemGroup = COALESCE(@itemGroup, ItemGroup)
+         ${schema.inventoryHasDescription ? ', Description = COALESCE(@description, Description)' : ''}
+         ${schema.inventoryHasImageUrl ? ', ImageUrl = COALESCE(@imageUrl, ImageUrl)' : ''}
+       WHERE InventoryItemId = @id;`
+
+    await query(updateSql, {
+      id: kind.id,
+      name: name !== undefined ? String(name).trim() : null,
+      categoryId,
+      unit: unit !== undefined ? (String(unit).trim() || null) : null,
+      qty: qty !== null ? qty : null,
+      reorder: min !== null ? min : null,
+      priceVnd: parsedPrice !== null ? parsedPrice : null,
+      itemGroup: parsedGroup || null,
+      description: desc === undefined ? null : desc,
+      imageUrl: img === undefined ? null : img,
+    })
 
     return { id: itemId }
   }
@@ -559,6 +681,9 @@ async function updateItem(itemId, payload) {
   // Retail products: allow updating name + price.
   const price = parseMoneyVnd(priceVnd)
   const sellPrice = parseMoneyVnd(sellPriceVnd)
+  const stockQty = stock !== undefined ? Number(stock) : null
+  const normalizedImages = normalizeImageUrls(images)
+  const hasImagesPayload = Object.prototype.hasOwnProperty.call(payload || {}, 'images')
   const desc = parseOptionalString(description)
   const img = parseOptionalString(imageUrl)
   const st = parseOptionalString(status)
@@ -573,6 +698,11 @@ async function updateItem(itemId, payload) {
     err.status = 400
     throw err
   }
+  if (stockQty !== null && (!Number.isFinite(stockQty) || stockQty < 0)) {
+    const err = new Error('Invalid stock')
+    err.status = 400
+    throw err
+  }
 
   if (!schema.productsHasCategoryId || !schema.hasProductCategories) {
     const err = new Error('Products.CategoryId or ProductCategories is missing')
@@ -584,6 +714,7 @@ async function updateItem(itemId, payload) {
      SET
        Name = COALESCE(@name, Name),
        CategoryId = COALESCE(@categoryId, CategoryId),
+       Stock = COALESCE(@stock, Stock),
        Price = COALESCE(@sellPrice, Price),
        Description = COALESCE(@description, Description),
        ImageUrl = COALESCE(@imageUrl, ImageUrl),
@@ -593,13 +724,18 @@ async function updateItem(itemId, payload) {
       id: kind.id,
       name: name !== undefined ? String(name).trim() : null,
       categoryId,
+      stock: stockQty !== null ? Math.trunc(stockQty) : null,
       importPrice: price,
       sellPrice,
       description: desc === undefined ? null : desc,
-      imageUrl: img === undefined ? null : img,
+      imageUrl: hasImagesPayload ? (normalizedImages[0] || null) : (img === undefined ? null : img),
       status: st === undefined ? null : st,
     }
   )
+
+  if (hasImagesPayload) {
+    await replaceProductImages(kind.id, normalizedImages)
+  }
 
   // Keep retail shadow InventoryItems row in sync as well.
   const shadowId = retailShadowId(kind.id)
@@ -626,6 +762,7 @@ async function updateItem(itemId, payload) {
          Name = COALESCE(@name, Name),
          Unit = COALESCE('sp', Unit),
          ConversionRate = COALESCE(1, ConversionRate),
+         Quantity = COALESCE((SELECT TOP 1 Stock FROM Products WHERE ProductId = @id), Quantity),
          ItemGroup = 'retail',
          PriceVnd = COALESCE(@importPrice, PriceVnd)
        WHERE InventoryItemId = @shadowId
@@ -931,25 +1068,52 @@ async function deleteItem(itemId) {
     throw err
   }
 
+  const schema = await getSchemaInfo()
+
   if (kind.kind === 'inventory') {
-    await query('DELETE FROM InventoryTransactions WHERE InventoryItemId = @id', { id: kind.id })
-    await query('DELETE FROM InventoryItems WHERE InventoryItemId = @id', { id: kind.id })
+    if (schema.inventoryHasStatus) {
+      await query(
+        `UPDATE InventoryItems
+         SET Status = @status
+         WHERE InventoryItemId = @id`,
+        { id: kind.id, status: 'deleted' }
+      )
+    } else {
+      await query(
+        `UPDATE InventoryItems
+         SET ItemGroup = 'deleted'
+         WHERE InventoryItemId = @id`,
+        { id: kind.id }
+      )
+    }
     return { id: itemId }
   }
 
-  const usedInOrders = await query('SELECT TOP 1 OrderItemId FROM OrderItems WHERE ProductId = @id', { id: kind.id })
-  if (usedInOrders.recordset?.length) {
-    const err = new Error('Cannot delete product with order history')
-    err.status = 409
-    throw err
+  if (schema.productsHasStatus) {
+    await query(
+      `UPDATE Products
+       SET Status = @status
+       WHERE ProductId = @id`,
+      { id: kind.id, status: 'deleted' }
+    )
   }
 
   const shadowId = retailShadowId(kind.id)
-  await query('DELETE FROM ProductVariants WHERE ProductId = @id', { id: kind.id })
-  await query('DELETE FROM ProductImages WHERE ProductId = @id', { id: kind.id }).catch(() => null)
-  await query('DELETE FROM InventoryTransactions WHERE InventoryItemId = @shadowId', { shadowId })
-  await query('DELETE FROM InventoryItems WHERE InventoryItemId = @shadowId', { shadowId })
-  await query('DELETE FROM Products WHERE ProductId = @id', { id: kind.id })
+  if (schema.inventoryHasStatus) {
+    await query(
+      `UPDATE InventoryItems
+       SET Status = @status
+       WHERE InventoryItemId = @shadowId`,
+      { shadowId, status: 'deleted' }
+    )
+  } else {
+    await query(
+      `UPDATE InventoryItems
+       SET ItemGroup = 'deleted'
+       WHERE InventoryItemId = @shadowId`,
+      { shadowId }
+    )
+  }
 
   return { id: itemId }
 }
