@@ -55,77 +55,96 @@ function parseHourToInt(value) {
 }
 
 async function tableExists(tableName) {
-  const res = await query(
-    `SELECT 1 AS ok
-     FROM INFORMATION_SCHEMA.TABLES
-     WHERE TABLE_NAME = @tableName`,
-    { tableName }
-  )
-  return Boolean(res.recordset?.length)
+  try {
+    const res = await query(
+      `SELECT 1 AS ok
+       FROM INFORMATION_SCHEMA.TABLES
+       WHERE TABLE_NAME = @tableName`,
+      { tableName }
+    )
+    return Boolean(res.recordset?.length)
+  } catch (err) {
+    console.warn(`tableExists check failed for ${tableName}:`, err.message)
+    return false
+  }
 }
 
 async function columnExists(tableName, columnName) {
-  const res = await query(
-    `SELECT 1 AS ok
-     FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_NAME = @tableName
-       AND COLUMN_NAME = @columnName`,
-    { tableName, columnName }
-  )
-  return Boolean(res.recordset?.length)
+  try {
+    const res = await query(
+      `SELECT 1 AS ok
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_NAME = @tableName
+         AND COLUMN_NAME = @columnName`,
+      { tableName, columnName }
+    )
+    return Boolean(res.recordset?.length)
+  } catch (err) {
+    console.warn(`columnExists check failed for ${tableName}.${columnName}:`, err.message)
+    return false
+  }
 }
 
 async function getStaffRoleSqlParts() {
-  const hasStaffSkills = await tableExists('StaffSkills')
-  if (!hasStaffSkills) {
-    return {
-      selectSql: `CAST('' AS NVARCHAR(255)) AS Role`,
-      joinSql: '',
-    }
-  }
-
-  const hasCategoryId = await columnExists('StaffSkills', 'CategoryId')
-  if (!hasCategoryId) {
-    return {
-      selectSql: `CAST('' AS NVARCHAR(255)) AS Role`,
-      joinSql: '',
-    }
-  }
-
-  const hasServiceCategories = await tableExists('ServiceCategories')
-  if (hasServiceCategories) {
-    const hasCategoryName = await columnExists('ServiceCategories', 'CategoryName')
-    const hasName = await columnExists('ServiceCategories', 'Name')
-    const categoryNameColumn = hasCategoryName ? 'CategoryName' : (hasName ? 'Name' : null)
-
-    if (categoryNameColumn) {
+  try {
+    const hasStaffSkills = await tableExists('StaffSkills')
+    if (!hasStaffSkills) {
       return {
-        selectSql: `ISNULL(sp.Role, '') AS Role`,
-        joinSql: `
-          OUTER APPLY (
-            SELECT STUFF((
-              SELECT ', ' + COALESCE(sc.${categoryNameColumn}, CONVERT(NVARCHAR(100), ssx.CategoryId))
-              FROM StaffSkills ssx
-              LEFT JOIN ServiceCategories sc ON sc.CategoryId = ssx.CategoryId
-              WHERE ssx.StaffId = s.StaffId
-              FOR XML PATH(''), TYPE
-            ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS Role
-          ) sp`,
+        selectSql: `CAST('' AS NVARCHAR(255)) AS Role`,
+        joinSql: '',
       }
     }
-  }
 
-  return {
-    selectSql: `ISNULL(sp.Role, '') AS Role`,
-    joinSql: `
-      OUTER APPLY (
-        SELECT STUFF((
-          SELECT ', ' + CONVERT(NVARCHAR(100), ssx.CategoryId)
-          FROM StaffSkills ssx
-          WHERE ssx.StaffId = s.StaffId
-          FOR XML PATH(''), TYPE
-        ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS Role
-      ) sp`,
+    const hasCategoryId = await columnExists('StaffSkills', 'CategoryId')
+    if (!hasCategoryId) {
+      return {
+        selectSql: `CAST('' AS NVARCHAR(255)) AS Role`,
+        joinSql: '',
+      }
+    }
+
+    const hasServiceCategories = await tableExists('ServiceCategories')
+    if (hasServiceCategories) {
+      const hasCategoryName = await columnExists('ServiceCategories', 'CategoryName')
+      const hasName = await columnExists('ServiceCategories', 'Name')
+      const categoryNameColumn = hasCategoryName ? 'CategoryName' : (hasName ? 'Name' : null)
+
+      if (categoryNameColumn) {
+        return {
+          selectSql: `ISNULL(sp.Role, '') AS Role`,
+          joinSql: `
+            OUTER APPLY (
+              SELECT STUFF((
+                SELECT ', ' + COALESCE(sc.${categoryNameColumn}, CONVERT(NVARCHAR(100), ssx.CategoryId))
+                FROM StaffSkills ssx
+                LEFT JOIN ServiceCategories sc ON sc.CategoryId = ssx.CategoryId
+                WHERE ssx.StaffId = s.StaffId
+                FOR XML PATH(''), TYPE
+              ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS Role
+            ) sp`,
+        }
+      }
+    }
+
+    return {
+      selectSql: `ISNULL(sp.Role, '') AS Role`,
+      joinSql: `
+        OUTER APPLY (
+          SELECT STUFF((
+            SELECT ', ' + CONVERT(NVARCHAR(100), ssx.CategoryId)
+            FROM StaffSkills ssx
+            WHERE ssx.StaffId = s.StaffId
+            FOR XML PATH(''), TYPE
+          ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS Role
+        ) sp`,
+    }
+  } catch (err) {
+    console.error('Error in getStaffRoleSqlParts:', err.message)
+    // Return safe default if something goes wrong
+    return {
+      selectSql: `CAST('' AS NVARCHAR(255)) AS Role`,
+      joinSql: '',
+    }
   }
 }
 

@@ -148,8 +148,15 @@ export default function OwnerAppointmentsPage() {
 
         const serviceNames = apptServices.map(s => s.Name).join(', ');
 
+<<<<<<< HEAD
         let appointmentDate = null;
         
+=======
+        // Extract date from various sources
+        let appointmentDate = null;
+        
+        // Priority 1: Use date field from backend (YYYY-MM-DD format)
+>>>>>>> a89d0f139e8c500b3f7a803591062abf0fc133f1
         if (a.date && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) {
           try {
             appointmentDate = new Date(`${a.date}T00:00:00`);
@@ -163,14 +170,30 @@ export default function OwnerAppointmentsPage() {
           }
         }
         
+<<<<<<< HEAD
+=======
+        // Priority 2: Parse BookingTime (could be full datetime or time-only)
+>>>>>>> a89d0f139e8c500b3f7a803591062abf0fc133f1
         if (!appointmentDate) {
           const bookingTimeValue = a.BookingTime || a.time || a.startTime;
           if (bookingTimeValue) {
             try {
+<<<<<<< HEAD
               let dt = new Date(bookingTimeValue);
               if (isNaN(dt.getTime())) {
                 const timeMatch = String(bookingTimeValue).match(/^(\d{1,2}):(\d{2})/);
                 if (timeMatch) {
+=======
+              // Try to parse as full datetime first
+              let dt = new Date(bookingTimeValue);
+              
+              // If that fails, check if it's just a time format (HH:MM)
+              if (isNaN(dt.getTime())) {
+                // Try parsing as time-only: if it looks like HH:MM, create date for today
+                const timeMatch = String(bookingTimeValue).match(/^(\d{1,2}):(\d{2})/);
+                if (timeMatch) {
+                  // Use today's date with the given time
+>>>>>>> a89d0f139e8c500b3f7a803591062abf0fc133f1
                   dt = new Date();
                   dt.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
                 }
@@ -203,6 +226,10 @@ export default function OwnerAppointmentsPage() {
       setCustomers(customerData);
       setServices(flatServices);
       
+<<<<<<< HEAD
+=======
+      // Debug logging
+>>>>>>> a89d0f139e8c500b3f7a803591062abf0fc133f1
       console.log('Appointments loaded:', mapped.length, 'appointments');
       console.log('Staff loaded:', staffData.length, 'staff members');
       console.log('Customers loaded:', customerData.length, 'customers');
