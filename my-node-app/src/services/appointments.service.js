@@ -297,5 +297,3 @@ module.exports = {
   updateAppointment,
   cancelAppointment,
 }
-
-

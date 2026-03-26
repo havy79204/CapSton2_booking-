@@ -46,8 +46,15 @@ export default function OwnerAppointmentsPage() {
   };
 
   const isSameDay = (d1, d2) => {
+    // Handle null/undefined dates
+    if (!d1 || !d2) return false;
+    
     const date1 = new Date(d1);
     const date2 = new Date(d2);
+    
+    // Check if dates are valid
+    if (isNaN(date1.getTime()) || isNaN(date2.getTime())) return false;
+    
     return date1.getFullYear() === date2.getFullYear() &&
            date1.getMonth() === date2.getMonth() &&
            date1.getDate() === date2.getDate();
@@ -107,7 +114,7 @@ export default function OwnerAppointmentsPage() {
       ]);
 
       const apptData = Array.isArray(apptRes) ? apptRes : apptRes?.appointments || [];
-      const staffData = Array.isArray(staffRes) ? staffRes : staffRes?.staff || [];
+      const staffData = Array.isArray(staffRes) ? staffRes : staffRes?.items || staffRes?.staff || [];
       const customerData = Array.isArray(custRes) ? custRes : custRes?.customers || [];
 
       let flatServices = [];
@@ -141,14 +148,52 @@ export default function OwnerAppointmentsPage() {
 
         const serviceNames = apptServices.map(s => s.Name).join(', ');
 
+        let appointmentDate = null;
+        
+        if (a.date && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) {
+          try {
+            appointmentDate = new Date(`${a.date}T00:00:00`);
+            if (!isNaN(appointmentDate.getTime())) {
+              // Successfully parsed
+            } else {
+              appointmentDate = null;
+            }
+          } catch (e) {
+            // continue to next attempt
+          }
+        }
+        
+        if (!appointmentDate) {
+          const bookingTimeValue = a.BookingTime || a.time || a.startTime;
+          if (bookingTimeValue) {
+            try {
+              let dt = new Date(bookingTimeValue);
+              if (isNaN(dt.getTime())) {
+                const timeMatch = String(bookingTimeValue).match(/^(\d{1,2}):(\d{2})/);
+                if (timeMatch) {
+                  dt = new Date();
+                  dt.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
+                }
+              }
+              
+              if (!isNaN(dt.getTime())) {
+                appointmentDate = dt;
+              }
+            } catch (e) {
+              console.warn(`Appointment ${a.BookingId}: error parsing BookingTime`, e.message);
+            }
+          }
+        }
+
         return {
           ...a,
           id: a.BookingId || a.id || a.AppointmentId,
           customer: customer?.Name || customer?.name || 'Unknown Customer',
           service: serviceNames || 'No Service',
           duration: totalDuration || 30,
-          time: normalizeTime(a.BookingTime || a.time || a.startTime),
-          status: a.Status || a.status || 'pending',
+          date: appointmentDate,
+          time: normalizeTime(a.time || a.BookingTime || a.startTime),
+          status: (a.status || a.Status || 'pending').toLowerCase(),
           serviceIds: sIds
         };
       });
@@ -157,6 +202,11 @@ export default function OwnerAppointmentsPage() {
       setStaffMembers(staffData);
       setCustomers(customerData);
       setServices(flatServices);
+      
+      console.log('Appointments loaded:', mapped.length, 'appointments');
+      console.log('Staff loaded:', staffData.length, 'staff members');
+      console.log('Customers loaded:', customerData.length, 'customers');
+      console.log('Services loaded:', flatServices.length, 'services');
     } catch (err) {
       console.error('FETCH ERROR:', err);
     }
@@ -164,7 +214,6 @@ export default function OwnerAppointmentsPage() {
 
   useEffect(() => { fetchData(); }, []);
 
-  // ================= ACTIONS =================
   const handleEditClick = (e, appt) => {
     e.stopPropagation();
     setEditingAppt(appt);
@@ -242,7 +291,6 @@ export default function OwnerAppointmentsPage() {
     }
   }
 
-  // ================= RENDER LOGIC =================
   const filteredAppointments = useMemo(() => 
     appointments.filter(appt => isSameDay(appt.date || appt.startTime || appt.BookingTime, selectedDate)),
     [appointments, selectedDate]
@@ -255,7 +303,6 @@ export default function OwnerAppointmentsPage() {
 
   return (
     <div className="calendar-page">
-      {/* ================= HEADER ================= */}
       <div className="calendar-header">
         <div className="calendar-title">
           <button className="nav-month-btn" onClick={() => { const d = new Date(selectedDate); d.setMonth(d.getMonth() - 1); setSelectedDate(d); }}>{"<"}</button>
@@ -280,7 +327,6 @@ export default function OwnerAppointmentsPage() {
         </div>
       </div>
 
-      {/* ================= DATE STRIP ================= */}
       <div className="date-strip">
         {useMemo(() => {
           const year = selectedDate.getFullYear();
@@ -304,7 +350,6 @@ export default function OwnerAppointmentsPage() {
         ))}
       </div>
 
-      {/* ================= CALENDAR MAIN ================= */}
       <div className="calendar-container">
         <div className="time-column" style={{ marginTop: '40px' }}>
           {Array.from({ length: 25 }, (_, i) => {
@@ -366,10 +411,8 @@ export default function OwnerAppointmentsPage() {
         </div>
       </div>
 
-      {/* ================= MODAL ================= */}
       <PortalModal open={open} onClose={() => {setOpen(false); setEditingAppt(null);}} title={editingAppt ? "Edit Appointment" : "Add New Appointment"}>
         <form className="appt-form" onSubmit={handleSubmit} style={{ maxHeight: '85vh', overflowY: 'auto', paddingRight: '10px' }}>
-          {/* Form content giống hệt lần trước - đã fix NaN */}
           <div style={{ display: 'flex', gap: '10px' }}>
             <div className="form-group" style={{ flex: 1 }}>
               <label>Customer</label>
