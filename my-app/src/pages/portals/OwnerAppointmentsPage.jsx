@@ -46,8 +46,15 @@ export default function OwnerAppointmentsPage() {
   };
 
   const isSameDay = (d1, d2) => {
+    // Handle null/undefined dates
+    if (!d1 || !d2) return false;
+    
     const date1 = new Date(d1);
     const date2 = new Date(d2);
+    
+    // Check if dates are valid
+    if (isNaN(date1.getTime()) || isNaN(date2.getTime())) return false;
+    
     return date1.getFullYear() === date2.getFullYear() &&
            date1.getMonth() === date2.getMonth() &&
            date1.getDate() === date2.getDate();
@@ -107,7 +114,7 @@ export default function OwnerAppointmentsPage() {
       ]);
 
       const apptData = Array.isArray(apptRes) ? apptRes : apptRes?.appointments || [];
-      const staffData = Array.isArray(staffRes) ? staffRes : staffRes?.staff || [];
+      const staffData = Array.isArray(staffRes) ? staffRes : staffRes?.items || staffRes?.staff || [];
       const customerData = Array.isArray(custRes) ? custRes : custRes?.customers || [];
 
       let flatServices = [];
@@ -141,14 +148,60 @@ export default function OwnerAppointmentsPage() {
 
         const serviceNames = apptServices.map(s => s.Name).join(', ');
 
+        // Extract date from various sources
+        let appointmentDate = null;
+        
+        // Priority 1: Use date field from backend (YYYY-MM-DD format)
+        if (a.date && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) {
+          try {
+            appointmentDate = new Date(`${a.date}T00:00:00`);
+            if (!isNaN(appointmentDate.getTime())) {
+              // Successfully parsed
+            } else {
+              appointmentDate = null;
+            }
+          } catch (e) {
+            // continue to next attempt
+          }
+        }
+        
+        // Priority 2: Parse BookingTime (could be full datetime or time-only)
+        if (!appointmentDate) {
+          const bookingTimeValue = a.BookingTime || a.time || a.startTime;
+          if (bookingTimeValue) {
+            try {
+              // Try to parse as full datetime first
+              let dt = new Date(bookingTimeValue);
+              
+              // If that fails, check if it's just a time format (HH:MM)
+              if (isNaN(dt.getTime())) {
+                // Try parsing as time-only: if it looks like HH:MM, create date for today
+                const timeMatch = String(bookingTimeValue).match(/^(\d{1,2}):(\d{2})/);
+                if (timeMatch) {
+                  // Use today's date with the given time
+                  dt = new Date();
+                  dt.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
+                }
+              }
+              
+              if (!isNaN(dt.getTime())) {
+                appointmentDate = dt;
+              }
+            } catch (e) {
+              console.warn(`Appointment ${a.BookingId}: error parsing BookingTime`, e.message);
+            }
+          }
+        }
+
         return {
           ...a,
           id: a.BookingId || a.id || a.AppointmentId,
           customer: customer?.Name || customer?.name || 'Unknown Customer',
           service: serviceNames || 'No Service',
           duration: totalDuration || 30,
-          time: normalizeTime(a.BookingTime || a.time || a.startTime),
-          status: a.Status || a.status || 'pending',
+          date: appointmentDate,
+          time: normalizeTime(a.time || a.BookingTime || a.startTime),
+          status: (a.status || a.Status || 'pending').toLowerCase(),
           serviceIds: sIds
         };
       });
@@ -157,6 +210,12 @@ export default function OwnerAppointmentsPage() {
       setStaffMembers(staffData);
       setCustomers(customerData);
       setServices(flatServices);
+      
+      // Debug logging
+      console.log('Appointments loaded:', mapped.length, 'appointments');
+      console.log('Staff loaded:', staffData.length, 'staff members');
+      console.log('Customers loaded:', customerData.length, 'customers');
+      console.log('Services loaded:', flatServices.length, 'services');
     } catch (err) {
       console.error('FETCH ERROR:', err);
     }
