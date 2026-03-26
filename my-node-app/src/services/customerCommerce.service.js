@@ -1041,7 +1041,7 @@ async function listBookings(userIdInput, limit = 20) {
       BookingId: row.BookingId,
       CustomerUserId: row.CustomerUserId,
       BookingTime: row.BookingTime,
-      Status: row.Status || 'C',
+      Status: row.Status || 'pending',
       Notes: row.Notes || '',
       CreatedAt: row.CreatedAt,
       Services: services,
@@ -1106,7 +1106,7 @@ async function createBooking(userIdInput, payload = {}) {
       bookingId,
       userId,
       bookingTime: when,
-      status: 'C',
+      status: 'pending',
       notes: String(payload.notes || '').trim() || null,
     }
   )

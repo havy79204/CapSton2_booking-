@@ -16,6 +16,7 @@ export default function OwnerAppointmentsPage() {
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [selectedStaff, setSelectedStaff] = useState('all')
   const [selectedServiceIds, setSelectedServiceIds] = useState([])
+  const [viewMode, setViewMode] = useState('calendar')
 
   // ================= UTILS =================
   const normalizeTime = (t) => {
@@ -41,7 +42,8 @@ export default function OwnerAppointmentsPage() {
   const getStatusColor = (status) => {
     const s = String(status || '').trim().toLowerCase();
     if (s === 'completed' || s === 'done') return '#10b981';
-    if (s === 'booked' || s === 'pending') return '#6366f1';
+    if (s === 'booked') return 'rgb(99, 102, 241)';
+     if (s === 'pending') return '#e8d064';
     return '#94a3b8';
   };
 
@@ -148,15 +150,8 @@ export default function OwnerAppointmentsPage() {
 
         const serviceNames = apptServices.map(s => s.Name).join(', ');
 
-<<<<<<< HEAD
         let appointmentDate = null;
         
-=======
-        // Extract date from various sources
-        let appointmentDate = null;
-        
-        // Priority 1: Use date field from backend (YYYY-MM-DD format)
->>>>>>> a89d0f139e8c500b3f7a803591062abf0fc133f1
         if (a.date && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) {
           try {
             appointmentDate = new Date(`${a.date}T00:00:00`);
@@ -170,30 +165,14 @@ export default function OwnerAppointmentsPage() {
           }
         }
         
-<<<<<<< HEAD
-=======
-        // Priority 2: Parse BookingTime (could be full datetime or time-only)
->>>>>>> a89d0f139e8c500b3f7a803591062abf0fc133f1
         if (!appointmentDate) {
           const bookingTimeValue = a.BookingTime || a.time || a.startTime;
           if (bookingTimeValue) {
             try {
-<<<<<<< HEAD
               let dt = new Date(bookingTimeValue);
               if (isNaN(dt.getTime())) {
                 const timeMatch = String(bookingTimeValue).match(/^(\d{1,2}):(\d{2})/);
                 if (timeMatch) {
-=======
-              // Try to parse as full datetime first
-              let dt = new Date(bookingTimeValue);
-              
-              // If that fails, check if it's just a time format (HH:MM)
-              if (isNaN(dt.getTime())) {
-                // Try parsing as time-only: if it looks like HH:MM, create date for today
-                const timeMatch = String(bookingTimeValue).match(/^(\d{1,2}):(\d{2})/);
-                if (timeMatch) {
-                  // Use today's date with the given time
->>>>>>> a89d0f139e8c500b3f7a803591062abf0fc133f1
                   dt = new Date();
                   dt.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
                 }
@@ -226,14 +205,9 @@ export default function OwnerAppointmentsPage() {
       setCustomers(customerData);
       setServices(flatServices);
       
-<<<<<<< HEAD
-=======
-      // Debug logging
->>>>>>> a89d0f139e8c500b3f7a803591062abf0fc133f1
-      console.log('Appointments loaded:', mapped.length, 'appointments');
-      console.log('Staff loaded:', staffData.length, 'staff members');
-      console.log('Customers loaded:', customerData.length, 'customers');
-      console.log('Services loaded:', flatServices.length, 'services');
+      if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) {
+        console.debug(`OwnerAppointments: counts — appts=${mapped.length}, staff=${staffData.length}, customers=${customerData.length}, services=${flatServices.length}`)
+      }
     } catch (err) {
       console.error('FETCH ERROR:', err);
     }
@@ -242,23 +216,39 @@ export default function OwnerAppointmentsPage() {
   useEffect(() => { fetchData(); }, []);
 
   const handleEditClick = (e, appt) => {
+    e.preventDefault();
     e.stopPropagation();
-    setEditingAppt(appt);
+    if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') e.nativeEvent.stopImmediatePropagation();
+    if (typeof console !== 'undefined' && console.debug) console.debug('OwnerAppointments: handleEditClick', { id: appt?.id, status: appt?.status, eventType: e.type, button: e.button });
+    // Normalize legacy or unexpected status values so the edit form
+    // doesn't submit an unknown 'delete' status which would be
+    // interpreted as a removal. Map 'delete'/'deleted' -> 'canceled'.
+    const rawStatus = String(appt?.status || '').trim().toLowerCase();
+    const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'canceled' : (appt?.status || 'pending');
+    setEditingAppt({ ...appt, status: normalizedStatus });
     const currentIds = Array.isArray(appt.serviceIds) ? appt.serviceIds.map(String) : [];
     setSelectedServiceIds(currentIds);
     setOpen(true);
+    e.preventDefault();
+    e.stopPropagation();
+    // Ensure no other listeners run for this event
   };
 
   const handleDeleteClick = async (e, appt) => {
+    e.preventDefault();
     e.stopPropagation();
-    if (!window.confirm("Bạn có chắc muốn xóa lịch hẹn này?")) return;
+    if (typeof console !== 'undefined' && console.debug) console.debug('OwnerAppointments: handleDeleteClick', { id: appt?.id, status: appt?.status, eventType: e.type, button: e.button });
+    if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') e.nativeEvent.stopImmediatePropagation();
+    if (!window.confirm("Are you sure you want to delete this appointment??")) return;
     try {
       const id = appt.id || appt.BookingId;
-      await api.delete(`/api/owner/appointments/${id}`);
+      await api.del(`/api/owner/appointments/${id}`);
       await fetchData();
     } catch (err) {
-      alert("Xóa thất bại!");
+      alert("Failed to delete appointment!");
     }
+    // ensure no other listeners run for this event
+    if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') e.nativeEvent.stopImmediatePropagation();
   };
 
   const toggleService = (id) => {
@@ -299,14 +289,26 @@ export default function OwnerAppointmentsPage() {
       time: normalizeTime(time),
       notes: formData.get('notes') || "",
       duration: totalDuration,
-      status: formData.get('status')
+      // Determine status: prefer explicit form value; otherwise keep existing editingAppt status
+      status: (function() {
+        const raw = formData.get('status');
+        if (raw !== null && String(raw).trim() !== '') {
+          const s = String(raw).trim();
+          const lower = s.toLowerCase();
+          if (lower === 'delete' || lower === 'deleted') return 'canceled';
+          return s;
+        }
+        return editingAppt?.status || 'pending';
+      })()
     };
 
     try {
       const targetId = editingAppt?.id || editingAppt?.AppointmentId || editingAppt?.BookingId;
       if (editingAppt) {
+        if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) console.debug('OwnerAppointments: updating', targetId, payload)
         await api.put(`/api/owner/appointments/${targetId}`, payload);
       } else {
+        if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) console.debug('OwnerAppointments: creating', payload)
         await api.post('/api/owner/appointments', payload);
       }
       setOpen(false);
@@ -319,14 +321,58 @@ export default function OwnerAppointmentsPage() {
   }
 
   const filteredAppointments = useMemo(() => 
-    appointments.filter(appt => isSameDay(appt.date || appt.startTime || appt.BookingTime, selectedDate)),
+    appointments
+      .filter(appt => {
+        const s = String(appt.status || '').toLowerCase();
+        return s !== 'delete' && s !== 'deleted' && s !== 'canceled' && s !== 'cancelled';
+      })
+      .filter(appt => isSameDay(appt.date || appt.startTime || appt.BookingTime, selectedDate)),
     [appointments, selectedDate]
   );
+
+  const listAppointments = useMemo(() => {
+    if (viewMode === 'list') {
+      return appointments.filter(a => {
+        const s = String(a.status || '').toLowerCase();
+        if (s === 'delete' || s === 'deleted' || s === 'canceled' || s === 'cancelled') return false;
+        return selectedStaff === 'all' || String(a.staffId) === String(selectedStaff);
+      });
+    }
+    return filteredAppointments;
+  }, [viewMode, appointments, filteredAppointments, selectedStaff]);
 
   const visibleStaff = useMemo(() => {
     if (selectedStaff === 'all') return staffMembers;
     return staffMembers.filter(s => String(s.id || s.UserId) === String(selectedStaff));
   }, [staffMembers, selectedStaff]);
+
+  const monthDays = useMemo(() => {
+    const year = selectedDate.getFullYear();
+    const month = selectedDate.getMonth();
+    const date = new Date(year, month, 1);
+    const days = [];
+    while (date.getMonth() === month) {
+      days.push(new Date(date));
+      date.setDate(date.getDate() + 1);
+    }
+    return days;
+  }, [selectedDate]);
+
+  const editDateDefault = (function() {
+    const src = editingAppt;
+    if (!src) return selectedDate.toISOString().split('T')[0];
+    const tryVals = [src.date, src.BookingTime, src.startTime, src.BookingDate, src.bookingDate];
+    for (const v of tryVals) {
+      if (!v) continue;
+      try {
+        const d = new Date(v);
+        if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+      } catch (e) {
+        // ignore and try next
+      }
+    }
+    return selectedDate.toISOString().split('T')[0];
+  })();
 
   return (
     <div className="calendar-page">
@@ -348,95 +394,134 @@ export default function OwnerAppointmentsPage() {
               </option>
             ))}
           </select>
+          <button className="btn secondary" onClick={() => setViewMode(viewMode === 'calendar' ? 'list' : 'calendar')}>
+            {viewMode === 'calendar' ? 'List View' : 'Calendar View'}
+          </button>
           <button className="btn primary" onClick={() => { setEditingAppt(null); setSelectedServiceIds([]); setOpen(true); }}>
             + New Appointment
           </button>
         </div>
       </div>
 
-      <div className="date-strip">
-        {useMemo(() => {
-          const year = selectedDate.getFullYear();
-          const month = selectedDate.getMonth();
-          const date = new Date(year, month, 1);
-          const days = [];
-          while (date.getMonth() === month) {
-            days.push(new Date(date));
-            date.setDate(date.getDate() + 1);
-          }
-          return days;
-        }, [selectedDate.getMonth(), selectedDate.getFullYear()]).map((d, i) => (
-          <div
-            key={i}
-            className={`date-item ${d.toDateString() === selectedDate.toDateString() ? 'active' : ''}`}
-            onClick={() => setSelectedDate(d)}
-          >
-            <span>{d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
-            <strong>{d.getDate()}</strong>
+      {viewMode === 'calendar' && (
+        <div className="date-strip">
+          {monthDays.map((d, i) => (
+            <div
+              key={i}
+              className={`date-item ${d.toDateString() === selectedDate.toDateString() ? 'active' : ''}`}
+              onClick={() => setSelectedDate(d)}
+            >
+              <span>{d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+              <strong>{d.getDate()}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {viewMode === 'calendar' ? (
+        <div className="calendar-container">
+          <div className="time-column" style={{ marginTop: '40px' }}>
+            {Array.from({ length: 25 }, (_, i) => {
+              const h = 9 + Math.floor(i / 2);
+              const m = i % 2 === 0 ? '00' : '30';
+              return h <= 21 ? <div key={i} className="time-cell">{`${String(h).padStart(2, '0')}:${m}`}</div> : null;
+            })}
           </div>
-        ))}
-      </div>
 
-      <div className="calendar-container">
-        <div className="time-column" style={{ marginTop: '40px' }}>
-          {Array.from({ length: 25 }, (_, i) => {
-            const h = 9 + Math.floor(i / 2);
-            const m = i % 2 === 0 ? '00' : '30';
-            return h <= 21 ? <div key={i} className="time-cell">{`${String(h).padStart(2, '0')}:${m}`}</div> : null;
-          })}
-        </div>
+          <div className="staff-columns">
+            {visibleStaff.map(staff => {
+              const staffAppts = filteredAppointments.filter(a => String(a.staffId) === String(staff.id || staff.UserId));
+              const columns = layoutAppointments(staffAppts);
 
-        <div className="staff-columns">
-          {visibleStaff.map(staff => {
-            const staffAppts = filteredAppointments.filter(a => String(a.staffId) === String(staff.id || staff.UserId));
-            const columns = layoutAppointments(staffAppts);
+              return (
+                <div key={staff.id || staff.UserId} className="staff-column">
+                  <div className="staff-header">{staff.name || staff.Name}</div>
+                  <div className="staff-body" style={{ position: 'relative', height: '832px', backgroundColor: '#fff', marginTop: '40px' }}>
+                    {Array.from({ length: 25 }, (_, i) => (
+                      <div key={i} className="grid-cell" style={{ height: '64px', borderBottom: '1px solid #f0f0f0' }} />
+                    ))}
 
-            return (
-              <div key={staff.id || staff.UserId} className="staff-column">
-                <div className="staff-header">{staff.name || staff.Name}</div>
-                <div className="staff-body" style={{ position: 'relative', height: '832px', backgroundColor: '#fff', marginTop: '40px' }}>
-                  {Array.from({ length: 25 }, (_, i) => (
-                    <div key={i} className="grid-cell" style={{ height: '64px', borderBottom: '1px solid #f0f0f0' }} />
-                  ))}
-
-                  {columns.map((col, colIndex) => col.map(appt => {
-                    const dur = Number(appt.duration) || 30;
-                    return (
-                      <div
-                        key={appt.id}
-                        className="appt-card"
-                        style={{
-                          position: 'absolute',
-                          top: calculateTopOffset(appt.time),
-                          left: `${(colIndex * 100) / (columns.length || 1)}%`,
-                          width: `${100 / (columns.length || 1)}%`,
-                          height: (dur / 30) * 64,
-                          background: getStatusColor(appt.status),
-                          zIndex: 5,
-                          padding: '4px 8px',
-                          overflow: 'hidden'
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <div style={{ lineHeight: '1.2' }}>
-                            <strong style={{ fontSize: '10.5px' }}>{appt.service} ({dur}m)</strong>
-                            <span style={{ fontSize: '9px', display: 'block', fontWeight: 'bold', textTransform: 'capitalize' }}>• {appt.status}</span>
+                    {columns.map((col, colIndex) => col.map(appt => {
+                      const dur = Number(appt.duration) || 30;
+                      return (
+                        <div
+                          key={appt.id}
+                          className="appt-card"
+                          style={{
+                            position: 'absolute',
+                            top: calculateTopOffset(appt.time),
+                            left: `${(colIndex * 100) / (columns.length || 1)}%`,
+                            width: `${100 / (columns.length || 1)}%`,
+                            height: (dur / 30) * 64,
+                            background: getStatusColor(appt.status),
+                            zIndex: 5,
+                            padding: '4px 8px',
+                            overflow: 'hidden'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ lineHeight: '1.2' }}>
+                              <strong style={{ fontSize: '10.5px' }}>{appt.service} ({dur}m)</strong>
+                              <span style={{ fontSize: '9px', display: 'block', fontWeight: 'bold', textTransform: 'capitalize' }}>• {appt.status}</span>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <button type="button" className="edit-mini-btn" onClick={(e) => handleEditClick(e, appt)}>✎</button>
+                              <button type="button" className="delete-mini-btn" onClick={(e) => handleDeleteClick(e, appt)}>🗑</button>
+                            </div>
                           </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <button className="edit-mini-btn" onClick={(e) => handleEditClick(e, appt)}>✎</button>
-                            <button className="delete-mini-btn" onClick={(e) => handleDeleteClick(e, appt)}>🗑</button>
-                          </div>
+                          <p style={{ fontSize: '11px', margin: '2px 0 0 0' }}>{appt.customer}</p>
                         </div>
-                        <p style={{ fontSize: '11px', margin: '2px 0 0 0' }}>{appt.customer}</p>
-                      </div>
-                    );
-                  }))}
+                      );
+                    }))}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="list-view" style={{ marginTop: '20px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>
+                  <th style={{ padding: '8px' }}>Date</th>
+                  <th style={{ padding: '8px' }}>Time</th>
+                  <th style={{ padding: '8px' }}>Staff</th>
+                  <th style={{ padding: '8px' }}>Service</th>
+                  <th style={{ padding: '8px' }}>Customer</th>
+                  <th style={{ padding: '8px' }}>Duration</th>
+                  <th style={{ padding: '8px' }}>Status</th>
+                  <th style={{ padding: '8px' }}>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+              {listAppointments.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{ padding: '12px', color: '#6b7280' }}>No appointments found.</td>
+                </tr>
+              )}
+              {listAppointments.map(appt => {
+                const staff = staffMembers.find(s => String(s.id || s.UserId) === String(appt.staffId));
+                return (
+                  <tr key={appt.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.date ? new Date(appt.date).toLocaleDateString() : (appt.BookingTime ? new Date(appt.BookingTime).toLocaleDateString() : '')}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.time}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{staff?.name || staff?.Name || '—'}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.service}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.customer}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.duration}m</td>
+                    <td style={{ padding: '8px', verticalAlign: 'top', textTransform: 'capitalize' }}>{appt.status}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'top' }}>
+                      <button type="button" className="btn secondary" style={{ marginRight: '6px' }} onClick={(e) => handleEditClick(e, appt)}>Edit</button>
+                      <button type="button" className="btn danger" onClick={(e) => handleDeleteClick(e, appt)}>Delete</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <PortalModal open={open} onClose={() => {setOpen(false); setEditingAppt(null);}} title={editingAppt ? "Edit Appointment" : "Add New Appointment"}>
         <form className="appt-form" onSubmit={handleSubmit} style={{ maxHeight: '85vh', overflowY: 'auto', paddingRight: '10px' }}>
@@ -486,7 +571,7 @@ export default function OwnerAppointmentsPage() {
           <div style={{ display: 'flex', gap: '10px' }}>
             <div className="form-group" style={{ flex: 1 }}>
               <label>Date</label>
-              <input type="date" name="date" required defaultValue={editingAppt?.date ? new Date(editingAppt.date).toISOString().split('T')[0] : selectedDate.toISOString().split('T')[0]} />
+              <input type="date" name="date" required defaultValue={editDateDefault} />
             </div>
             <div className="form-group" style={{ flex: 1 }}>
               <label>Time</label>
@@ -499,7 +584,8 @@ export default function OwnerAppointmentsPage() {
             <select name="status" defaultValue={editingAppt?.status || "pending"}>
               <option value="pending">Pending</option>
               <option value="booked">Booked</option>
-              <option value="completed">Completed</option>
+                <option value="completed">Completed</option>
+                <option value="canceled">Canceled</option>
             </select>
           </div>
 

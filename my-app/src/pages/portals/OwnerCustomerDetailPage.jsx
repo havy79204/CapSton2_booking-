@@ -138,9 +138,9 @@ export default function OwnerCustomerDetailPage() {
       api
         .get(`/api/owner/customers/${customerId}/bookings`)
         .then((data) => {
-          console.log('Bookings loaded:', data)
-          setBookings(Array.isArray(data) ? data : [])
-        })
+            if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) console.debug('OwnerCustomerDetail: bookings count', Array.isArray(data) ? data.length : 0)
+            setBookings(Array.isArray(data) ? data : [])
+          })
         .catch((err) => {
           console.warn('Failed to load bookings:', err.message)
           setBookings([])
@@ -149,9 +149,9 @@ export default function OwnerCustomerDetailPage() {
       api
         .get(`/api/owner/customers/${customerId}/orders`)
         .then((data) => {
-          console.log('Orders loaded:', data)
-          setOrders(Array.isArray(data) ? data : [])
-        })
+            if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) console.debug('OwnerCustomerDetail: orders count', Array.isArray(data) ? data.length : 0)
+            setOrders(Array.isArray(data) ? data : [])
+          })
         .catch((err) => {
           console.warn('Failed to load orders:', err.message)
           setOrders([])
