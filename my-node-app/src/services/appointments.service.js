@@ -51,16 +51,15 @@ ORDER BY b.BookingTime DESC`
 
   // Phải map qua toAppointmentListItem để Frontend nhận đúng format
   return (result.recordset || []).map(row => {
-  const mapped = toAppointmentListItem(row);
+    const mapped = toAppointmentListItem(row);
 
-  return {
-    ...mapped,
-    serviceIds: row.ServiceIds
-      ? row.ServiceIds.split(',').map(id => String(id))
-      : []
-  };
-});
-  return (result.recordset || []).map(toAppointmentListItem);
+    return {
+      ...mapped,
+      serviceIds: row.ServiceIds
+        ? row.ServiceIds.split(',').map(id => String(id))
+        : []
+    };
+  });
 }
 
 async function createAppointment(payload) {
