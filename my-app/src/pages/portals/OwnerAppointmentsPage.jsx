@@ -1,355 +1,449 @@
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable no-unused-vars */
 import React, { useEffect, useMemo, useState } from 'react'
 import '../../styles/appointments.css'
-import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
-import {
-  IconCalendar,
-  IconClock,
-  IconSearch,
-  IconUser,
-} from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
 
 export default function OwnerAppointmentsPage() {
-  const [open, setOpen] = useState(false)
   const [appointments, setAppointments] = useState([])
-  const [query, setQuery] = useState('')
-  const [editing, setEditing] = useState(null)
+  const [staffMembers, setStaffMembers] = useState([])
   const [customers, setCustomers] = useState([])
   const [services, setServices] = useState([])
-  const [staffMembers, setStaffMembers] = useState([])
-  const [form, setForm] = useState({
-    customerUserId: '',
-    serviceId: '',
-    staffId: '',
-    date: '',
-    time: '',
-    note: '',
-  })
 
-  async function reloadAppointments() {
-    const appt = await api.get('/api/owner/appointments')
-    if (Array.isArray(appt)) setAppointments(appt)
-  }
+  const [open, setOpen] = useState(false)
+  const [editingAppt, setEditingAppt] = useState(null)
+  const [selectedDate, setSelectedDate] = useState(new Date())
+  const [selectedStaff, setSelectedStaff] = useState('all')
+  const [selectedServiceIds, setSelectedServiceIds] = useState([])
 
-  useEffect(() => {
-    Promise.all([
-      api.get('/api/owner/appointments'),
-      api.get('/api/owner/customers'),
-      api.get('/api/owner/services'),
-      api.get('/api/owner/staff'),
-    ])
-      .then(([appt, cust, svcSections, staff]) => {
-        if (Array.isArray(appt)) setAppointments(appt)
-        if (Array.isArray(cust)) setCustomers(cust)
-        if (Array.isArray(staff)) setStaffMembers(staff)
+  // ================= UTILS =================
+  const normalizeTime = (t) => {
+    if (!t) return '09:00';
+    const match = String(t).match(/(\d+):(\d+)\s*(AM|PM|CH|SA)?/i);
+    if (!match) return String(t);
+    let hours = parseInt(match[1], 10);
+    const minutes = match[2];
+    const modifier = match[3];
+    if (modifier) {
+      if ((modifier.toUpperCase() === 'PM' || modifier.toUpperCase() === 'CH') && hours < 12) hours += 12;
+      if ((modifier.toUpperCase() === 'AM' || modifier.toUpperCase() === 'SA') && hours === 12) hours = 0;
+    }
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  };
 
-        const flatServices = []
-        if (Array.isArray(svcSections)) {
-          for (const section of svcSections) {
-            if (section && Array.isArray(section.items)) {
-              for (const it of section.items) {
-                flatServices.push(it)
-              }
-            }
-          }
+  const calculateTopOffset = (timeStr) => {
+    const normalized = normalizeTime(timeStr);
+    const [hours, minutes] = normalized.split(':').map(Number);
+    return ((hours * 60 + minutes) - (9 * 60)) * 64 / 30;
+  };
+
+  const getStatusColor = (status) => {
+    const s = String(status || '').trim().toLowerCase();
+    if (s === 'completed' || s === 'done') return '#10b981';
+    if (s === 'booked' || s === 'pending') return '#6366f1';
+    return '#94a3b8';
+  };
+
+  const isSameDay = (d1, d2) => {
+    const date1 = new Date(d1);
+    const date2 = new Date(d2);
+    return date1.getFullYear() === date2.getFullYear() &&
+           date1.getMonth() === date2.getMonth() &&
+           date1.getDate() === date2.getDate();
+  };
+
+  const toMinutes = (t) => {
+    const [h, m] = normalizeTime(t).split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  const isOverlap = (newAppt, existingAppts) => {
+    const newStart = toMinutes(newAppt.time);
+    const newDuration = Number(newAppt.duration) || 30;
+    const newEnd = newStart + newDuration;
+
+    return existingAppts.some(a => {
+      const start = toMinutes(a.time);
+      const duration = Number(a.duration) || 30;
+      const end = start + duration;
+      return newStart < end && newEnd > start;
+    });
+  };
+
+  function layoutAppointments(list) {
+    const sorted = [...list].sort((a, b) => toMinutes(a.time) - toMinutes(b.time));
+    const columns = [];
+
+    sorted.forEach(appt => {
+      let placed = false;
+      const apptStart = toMinutes(appt.time);
+      const apptDuration = Number(appt.duration) || 30;
+
+      for (let col of columns) {
+        const last = col[col.length - 1];
+        const lastDuration = Number(last.duration) || 30;
+        const lastEnd = toMinutes(last.time) + lastDuration;
+
+        if (apptStart >= lastEnd) {
+          col.push(appt);
+          placed = true;
+          break;
         }
-        setServices(flatServices)
-      })
-      .catch((err) => console.error(err))
-  }, [])
-
-  const customerOptions = useMemo(
-    () => customers.map((c) => ({ id: c.id, name: c.name })),
-    [customers]
-  )
-  const serviceOptions = useMemo(
-    () => services.map((s) => ({ id: s.id, name: s.name })),
-    [services]
-  )
-  const staffOptions = useMemo(
-    () => staffMembers.map((s) => ({ id: s.id, name: s.name })),
-    [staffMembers]
-  )
-
-  function close() {
-    setOpen(false)
-    setEditing(null)
+      }
+      if (!placed) columns.push([appt]);
+    });
+    return columns;
   }
 
-  function openCreate() {
-    setEditing(null)
-    setForm({ customerUserId: '', serviceId: '', staffId: '', date: '', time: '', note: '' })
-    setOpen(true)
-  }
-
-  function openEdit(appt) {
-    if (!appt) return
-    setEditing(appt)
-    setForm({
-      customerUserId: appt.customerUserId ? String(appt.customerUserId) : '',
-      serviceId: appt.serviceId ? String(appt.serviceId) : '',
-      staffId: appt.staffId ? String(appt.staffId) : '',
-      date: appt.date || '',
-      time: appt.timeValue || '',
-      note: appt.note || '',
-    })
-    setOpen(true)
-  }
-
-  async function onSubmit(e) {
-    e.preventDefault()
-
+  // ================= FETCH DATA =================
+  const fetchData = async () => {
     try {
-      const payload = {
-        customerUserId: form.customerUserId,
-        serviceId: form.serviceId,
-        staffId: form.staffId,
-        date: form.date,
-        time: form.time,
-        note: form.note,
+      const [apptRes, staffRes, custRes, svcRes] = await Promise.all([
+        api.get('/api/owner/appointments'),
+        api.get('/api/owner/staff'),
+        api.get('/api/owner/customers'),
+        api.get('/api/owner/services'),
+      ]);
+
+      const apptData = Array.isArray(apptRes) ? apptRes : apptRes?.appointments || [];
+      const staffData = Array.isArray(staffRes) ? staffRes : staffRes?.staff || [];
+      const customerData = Array.isArray(custRes) ? custRes : custRes?.customers || [];
+
+      let flatServices = [];
+      if (Array.isArray(svcRes)) {
+        svcRes.forEach(section => {
+          if (section.items && Array.isArray(section.items)) {
+            section.items.forEach(item => {
+              flatServices.push({
+                ...item,
+                ServiceId: item.ServiceId || item.id,
+                Name: item.Name || item.name,
+                DurationMinutes: Number(item.DurationMinutes || item.durationMinutes || item.duration || 30)
+              });
+            });
+          }
+        });
       }
 
-      if (editing?.id) {
-        await api.put(`/api/owner/appointments/${editing.id}`, payload)
+      const mapped = apptData.map(a => {
+        const customer = customerData.find(c =>
+          String(c.UserId || c.userId || c.id) === String(a.customerUserId || a.customerId)
+        );
+
+        const sIds = Array.isArray(a.serviceIds)
+          ? a.serviceIds.map(String)
+          : (a.serviceId ? [String(a.serviceId)] : []);
+
+        const apptServices = flatServices.filter(s => sIds.includes(String(s.ServiceId)));
+
+        const totalDuration = apptServices.reduce((sum, s) => sum + s.DurationMinutes, 0);
+
+        const serviceNames = apptServices.map(s => s.Name).join(', ');
+
+        return {
+          ...a,
+          id: a.BookingId || a.id || a.AppointmentId,
+          customer: customer?.Name || customer?.name || 'Unknown Customer',
+          service: serviceNames || 'No Service',
+          duration: totalDuration || 30,
+          time: normalizeTime(a.BookingTime || a.time || a.startTime),
+          status: a.Status || a.status || 'pending',
+          serviceIds: sIds
+        };
+      });
+
+      setAppointments(mapped);
+      setStaffMembers(staffData);
+      setCustomers(customerData);
+      setServices(flatServices);
+    } catch (err) {
+      console.error('FETCH ERROR:', err);
+    }
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  // ================= ACTIONS =================
+  const handleEditClick = (e, appt) => {
+    e.stopPropagation();
+    setEditingAppt(appt);
+    const currentIds = Array.isArray(appt.serviceIds) ? appt.serviceIds.map(String) : [];
+    setSelectedServiceIds(currentIds);
+    setOpen(true);
+  };
+
+  const handleDeleteClick = async (e, appt) => {
+    e.stopPropagation();
+    if (!window.confirm("Bạn có chắc muốn xóa lịch hẹn này?")) return;
+    try {
+      const id = appt.id || appt.BookingId;
+      await api.delete(`/api/owner/appointments/${id}`);
+      await fetchData();
+    } catch (err) {
+      alert("Xóa thất bại!");
+    }
+  };
+
+  const toggleService = (id) => {
+    const sid = String(id);
+    setSelectedServiceIds(prev => prev.includes(sid) ? prev.filter(i => i !== sid) : [...prev, sid]);
+  };
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+
+    const totalDuration = services
+      .filter(s => selectedServiceIds.includes(String(s.ServiceId)))
+      .reduce((sum, s) => sum + s.DurationMinutes, 0);
+
+    const staffId = formData.get('staffId');
+    const date = formData.get('date');
+    const time = formData.get('time');
+
+    const sameStaffAppts = appointments.filter(a => {
+      const apptDate = new Date(a.date || a.BookingTime);
+      const selected = new Date(date);
+      return String(a.staffId) === String(staffId) &&
+             apptDate.toDateString() === selected.toDateString() &&
+             String(a.id) !== String(editingAppt?.id);
+    });
+
+    if (isOverlap({ time, duration: totalDuration }, sameStaffAppts)) {
+      alert("Nhân viên này đã có lịch trong khoảng thời gian này!");
+      return;
+    }
+
+    const payload = {
+      customerUserId: formData.get('customerUserId'),
+      serviceIds: selectedServiceIds,
+      staffId,
+      date,
+      time: normalizeTime(time),
+      notes: formData.get('notes') || "",
+      duration: totalDuration,
+      status: formData.get('status')
+    };
+
+    try {
+      const targetId = editingAppt?.id || editingAppt?.AppointmentId || editingAppt?.BookingId;
+      if (editingAppt) {
+        await api.put(`/api/owner/appointments/${targetId}`, payload);
       } else {
-        await api.post('/api/owner/appointments', payload)
+        await api.post('/api/owner/appointments', payload);
       }
-
-      await reloadAppointments()
-
-      setForm({ customerUserId: '', serviceId: '', staffId: '', date: '', time: '', note: '' })
-      close()
+      setOpen(false);
+      setEditingAppt(null);
+      setSelectedServiceIds([]);
+      await fetchData();
     } catch (err) {
-      console.error(err)
+      alert("Lỗi: " + (err.response?.data?.error || "Không thể lưu"));
     }
   }
 
-  async function onCancel(appt) {
-    if (!appt?.id) return
+  // ================= RENDER LOGIC =================
+  const filteredAppointments = useMemo(() => 
+    appointments.filter(appt => isSameDay(appt.date || appt.startTime || appt.BookingTime, selectedDate)),
+    [appointments, selectedDate]
+  );
 
-    try {
-      await api.del(`/api/owner/appointments/${appt.id}`)
-      await reloadAppointments()
-    } catch (err) {
-      console.error(err)
-    }
-  }
-
-  const filteredAppointments = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return appointments
-
-    return appointments.filter((a) => {
-      const customer = String(a?.customer || '').toLowerCase()
-      const service = String(a?.service || '').toLowerCase()
-      const staff = String(a?.staff || '').toLowerCase()
-      const status = String(a?.status || '').toLowerCase()
-      const time = String(a?.time || '').toLowerCase()
-      const day = String(a?.day || '').toLowerCase()
-      const month = String(a?.month || '').toLowerCase()
-      return (
-        customer.includes(q) ||
-        service.includes(q) ||
-        staff.includes(q) ||
-        status.includes(q) ||
-        time.includes(q) ||
-        day.includes(q) ||
-        month.includes(q)
-      )
-    })
-  }, [appointments, query])
+  const visibleStaff = useMemo(() => {
+    if (selectedStaff === 'all') return staffMembers;
+    return staffMembers.filter(s => String(s.id || s.UserId) === String(selectedStaff));
+  }, [staffMembers, selectedStaff]);
 
   return (
-    <div className="appointments-page">
-      <div className="portal-pageHeader">
-        <div className="portal-pageHeaderLeft" />
-
-        <button type="button" className="portal-primaryBtn" onClick={openCreate}>
-          <span className="portal-primaryBtnIcon" aria-hidden="true">
-            +
+    <div className="calendar-page">
+      {/* ================= HEADER ================= */}
+      <div className="calendar-header">
+        <div className="calendar-title">
+          <button className="nav-month-btn" onClick={() => { const d = new Date(selectedDate); d.setMonth(d.getMonth() - 1); setSelectedDate(d); }}>{"<"}</button>
+          <span style={{ margin: '0 15px', minWidth: '180px', textAlign: 'center', fontSize: '1.1rem', fontWeight: '600' }}>
+            {selectedDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
           </span>
-          Add Appointment
-        </button>
+          <button className="nav-month-btn" onClick={() => { const d = new Date(selectedDate); d.setMonth(d.getMonth() + 1); setSelectedDate(d); }}>{">"}</button>
+        </div>
+
+        <div className="calendar-actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <select className="staff-filter-select" value={selectedStaff} onChange={(e) => setSelectedStaff(e.target.value)}>
+            <option value="all">All</option>
+            {staffMembers.map(s => (
+              <option key={s.id || s.UserId} value={s.id || s.UserId}>
+                {s.name || s.Name}
+              </option>
+            ))}
+          </select>
+          <button className="btn primary" onClick={() => { setEditingAppt(null); setSelectedServiceIds([]); setOpen(true); }}>
+            + New Appointment
+          </button>
+        </div>
       </div>
 
-      <PortalModal
-        open={open}
-        title={editing ? 'Edit Appointment' : 'Add New Appointment'}
-        onClose={close}
-        footer={
-          <>
-            <button type="button" className="portal-modalBtn" onClick={close}>
-              Cancel
-            </button>
-            <button type="submit" form="appt-form" className="portal-modalBtn portal-modalBtnPrimary">
-              {editing ? 'Save Changes' : 'Create Appointment'}
-            </button>
-          </>
-        }
-      >
-        <form id="appt-form" onSubmit={onSubmit}>
-          <label className="portal-field">
-            <span className="portal-label">Customer</span>
-            <select
-              className="portal-select"
-              value={form.customerUserId}
-              onChange={(e) => setForm((p) => ({ ...p, customerUserId: e.target.value }))}
-            >
-              <option value="">Select customer</option>
-              {customerOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+      {/* ================= DATE STRIP ================= */}
+      <div className="date-strip">
+        {useMemo(() => {
+          const year = selectedDate.getFullYear();
+          const month = selectedDate.getMonth();
+          const date = new Date(year, month, 1);
+          const days = [];
+          while (date.getMonth() === month) {
+            days.push(new Date(date));
+            date.setDate(date.getDate() + 1);
+          }
+          return days;
+        }, [selectedDate.getMonth(), selectedDate.getFullYear()]).map((d, i) => (
+          <div
+            key={i}
+            className={`date-item ${d.toDateString() === selectedDate.toDateString() ? 'active' : ''}`}
+            onClick={() => setSelectedDate(d)}
+          >
+            <span>{d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+            <strong>{d.getDate()}</strong>
+          </div>
+        ))}
+      </div>
 
-          <label className="portal-field">
-            <span className="portal-label">Service</span>
-            <select
-              className="portal-select"
-              value={form.serviceId}
-              onChange={(e) => setForm((p) => ({ ...p, serviceId: e.target.value }))}
-            >
-              <option value="">Select service</option>
-              {serviceOptions.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
+      {/* ================= CALENDAR MAIN ================= */}
+      <div className="calendar-container">
+        <div className="time-column" style={{ marginTop: '40px' }}>
+          {Array.from({ length: 25 }, (_, i) => {
+            const h = 9 + Math.floor(i / 2);
+            const m = i % 2 === 0 ? '00' : '30';
+            return h <= 21 ? <div key={i} className="time-cell">{`${String(h).padStart(2, '0')}:${m}`}</div> : null;
+          })}
+        </div>
 
-          <label className="portal-field">
-            <span className="portal-label">Staff</span>
-            <select
-              className="portal-select"
-              value={form.staffId}
-              onChange={(e) => setForm((p) => ({ ...p, staffId: e.target.value }))}
-            >
-              <option value="">Select staff</option>
-              {staffOptions.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="staff-columns">
+          {visibleStaff.map(staff => {
+            const staffAppts = filteredAppointments.filter(a => String(a.staffId) === String(staff.id || staff.UserId));
+            const columns = layoutAppointments(staffAppts);
 
-          <div className="portal-modalGrid2">
-            <label className="portal-field" style={{ marginTop: 12 }}>
-              <span className="portal-label">Date</span>
-              <div className="portal-inputWithIcon">
-                <input
-                  className="portal-input"
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
-                />
-                <span className="portal-inputIcon" aria-hidden="true">
-                  <IconCalendar />
-                </span>
+            return (
+              <div key={staff.id || staff.UserId} className="staff-column">
+                <div className="staff-header">{staff.name || staff.Name}</div>
+                <div className="staff-body" style={{ position: 'relative', height: '832px', backgroundColor: '#fff', marginTop: '40px' }}>
+                  {Array.from({ length: 25 }, (_, i) => (
+                    <div key={i} className="grid-cell" style={{ height: '64px', borderBottom: '1px solid #f0f0f0' }} />
+                  ))}
+
+                  {columns.map((col, colIndex) => col.map(appt => {
+                    const dur = Number(appt.duration) || 30;
+                    return (
+                      <div
+                        key={appt.id}
+                        className="appt-card"
+                        style={{
+                          position: 'absolute',
+                          top: calculateTopOffset(appt.time),
+                          left: `${(colIndex * 100) / (columns.length || 1)}%`,
+                          width: `${100 / (columns.length || 1)}%`,
+                          height: (dur / 30) * 64,
+                          background: getStatusColor(appt.status),
+                          zIndex: 5,
+                          padding: '4px 8px',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ lineHeight: '1.2' }}>
+                            <strong style={{ fontSize: '10.5px' }}>{appt.service} ({dur}m)</strong>
+                            <span style={{ fontSize: '9px', display: 'block', fontWeight: 'bold', textTransform: 'capitalize' }}>• {appt.status}</span>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <button className="edit-mini-btn" onClick={(e) => handleEditClick(e, appt)}>✎</button>
+                            <button className="delete-mini-btn" onClick={(e) => handleDeleteClick(e, appt)}>🗑</button>
+                          </div>
+                        </div>
+                        <p style={{ fontSize: '11px', margin: '2px 0 0 0' }}>{appt.customer}</p>
+                      </div>
+                    );
+                  }))}
+                </div>
               </div>
-            </label>
+            );
+          })}
+        </div>
+      </div>
 
-            <label className="portal-field" style={{ marginTop: 12 }}>
-              <span className="portal-label">Time</span>
-              <div className="portal-inputWithIcon">
-                <input
-                  className="portal-input"
-                  type="time"
-                  value={form.time}
-                  onChange={(e) => setForm((p) => ({ ...p, time: e.target.value }))}
-                />
-                <span className="portal-inputIcon" aria-hidden="true">
-                  <IconClock />
-                </span>
-              </div>
-            </label>
+      {/* ================= MODAL ================= */}
+      <PortalModal open={open} onClose={() => {setOpen(false); setEditingAppt(null);}} title={editingAppt ? "Edit Appointment" : "Add New Appointment"}>
+        <form className="appt-form" onSubmit={handleSubmit} style={{ maxHeight: '85vh', overflowY: 'auto', paddingRight: '10px' }}>
+          {/* Form content giống hệt lần trước - đã fix NaN */}
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label>Customer</label>
+              <select name="customerUserId" required defaultValue={editingAppt?.customerUserId || ""}>
+                <option value="">Select customer</option>
+                {customers.map(c => <option key={c.UserId || c.id} value={c.UserId || c.id}>{c.Name || c.name}</option>)}
+              </select>
+            </div>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label>Staff</label>
+              <select name="staffId" required defaultValue={editingAppt?.staffId || ""}>
+                {staffMembers.map(s => <option key={s.id || s.UserId} value={s.id || s.UserId}>{s.name || s.Name}</option>)}
+              </select>
+            </div>
           </div>
 
-          <label className="portal-field">
-            <span className="portal-label">Notes</span>
-            <textarea
-              className="portal-textarea"
-              placeholder="Add notes (optional)"
-              value={form.note}
-              onChange={(e) => setForm((p) => ({ ...p, note: e.target.value }))}
-            />
-          </label>
+          <div className="form-group">
+            <label style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Services ({selectedServiceIds.length})</span>
+              <span style={{ color: '#6366f1' }}>
+                Total: {services.filter(s => selectedServiceIds.includes(String(s.ServiceId)))
+                                .reduce((sum, s) => sum + s.DurationMinutes, 0)} min
+              </span>
+            </label>
+
+            <div className="service-chip-container" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '10px', border: '1px solid #e2e8f0', borderRadius: '8px', maxHeight: '140px', overflowY: 'auto' }}>
+              {services.map(s => {
+                const id = String(s.ServiceId);
+                const active = selectedServiceIds.includes(id);
+                return (
+                  <div key={id} onClick={() => toggleService(id)} className={`service-chip ${active ? 'active' : ''}`}
+                    style={{
+                      padding: '6px 12px', borderRadius: '20px', fontSize: '12.5px', cursor: 'pointer',
+                      border: `1px solid ${active ? '#6366f1' : '#cbd5e1'}`, backgroundColor: active ? '#6366f1' : '#fff',
+                      color: active ? '#fff' : '#475569'
+                    }}>
+                    {active ? '✓ ' : ''}{s.Name} <small>({s.DurationMinutes}m)</small>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label>Date</label>
+              <input type="date" name="date" required defaultValue={editingAppt?.date ? new Date(editingAppt.date).toISOString().split('T')[0] : selectedDate.toISOString().split('T')[0]} />
+            </div>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label>Time</label>
+              <input type="time" name="time" required defaultValue={editingAppt?.time || ""} />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label>Status</label>
+            <select name="status" defaultValue={editingAppt?.status || "pending"}>
+              <option value="pending">Pending</option>
+              <option value="booked">Booked</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label>Notes</label>
+            <textarea name="notes" rows="3" defaultValue={editingAppt?.notes || ""}></textarea>
+          </div>
+
+          <div className="form-actions">
+            <button type="button" className="btn secondary" onClick={() => setOpen(false)}>Cancel</button>
+            <button type="submit" className="btn primary">{editingAppt ? "Save Changes" : "Create Appointment"}</button>
+          </div>
         </form>
       </PortalModal>
-
-      <div className="portal-search portal-searchFull" role="search">
-        <span className="portal-searchIcon" aria-hidden="true">
-          <IconSearch />
-        </span>
-        <input
-          className="portal-searchInput"
-          placeholder="Search appointments by customer, service, staff..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
-
-      <PortalCard className="portal-apptCard">
-        <div className="portal-apptList" role="list">
-          {filteredAppointments.map((a) => (
-            <div
-              key={a.id || `${a.customer}-${a.time}`}
-              className="portal-apptItem"
-              role="listitem"
-            >
-              <div className="portal-apptDate" aria-label="Appointment date">
-                <div className="portal-apptDay">{a.day}</div>
-                <div className="portal-apptMonth">{a.month}</div>
-              </div>
-
-              <div className="portal-apptInfo">
-                <div className="portal-apptTop">
-                  <div className="portal-apptName">{a.customer}</div>
-                  <span className="portal-pill portal-pillBlue">{a.status}</span>
-                </div>
-
-                <div className="portal-apptMetaRow">
-                  <span className="portal-apptMeta">
-                    <span className="portal-apptMetaIcon" aria-hidden="true">
-                      <IconClock />
-                    </span>
-                    {a.time} ({a.duration})
-                  </span>
-                  <span className="portal-apptMeta">
-                    <span className="portal-apptMetaIcon" aria-hidden="true">
-                      <IconUser />
-                    </span>
-                    {a.staff}
-                  </span>
-                </div>
-
-                <div className="portal-apptService">
-                  <span className="portal-apptServiceIcon" aria-hidden="true">
-                    <IconCalendar />
-                  </span>
-                  {a.service}
-                </div>
-              </div>
-
-              <div className="portal-apptRight">
-                <div className="portal-apptPrice">{a.price}</div>
-                <div className="portal-apptActions">
-                  <button type="button" className="portal-ghostBtn" onClick={() => openEdit(a)}>
-                    Edit
-                  </button>
-                  <button type="button" className="portal-ghostBtn danger" onClick={() => onCancel(a)}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </PortalCard>
     </div>
-  )
+  );
 }
