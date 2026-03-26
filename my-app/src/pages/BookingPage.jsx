@@ -25,6 +25,17 @@ function buildTimeSlots() {
 }
 
 const BookingPage = () => {
+
+  const mapBookingStatus = (s) => {
+    const st = String(s || '').trim().toLowerCase()
+    if (!st) return 'Unknown'
+    if (st === 'completed' || st === 'done') return 'Completed'
+    if (st === 'booked') return 'Booked'
+    if (st === 'pending') return 'Pending'
+    if (st === 'cancel' || st === 'cancelled') return 'Cancelled'
+    return st.charAt(0).toUpperCase() + st.slice(1)
+  }
+
   const location = useLocation()
   const selectedServiceIdFromState = location.state?.serviceId
 
@@ -415,7 +426,7 @@ const BookingPage = () => {
                     <div key={booking.BookingId} className="summary-service-row">
                       <span>{booking.BookingId}</span>
                       <span>{new Date(booking.BookingTime).toLocaleString()}</span>
-                      <span>{booking.Status}</span>
+                      <span>{mapBookingStatus(booking.Status || booking.status)}</span>
                     </div>
                   ))}
                 </div>

@@ -32,7 +32,6 @@ import '../styles/ProfilePage.css'
 function mapBookingStatusClass(status) {
   const s = String(status || '').toLowerCase()
   if (s.includes('confirm')) return 'status-confirmed'
-  if (s.includes('C')) return 'status-C'
   if (s.includes('complete')) return 'status-completed'
   if (s.includes('cancel')) return 'status-cancelled'
   return ''
@@ -49,7 +48,7 @@ function mapOrderStatusClass(status) {
 function normalizeOrderStatus(status) {
   const s = String(status || '').trim().toLowerCase()
   if (!s) return 'Pending'
-  if (s === 'c' || s === 'pending') return 'Pending'
+  if (s === 'pending') return 'Pending'
   if (s === 'processing') return 'Processing'
   if (s === 'shipping' || s === 'shipped' || s === 'delivering' || s === 'in transit') return 'Shipping'
   if (s === 'completed' || s === 'complete' || s === 'delivered') return 'Completed'
@@ -59,17 +58,18 @@ function normalizeOrderStatus(status) {
 }
 
 function isCStatus(status) {
-  return String(status || '').trim().toLowerCase() === 'C'
+  // treat 'pending' as cancellable (previously 'C')
+  return String(status || '').trim().toLowerCase() === 'pending'
 }
 
 const ProfileHeader = ({ user, bookings, orders, onEditProfile, onManageAddresses, reviewsCount }) => {
   const now = new Date()
   const upcomingCount = bookings.filter((b) => {
     const t = new Date(b.BookingTime)
-    return (String(b.Status || '').toLowerCase().includes('confirm') || String(b.Status || '').toLowerCase().includes('C')) && t > now
+    return (String(b.Status || '').toLowerCase().includes('confirm') || String(b.Status || '').toLowerCase().includes('pending')) && t > now
   }).length
 
-  const CCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('C')).length
+  const CCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('pending')).length
   const inProgressCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('progress')).length
   const completedCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('complete')).length
   // Use provided reviewsCount (from API) when available; otherwise fall back to completed bookings
@@ -140,13 +140,14 @@ const MyBookingSection = ({ bookings, onCancelBooking, cancellingBookingId, init
   }, [initialTab])
 
   const filteredBookings = useMemo(() => {
-    const now = new Date()
     return bookings.filter((booking) => {
       const status = String(booking.Status || '').toLowerCase()
-      const time = new Date(booking.BookingTime)
       if (activeTab === 'All') return true
-      if (activeTab === 'Past') return status.includes('complete') || time < now
-      return status.includes('cancel')
+      if (activeTab === 'Completed') return status.includes('complete') || status.includes('done')
+      if (activeTab === 'Pending') return status.includes('pending') || status.includes('wait')
+      if (activeTab === 'Booked') return status.includes('book') || status.includes('confirm')
+      if (activeTab === 'Cancelled') return status.includes('cancel')
+      return true
     })
   }, [bookings, activeTab])
 
@@ -162,7 +163,9 @@ const MyBookingSection = ({ bookings, onCancelBooking, cancellingBookingId, init
 
         <div className="booking-tabs">
           <button className={`tab-btn ${activeTab === 'All' ? 'active' : ''}`} onClick={() => setActiveTab('All')}>All Service Booking</button>
-          <button className={`tab-btn ${activeTab === 'Past' ? 'active' : ''}`} onClick={() => setActiveTab('Past')}>Past</button>
+          <button className={`tab-btn ${activeTab === 'Completed' ? 'active' : ''}`} onClick={() => setActiveTab('Completed')}>Completed</button>
+          <button className={`tab-btn ${activeTab === 'Pending' ? 'active' : ''}`} onClick={() => setActiveTab('Pending')}>Pending</button>
+          <button className={`tab-btn ${activeTab === 'Booked' ? 'active' : ''}`} onClick={() => setActiveTab('Booked')}>Booked</button>
           <button className={`tab-btn ${activeTab === 'Cancelled' ? 'active' : ''}`} onClick={() => setActiveTab('Cancelled')}>Cancelled</button>
         </div>
 
@@ -191,7 +194,7 @@ const MyBookingSection = ({ bookings, onCancelBooking, cancellingBookingId, init
                     <span className={`booking-status ${mapBookingStatusClass(booking.Status)}`}><IoCheckmarkCircle /> {booking.Status}</span>
                     <p className="booking-time">{date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</p>
                   </div>
-                  <div className="booking-user"><span>{booking.CustomerUserId}</span></div>
+                  {/* removed display of raw user id for privacy */}
                   <div className="booking-actions">
                     {isCStatus(booking.Status) ? (
                       <button
