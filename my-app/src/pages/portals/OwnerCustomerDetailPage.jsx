@@ -107,6 +107,11 @@ export default function OwnerCustomerDetailPage() {
             phone: data.phone || '',
             email: data.email || '',
           })
+          // Initialize account disabled flag from DB status when available
+          if (data && data.status) {
+            const s = String(data.status || '').toLowerCase()
+            setIsAccountDisabled(s === 'inactive' || s === 'deleted')
+          }
         })
         .catch((err) => {
           console.error('Failed to load customer:', err)
@@ -121,6 +126,10 @@ export default function OwnerCustomerDetailPage() {
                   phone: found.phone || '',
                   email: found.email || '',
                 })
+                if (found && found.status) {
+                  const s = String(found.status || '').toLowerCase()
+                  setIsAccountDisabled(s === 'inactive' || s === 'deleted')
+                }
               }
             })
             .catch((e) => console.error('Failed to load customers list:', e))
@@ -158,8 +167,27 @@ export default function OwnerCustomerDetailPage() {
     setOpenEdit(true)
   }
 
-  function toggleAccountStatus() {
-    setIsAccountDisabled(!isAccountDisabled)
+  async function toggleAccountStatus() {
+    const newDisabled = !isAccountDisabled
+    // Optimistic UI update
+    setIsAccountDisabled(newDisabled)
+
+    if (!customer?.id) return
+
+    try {
+      const statusValue = newDisabled ? 'Inactive' : 'Active'
+      await api.put(`/api/owner/customers/${customer.id}`, { status: statusValue })
+      const updated = await api.get(`/api/owner/customers/${customer.id}`)
+      setCustomer(updated)
+      if (updated && updated.status) {
+        const s = String(updated.status || '').toLowerCase()
+        setIsAccountDisabled(s === 'inactive' || s === 'deleted')
+      }
+    } catch (err) {
+      console.error('Failed to toggle account status:', err)
+      // Revert optimistic UI change on error
+      setIsAccountDisabled(!newDisabled)
+    }
   }
 
   async function onSubmitEdit(e) {

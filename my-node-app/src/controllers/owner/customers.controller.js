@@ -40,13 +40,19 @@ const putCustomer = asyncHandler(async (req, res) => {
     return
   }
 
-  const { name } = req.body || {}
-  if (!name) {
-    res.status(400).json({ ok: false, error: 'Missing name' })
+  // Accept partial updates: name, phone, email, status
+  const allowed = ['name', 'phone', 'email', 'status']
+  const payload = {}
+  for (const k of allowed) {
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, k)) payload[k] = req.body[k]
+  }
+
+  if (!payload || Object.keys(payload).length === 0) {
+    res.status(400).json({ ok: false, error: 'No fields to update' })
     return
   }
 
-  const data = await customersService.updateCustomer(id, req.body)
+  const data = await customersService.updateCustomer(id, payload)
   res.json({ ok: true, data })
 })
 

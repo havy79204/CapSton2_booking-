@@ -7,7 +7,16 @@ import {
 } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
 
-function getAccountStatus(lastVisitDateString) {
+function getAccountStatus(statusFromDb, lastVisitDateString) {
+  // Prefer explicit DB status when provided
+  const s = statusFromDb ? String(statusFromDb).trim().toLowerCase() : ''
+  if (s) {
+    if (s === 'deleted') return { status: 'Deleted', color: '#6c757d' }
+    if (s === 'inactive') return { status: 'Inactive', color: '#ff7b00' }
+    if (s === 'active') return { status: 'Active', color: '#28a745' }
+    // unknown token from DB — fallthrough to last-visit logic below
+  }
+
   // If never visited, return inactive
   if (!lastVisitDateString || lastVisitDateString === 'Never' || lastVisitDateString === '') {
     return { status: 'Inactive', color: '#dc3545' }
@@ -49,6 +58,7 @@ export default function OwnerCustomersPage() {
     name: '',
     phone: '',
     email: '',
+    status: 'Active',
   })
   const [deletingId, setDeletingId] = useState('')
 
@@ -72,7 +82,7 @@ export default function OwnerCustomersPage() {
 
   function openCreate() {
     setEditing(null)
-    setForm({ name: '', phone: '', email: '' })
+    setForm({ name: '', phone: '', email: '', status: 'Active' })
     setOpen(true)
   }
 
@@ -83,28 +93,34 @@ export default function OwnerCustomersPage() {
       name: customer.name || '',
       phone: customer.phone || '',
       email: customer.email || '',
+      status: customer.status || 'Active',
     })
     setOpen(true)
   }
 
   async function onSubmit(e) {
     e.preventDefault()
-    if (!form.name) return
+    // For create require a name; for edit allow partial updates (status-only, etc.)
+    if (!editing && !form.name) return
 
     try {
       const payload = {
         name: form.name,
         phone: form.phone,
         email: form.email,
+        status: form.status,
       }
 
       if (editing?.id) {
-        await api.put(`/api/owner/customers/${editing.id}`, payload)
+        // For edit, remove empty name to allow partial update
+        const putPayload = { ...payload }
+        if (!putPayload.name) delete putPayload.name
+        await api.put(`/api/owner/customers/${editing.id}`, putPayload)
       } else {
         await api.post('/api/owner/customers', payload)
       }
 
-      setForm({ name: '', phone: '', email: '' })
+      setForm({ name: '', phone: '', email: '', status: 'Active' })
       close()
       await loadCustomers()
     } catch (err) {
@@ -198,6 +214,15 @@ export default function OwnerCustomersPage() {
               onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
             />
           </label>
+
+          <label className="portal-field">
+            <span className="portal-label">Account Status</span>
+            <select className="portal-select" value={form.status} onChange={(e) => setForm(p => ({ ...p, status: e.target.value }))}>
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+              <option value="Deleted">Deleted</option>
+            </select>
+          </label>
         </form>
       </PortalModal>
 
@@ -238,7 +263,7 @@ export default function OwnerCustomersPage() {
                   <td>{c.name}</td>
                   <td>{c.phone}</td>
                   <td>{c.email}</td>
-                  <td><span style={{ color: getAccountStatus(c.last).color, fontWeight: '600' }}>{getAccountStatus(c.last).status}</span></td>
+                  <td><span style={{ color: getAccountStatus(c.status, c.last).color, fontWeight: '600' }}>{getAccountStatus(c.status, c.last).status}</span></td>
                   <td>{c.visits}</td>
                   <td>{c.last}</td>
                   <td>
