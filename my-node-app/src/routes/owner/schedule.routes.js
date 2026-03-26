@@ -1,9 +1,11 @@
-const express = require('express')
-const controller = require('../../controllers/owner/schedule.controller')
+const express = require('express');
+const controller = require('../../controllers/owner/schedule.controller');
 
-const router = express.Router()
+const router = express.Router();
 
-router.get('/schedule', controller.getSchedule)
-router.post('/schedule/shifts', controller.postShift)
+router.get('/schedule', controller.getSchedule);
+router.post('/schedule/shifts', controller.postShift);
 
-module.exports = router
+router.delete('/schedule/shifts', controller.deleteShift);
+
+module.exports = router;
