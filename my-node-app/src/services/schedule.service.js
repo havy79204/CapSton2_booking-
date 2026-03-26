@@ -39,19 +39,20 @@ function formatHourValue(value) {
 
   return raw
 }
-
 function parseHourToInt(value) {
-  const raw = String(value || '').trim()
-  const m = raw.match(/^(\d{1,2})(?::(\d{2}))?$/)
-  if (!m) return null
+  const raw = String(value || '').trim().toUpperCase();
+  const m = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/);
+  if (!m) return null;
 
-  const hour = Number(m[1])
-  const minute = Number(m[2] || '0')
-  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null
-  if (!Number.isFinite(minute) || minute < 0 || minute > 59) return null
+  let hour = Number(m[1]);
+  const minute = Number(m[2] || '0');
+  const ampm = m[3];
 
-  // Store by hour granularity in StartHour/EndHour int columns.
-  return minute >= 30 ? hour + 1 : hour
+  if (ampm === 'PM' && hour < 12) hour += 12;
+  if (ampm === 'AM' && hour === 12) hour = 0;
+
+  if (hour < 0 || hour > 23) return null;
+  return minute >= 30 ? hour + 1 : hour;
 }
 
 async function tableExists(tableName) {
@@ -234,7 +235,7 @@ async function getSchedule(weekStartQuery) {
 }
 
 async function addShift(payload) {
-  const { staffId, date, start, end } = payload || {}
+  const { staffId, date, oldDate, start, end, oldLabel } = payload || {}
   if (!staffId || !date || !start || !end) {
     const err = new Error('Missing staffId/date/start/end')
     err.status = 400
@@ -265,13 +266,136 @@ async function addShift(payload) {
     throw err
   }
 
+  const isEditing = Boolean(String(oldLabel || '').trim())
+  let oldShiftDateIso = shiftDateIso
+  let oldStartHourInt = null
+  let oldEndHourInt = null
+
+  if (isEditing) {
+    const oldLabelParts = String(oldLabel).split('-').map((part) => part.trim())
+    if (oldLabelParts.length < 2) {
+      const err = new Error('Invalid oldLabel format')
+      err.status = 400
+      throw err
+    }
+
+    oldStartHourInt = parseHourToInt(oldLabelParts[0])
+    oldEndHourInt = parseHourToInt(oldLabelParts[1])
+    if (oldStartHourInt === null || oldEndHourInt === null) {
+      const err = new Error('Invalid oldLabel time format')
+      err.status = 400
+      throw err
+    }
+
+    if (oldDate) {
+      const parsedOldDate = new Date(oldDate)
+      if (Number.isNaN(parsedOldDate.getTime())) {
+        const err = new Error('Invalid oldDate')
+        err.status = 400
+        throw err
+      }
+      oldShiftDateIso = toIsoDate(parsedOldDate)
+    }
+
+    const unchangedShift =
+      oldShiftDateIso === shiftDateIso &&
+      oldStartHourInt === startHourInt &&
+      oldEndHourInt === endHourInt
+
+    if (unchangedShift) {
+      return { staffId, date: dateLabel }
+    }
+  }
+
   const duplicate = await query(
     `SELECT TOP 1 1 AS ok
      FROM StaffAvailability
      WHERE WeekStartDate = @shiftDate
        AND StaffId = @staffId
        AND StartHour = @startHour
-       AND EndHour = @endHour`,
+       AND EndHour = @endHour
+       AND (
+         @isEditing = 0
+         OR WeekStartDate <> @oldShiftDate
+         OR StartHour <> @oldStartHour
+         OR EndHour <> @oldEndHour
+       )`,
+    {
+      shiftDate: shiftDateIso,
+      staffId,
+      startHour: startHourInt,
+      endHour: endHourInt,
+      isEditing: isEditing ? 1 : 0,
+      oldShiftDate: oldShiftDateIso,
+      oldStartHour: oldStartHourInt,
+      oldEndHour: oldEndHourInt,
+    }
+  )
+
+  if (duplicate.recordset?.length) {
+    const err = new Error('This shift already exists')
+    err.status = 409
+    throw err
+  }
+
+  const overlap = await query(
+    `SELECT TOP 1 StartHour, EndHour
+     FROM StaffAvailability
+     WHERE WeekStartDate = @shiftDate
+       AND StaffId = @staffId
+       AND NOT (EndHour <= @startHour OR StartHour >= @endHour)
+       AND (
+         @isEditing = 0
+         OR WeekStartDate <> @oldShiftDate
+         OR StartHour <> @oldStartHour
+         OR EndHour <> @oldEndHour
+       )`,
+    {
+      shiftDate: shiftDateIso,
+      staffId,
+      startHour: startHourInt,
+      endHour: endHourInt,
+      isEditing: isEditing ? 1 : 0,
+      oldShiftDate: oldShiftDateIso,
+      oldStartHour: oldStartHourInt,
+      oldEndHour: oldEndHourInt,
+    }
+  )
+
+  if (overlap.recordset?.length) {
+    const existed = overlap.recordset[0]
+    const isExactDuplicate =
+      Number(existed.StartHour) === Number(startHourInt) &&
+      Number(existed.EndHour) === Number(endHourInt)
+
+    const err = new Error(
+      isExactDuplicate
+        ? 'This shift already exists'
+        : 'This shift overlaps with an existing shift'
+    )
+    err.status = 409
+    throw err
+  }
+
+  if (isEditing) {
+    await query(
+      `DELETE FROM StaffAvailability
+       WHERE StaffId = @staffId
+         AND WeekStartDate = @oldShiftDate
+         AND StartHour = @oldStartHour
+         AND EndHour = @oldEndHour`,
+      {
+        staffId,
+        oldShiftDate: oldShiftDateIso,
+        oldStartHour: oldStartHourInt,
+        oldEndHour: oldEndHourInt,
+      }
+    )
+  }
+
+  await query(
+    `INSERT INTO StaffAvailability (WeekStartDate, StaffId, StartHour, EndHour, UpdatedAt)
+     VALUES (@shiftDate, @staffId, @startHour, @endHour, GETDATE())`,
     {
       shiftDate: shiftDateIso,
       staffId,
@@ -280,23 +404,59 @@ async function addShift(payload) {
     }
   )
 
-  if (!duplicate.recordset?.length) {
-    await query(
-      `INSERT INTO StaffAvailability (WeekStartDate, StaffId, StartHour, EndHour, UpdatedAt)
-       VALUES (@shiftDate, @staffId, @startHour, @endHour, GETDATE())`,
-      {
-        shiftDate: shiftDateIso,
-        staffId,
-        startHour: startHourInt,
-        endHour: endHourInt,
-      }
-    )
+  return { staffId, date: dateLabel }
+}
+
+async function deleteShift(payload) {
+  const { staffId, date, label } = payload || {};
+
+  if (!staffId || !date || !label) {
+    const err = new Error('Missing data (staffId, date, or label)');
+    err.status = 400;
+    throw err;
+  }
+  const parts = label.split('-').map(t => t.trim());
+  if (parts.length < 2) {
+    const err = new Error('Invalid label format');
+    err.status = 400;
+    throw err;
   }
 
-  return { staffId, date: dateLabel }
+  const startHourInt = parseHourToInt(parts[0]);
+  const endHourInt = parseHourToInt(parts[1]);
+  if (startHourInt === null || endHourInt === null) {
+    const err = new Error('Invalid time format');
+    err.status = 400;
+    throw err;
+  }
+
+  const shiftDate = new Date(date);
+  if (isNaN(shiftDate.getTime())) {
+    const err = new Error('Invalid date');
+    err.status = 400;
+    throw err;
+  }
+  const shiftDateIso = toIsoDate(shiftDate);
+
+  await query(
+    `DELETE FROM StaffAvailability 
+     WHERE StaffId = @staffId 
+     AND WeekStartDate = @shiftDate 
+     AND StartHour = @startHour 
+     AND EndHour = @endHour`,
+    {
+      staffId,
+      shiftDate: shiftDateIso,
+      startHour: startHourInt,
+      endHour: endHourInt
+    }
+  );
+
+  return { success: true };
 }
 
 module.exports = {
   getSchedule,
   addShift,
-}
+  deleteShift
+};
