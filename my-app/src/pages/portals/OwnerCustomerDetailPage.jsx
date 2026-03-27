@@ -213,6 +213,24 @@ export default function OwnerCustomerDetailPage() {
     }
   }
 
+  // Compute account status: prefer DB `customer.status` when available,
+  // otherwise fall back to last-visit heuristic (getAccountStatus).
+  const accountStatus = useMemo(() => {
+    if (customer && customer.status) {
+      const s = String(customer.status || '').trim().toLowerCase()
+      if (s === 'active') {
+        return { status: 'Active', color: '#28a745', icon: '✓' }
+      }
+      if (s === 'inactive' || s === 'deleted') {
+        return { status: 'Inactive', color: '#dc3545', icon: '✕' }
+      }
+      // Unknown explicit status: show as provided string
+      return { status: String(customer.status || ''), color: '#6c757d', icon: '?' }
+    }
+
+    return getAccountStatus(customer?.last, isAccountDisabled)
+  }, [customer, isAccountDisabled])
+
   const filteredBookings = useMemo(() => {
     const now = new Date()
     return bookings.filter((booking) => {
@@ -365,11 +383,11 @@ export default function OwnerCustomerDetailPage() {
               <div>
                 <div style={{ fontSize: '13px', color: '#666', marginBottom: '4px' }}>Account Status</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '20px', color: getAccountStatus(customer.last, isAccountDisabled).color }}>
-                    {getAccountStatus(customer.last, isAccountDisabled).icon}
+                  <span style={{ fontSize: '20px', color: accountStatus.color }}>
+                    {accountStatus.icon}
                   </span>
-                  <span style={{ fontSize: '16px', fontWeight: '600', color: getAccountStatus(customer.last, isAccountDisabled).color }}>
-                    {getAccountStatus(customer.last, isAccountDisabled).status}
+                  <span style={{ fontSize: '16px', fontWeight: '600', color: accountStatus.color }}>
+                    {accountStatus.status}
                   </span>
                 </div>
               </div>
@@ -499,29 +517,39 @@ export default function OwnerCustomerDetailPage() {
             {filteredOrders.length === 0 ? (
               <div className="portal-emptyState">No orders</div>
             ) : (
-              filteredOrders.map((order) => (
-                <div key={order.OrderId} className="portal-orderListCard">
-                  <div className="portal-orderDetailsBox">
-                    <h3 className="portal-orderId">#{order.OrderId}</h3>
-                    <div className="portal-orderItems">
-                      {(order.Items || []).map((item, idx) => (
-                        <span key={`${order.OrderId}-${idx}`}>
-                          {item.ProductName} x {item.Quantity}
-                        </span>
-                      ))}
+              filteredOrders.map((order, orderIdx) => {
+                const id = String(order.OrderId || order.orderId || order.Id || order.id || '').trim()
+                const displayId = id ? `#${id}` : `#${orderIdx + 1}`
+                return (
+                  <div key={id || orderIdx} className="portal-orderListCard">
+                    <div className="portal-orderDetailsBox">
+                      <h3 className="portal-orderId">{displayId}</h3>
+
+                      <div className="portal-orderItems" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {(order.Items || []).map((item, idx) => (
+                          <div key={`${id || orderIdx}-${idx}`} className="portal-orderItem">
+                            <span style={{ fontWeight: 600 }}>{item.ProductName || item.Name || 'Item'}</span>
+                            <span style={{ marginLeft: 8, color: '#666' }}>x {item.Quantity || 1}</span>
+                          </div>
+                        ))}
+                        {order.Items && order.Items.length === 0 ? (
+                          <div className="portal-orderItem">No items</div>
+                        ) : null}
+                      </div>
+
+                      <p className="portal-orderPayment">Payment: {order.PaymentStatus || order.Payment || 'N/A'}</p>
                     </div>
-                    <p className="portal-orderPayment">Payment: {order.PaymentStatus || 'N/A'}</p>
+                    <div className="portal-orderStatusBox">
+                      <span className={`portal-orderStatusBadge ${mapOrderStatusClass(order.Status)}`}>
+                        <IoCheckmarkCircle /> {normalizeOrderStatus(order.Status)}
+                      </span>
+                      <p className="portal-orderDate">
+                        {order.CreatedAt ? new Date(order.CreatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
+                      </p>
+                    </div>
                   </div>
-                  <div className="portal-orderStatusBox">
-                    <span className={`portal-orderStatusBadge ${mapOrderStatusClass(order.Status)}`}>
-                      <IoCheckmarkCircle /> {normalizeOrderStatus(order.Status)}
-                    </span>
-                    <p className="portal-orderDate">
-                      {new Date(order.CreatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </p>
-                  </div>
-                </div>
-              ))
+                )
+              })
             )}
           </div>
         </div>
