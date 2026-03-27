@@ -557,7 +557,6 @@ export default function OwnerProductsPage() {
                       <button type="button" className="portal-ghostBtn" onClick={() => openVariantsForProduct(p)}>
                         Variants
                       </button>
-                      {/* Delete removed: use Edit -> Status to deactivate products */}
                     </div>
                   </td>
                 </tr>

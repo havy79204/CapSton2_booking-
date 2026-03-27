@@ -13,6 +13,8 @@ function defaultFilters() {
   return {
     status: '',
     keyword: '',
+    page: 1,
+    pageSize: 20,
     sortBy: 'createdAt',
     sortDir: 'desc',
   }
@@ -24,6 +26,8 @@ function toOrderQueryString(filters) {
   if (filters.keyword) p.set('keyword', filters.keyword)
   if (filters.sortBy) p.set('sortBy', filters.sortBy)
   if (filters.sortDir) p.set('sortDir', filters.sortDir)
+  if (filters.page) p.set('page', String(filters.page))
+  if (filters.pageSize) p.set('pageSize', String(filters.pageSize))
   return p.toString()
 }
 
@@ -192,8 +196,9 @@ export default function OwnerOrdersPage() {
   }
 
   function openEditOrder(order) {
-    if (!order?.OrderId) return
-    setOrderEditing(order)
+    const realId = order?.Id || order?.id || order?.OrderId || order?.OrderCode
+    if (!realId) return
+    setOrderEditing({ ...order, OrderId: realId })
     setOrderForm({
       customerName: order.CustomerName || '',
       customerPhone: order.CustomerPhone || '',
@@ -418,29 +423,74 @@ export default function OwnerOrdersPage() {
                   <td colSpan={9}>No orders found for the current filters.</td>
                 </tr>
               ) : (
-                (orderReport.items || []).map((o) => (
-                  <tr key={o.OrderId}>
-                    <td className="portal-invName">{o.OrderCode || o.OrderId}</td>
-                    <td>{o.CreatedAt ? new Date(o.CreatedAt).toLocaleString('en-US') : '-'}</td>
-                    <td>
-                      <div>{o.CustomerName || '-'}</div>
-                      <small>{o.CustomerPhone || '-'}</small>
-                    </td>
-                    <td>{o.CustomerAddress || '-'}</td>
-                    <td>{formatVnd(o.DiscountAmount || 0)} VND</td>
-                    <td>{formatVnd(o.Total)} VND</td>
-                    <td><span className="portal-invPill">{normalizeDisplayStatus(o.Status)}</span></td>
-                    <td>{o.PaymentMethod || '-'}</td>
-                    <td>
-                      <button type="button" className="portal-ghostBtn" onClick={() => openEditOrder(o)}>
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                (orderReport.items || []).map((o) => {
+                  const realId = o.Id || o.id || o.OrderId || o.OrderCode
+                  return (
+                    <tr key={realId || `${o.OrderCode || o.OrderId || o.Id || o.id}` } onClick={() => openEditOrder(o)} style={{ cursor: 'pointer' }}>
+                      <td className="portal-invName">{realId}</td>
+                      <td>{o.CreatedAt ? new Date(o.CreatedAt).toLocaleString('en-US') : '-'}</td>
+                      <td>
+                        <div>{o.CustomerName || '-'}</div>
+                        <small>{o.CustomerPhone || '-'}</small>
+                      </td>
+                      <td>{o.CustomerAddress || '-'}</td>
+                      <td>{formatVnd(o.DiscountAmount || 0)} VND</td>
+                      <td>{formatVnd(o.Total)} VND</td>
+                      <td><span className="portal-invPill">{normalizeDisplayStatus(o.Status)}</span></td>
+                      <td>{o.PaymentMethod || '-'}</td>
+                      <td>
+                        <button type="button" className="portal-ghostBtn" onClick={() => openEditOrder(o)}>
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
+        </div>
+        <div className="portal-pagination" style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              className="portal-ghostBtn"
+              disabled={orderReport.pagination.page <= 1 || ordersLoading}
+              onClick={() => setOrderFilters((p) => ({ ...p, page: 1 }))}
+            >
+              First
+            </button>
+            <button
+              type="button"
+              className="portal-ghostBtn"
+              disabled={orderReport.pagination.page <= 1 || ordersLoading}
+              onClick={() => setOrderFilters((p) => ({ ...p, page: Math.max(1, (p.page || 1) - 1) }))}
+            >
+              Previous
+            </button>
+            <span style={{ minWidth: 120, textAlign: 'center' }}>
+              Page {orderReport.pagination.page || 1} / {Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20)))}
+            </span>
+            <button
+              type="button"
+              className="portal-ghostBtn"
+              disabled={
+                ordersLoading ||
+                (orderReport.pagination.page || 1) >= Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20)))
+              }
+              onClick={() => setOrderFilters((p) => ({ ...p, page: (p.page || 1) + 1 }))}
+            >
+              Next
+            </button>
+            <button
+              type="button"
+              className="portal-ghostBtn"
+              disabled={ordersLoading || (orderReport.pagination.page || 1) >= Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20)))}
+              onClick={() => setOrderFilters((p) => ({ ...p, page: Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20))) }))}
+            >
+              Last
+            </button>
+          </div>
         </div>
       </PortalCard>
       <PortalModal
