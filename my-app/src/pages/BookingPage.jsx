@@ -13,6 +13,8 @@ import {
   useCustomerContext,
   useCustomerStaff,
 } from '../hooks/useCustomerCommerce'
+import PortalModal from '../components/Layout portal/PortalModal.jsx'
+import { api } from '../lib/api'
 import '../styles/BookingPage.css'
 
 function buildTimeSlots() {
@@ -36,6 +38,11 @@ const BookingPage = () => {
     return st.charAt(0).toUpperCase() + st.slice(1)
   }
 
+  const isCompleted = (status) => {
+    const value = String(status || '').trim().toLowerCase()
+    return value.includes('complete') || value.includes('confirm') || value.includes('done')
+  }
+
   const location = useLocation()
   const selectedServiceIdFromState = location.state?.serviceId
 
@@ -51,6 +58,18 @@ const BookingPage = () => {
   const [selectedStaffId, setSelectedStaffId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [serviceSelections, setServiceSelections] = useState([])
+  const [completionModalOpen, setCompletionModalOpen] = useState(false)
+  const [bookingToComplete, setBookingToComplete] = useState(null)
+  const [completingBookingId, setCompletingBookingId] = useState(null)
+  const [resultModalOpen, setResultModalOpen] = useState(false)
+  const [resultMessage, setResultMessage] = useState('')
+  const [resultTitle, setResultTitle] = useState('')
+
+  // Test modal rendering - uncomment to debug
+  useEffect(() => {
+    // setCompletionModalOpen(true)
+    // setBookingToComplete({ BookingId: 'TEST-001', BookingTime: new Date().toISOString(), Status: 'Completed' })
+  }, [])
 
   const selectedServiceIdsForStaff = useMemo(() => {
     return serviceSelections
@@ -173,15 +192,56 @@ const BookingPage = () => {
           staffId: isReturningCustomer ? selectedStaffId : null,
         })),
       })
-      alert('Booking request submitted successfully!')
+      setResultTitle('Successfully!')
+      setResultMessage('Your booking request has been submitted. We will contact you soon!')
+      setResultModalOpen(true)
       setNotes('')
       setGiftCode('')
       if (!isReturningCustomer) setSelectedStaffId('')
       setServiceSelections((prev) => prev.map((service) => ({ ...service, quantity: 0 })))
     } catch (err) {
-      alert(err?.message || 'Failed to create booking')
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to submit booking request')
+      setResultModalOpen(true)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const openCompletionModal = (booking) => {
+    setBookingToComplete(booking)
+    setCompletionModalOpen(true)
+  }
+
+  const closeCompletionModal = () => {
+    setCompletionModalOpen(false)
+    setBookingToComplete(null)
+    setCompletingBookingId(null)
+  }
+
+  const confirmBookingCompletion = async () => {
+    if (!bookingToComplete) return
+
+    try {
+      setCompletingBookingId(bookingToComplete.BookingId)
+      // Update booking status to Completed
+      await api.put(`/appointments/${bookingToComplete.BookingId}`, {
+        status: 'Completed'
+      })
+      setResultTitle('Successfully!')
+      setResultMessage('Booking has been confirmed as completed. Thank you!')
+      setResultModalOpen(true)
+      closeCompletionModal()
+      // Refresh bookings list after 2 seconds
+      setTimeout(() => {
+        window.location.reload()
+      }, 2000)
+    } catch (err) {
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to mark booking as completed')
+      setResultModalOpen(true)
+    } finally {
+      setCompletingBookingId(null)
     }
   }
 
@@ -427,6 +487,15 @@ const BookingPage = () => {
                       <span>{booking.BookingId}</span>
                       <span>{new Date(booking.BookingTime).toLocaleString()}</span>
                       <span>{mapBookingStatus(booking.Status || booking.status)}</span>
+                      {isCompleted(booking.Status || booking.status) && (
+                        <button
+                          className="booking-complete-btn"
+                          onClick={() => openCompletionModal(booking)}
+                          disabled={completingBookingId === booking.BookingId}
+                        >
+                          {completingBookingId === booking.BookingId ? 'Confirming...' : 'Confirm Completion'}
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -436,6 +505,79 @@ const BookingPage = () => {
           </aside>
         </div>
       </div>
+
+      <PortalModal
+        open={completionModalOpen}
+        title="Confirm Booking Completion"
+        onClose={closeCompletionModal}
+        footer={
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+            <button
+              onClick={closeCompletionModal}
+              style={{
+                padding: '8px 16px',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                background: 'white',
+                color: '#6b7280',
+                cursor: 'pointer',
+                fontWeight: '600',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmBookingCompletion}
+              disabled={completingBookingId !== null}
+              style={{
+                padding: '8px 16px',
+                border: 'none',
+                borderRadius: '4px',
+                background: '#10b981',
+                color: 'white',
+                cursor: completingBookingId ? 'not-allowed' : 'pointer',
+                fontWeight: '600',
+                opacity: completingBookingId ? 0.6 : 1,
+              }}
+            >
+              {completingBookingId ? 'Confirming...' : 'Confirm Completion'}
+            </button>
+          </div>
+        }
+      >
+        <p style={{ marginBottom: '16px', color: '#1f2937', lineHeight: '1.5' }}>
+          Are you sure you want to mark this booking as completed?
+        </p>
+        {bookingToComplete && (
+          <div style={{ padding: '12px', background: '#f0fdf4', borderRadius: '4px', marginBottom: '16px' }}>
+            <p style={{ fontSize: '0.9rem', color: '#047857', margin: '4px 0' }}>
+              <strong>Booking ID:</strong> {bookingToComplete.BookingId}
+            </p>
+            <p style={{ fontSize: '0.9rem', color: '#047857', margin: '4px 0' }}>
+              <strong>Time:</strong> {new Date(bookingToComplete.BookingTime).toLocaleString()}
+            </p>
+            <p style={{ fontSize: '0.9rem', color: '#047857', margin: '4px 0' }}>
+              <strong>Status:</strong> {mapBookingStatus(bookingToComplete.Status || bookingToComplete.status)}
+            </p>
+          </div>
+        )}
+      </PortalModal>
+
+      <PortalModal
+        open={resultModalOpen}
+        title={resultTitle}
+        onClose={() => setResultModalOpen(false)}
+      >
+        <p style={{ 
+          fontSize: '15px', 
+          color: '#1f2937', 
+          marginBottom: '12px', 
+          lineHeight: '1.6',
+          fontWeight: '500'
+        }}>
+          {resultMessage}
+        </p>
+      </PortalModal>
     </section>
   )
 }

@@ -306,6 +306,26 @@
   cursor: not-allowed;
 }
 
+.history-rate-btn {
+  border: none;
+  border-radius: 8px;
+  background: #fbbf24;
+  color: #1f2937;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.history-rate-btn:hover {
+  background: #f59e0b;
+}
+
+.history-rate-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 @media (max-width: 980px) {
   .history-list {
     grid-template-columns: 1fr;

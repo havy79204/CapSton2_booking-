@@ -37,7 +37,7 @@ function derivePaymentStatus(orderStatus, paymentMethod) {
 
 function isCStatus(status) {
   const value = String(status || '').trim().toLowerCase()
-  return value === 'C' || value === 'awaiting'
+  return value === 'c' || value === 'awaiting' || value === 'pending'
 }
 
 function calcOrderDiscountAmount(row) {
@@ -1291,7 +1291,7 @@ async function cancelBooking(userIdInput, bookingIdInput) {
   }
 
   const bookingRes = await query(
-    `SELECT TOP 1 BookingId, CustomerUserId, Status
+    `SELECT TOP 1 BookingId, CustomerUserId, ISNULL(Status, 'C') AS Status
      FROM Bookings
      WHERE BookingId = @bookingId AND CustomerUserId = @userId`,
     { bookingId, userId }
@@ -1305,7 +1305,7 @@ async function cancelBooking(userIdInput, bookingIdInput) {
   }
 
   if (!isCStatus(booking.Status)) {
-    const err = new Error('Only C bookings can be cancelled')
+    const err = new Error(`Only pending bookings can be cancelled. Current status: ${booking.Status}`)
     err.status = 409
     throw err
   }
@@ -1335,7 +1335,7 @@ async function cancelOrder(userIdInput, orderIdInput) {
   }
 
   const orderRes = await query(
-    `SELECT TOP 1 OrderId, Status
+    `SELECT TOP 1 OrderId, ISNULL(Status, 'C') AS Status
      FROM Orders
      WHERE OrderId = @orderId AND UserId = @userId`,
     { orderId, userId }
@@ -1349,7 +1349,7 @@ async function cancelOrder(userIdInput, orderIdInput) {
   }
 
   if (!isCStatus(order.Status)) {
-    const err = new Error('Only C orders can be cancelled')
+    const err = new Error(`Only pending orders can be cancelled. Current status: ${order.Status}`)
     err.status = 409
     throw err
   }
@@ -1388,6 +1388,51 @@ async function cancelOrder(userIdInput, orderIdInput) {
   return { OrderId: orderId, Status: 'Cancelled' }
 }
 
+async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInput) {
+  const userId = requireUserId(userIdInput)
+  const bookingId = String(bookingIdInput || '').trim()
+  const rating = Number(ratingInput) || 5
+  const comment = String(commentInput || '').trim()
+
+  if (!bookingId) {
+    const err = new Error('Missing bookingId')
+    err.status = 400
+    throw err
+  }
+
+  if (rating < 1 || rating > 5) {
+    const err = new Error('Rating must be between 1 and 5')
+    err.status = 400
+    throw err
+  }
+
+  const bookingRes = await query(
+    `SELECT TOP 1 BookingId, CustomerUserId
+     FROM Bookings
+     WHERE BookingId = @bookingId AND CustomerUserId = @userId`,
+    { bookingId, userId }
+  )
+
+  const booking = bookingRes.recordset?.[0]
+  if (!booking) {
+    const err = new Error('Booking not found')
+    err.status = 404
+    throw err
+  }
+
+  await query(
+    `INSERT INTO BookingReviews (BookingId, Rating, Comment, CreatedAt)
+     VALUES (@bookingId, @rating, @comment, GETUTCDATE())`,
+    {
+      bookingId,
+      rating,
+      comment: comment || null,
+    }
+  )
+
+  return { BookingId: bookingId, Rating: rating, Comment: comment || null }
+}
+
 module.exports = {
   getCustomerContext,
   listAvailableStaff,
@@ -1403,6 +1448,7 @@ module.exports = {
   checkoutCart,
   listBookings,
   createBooking,
+  rateBooking,
   listOrders,
   cancelBooking,
   cancelOrder,

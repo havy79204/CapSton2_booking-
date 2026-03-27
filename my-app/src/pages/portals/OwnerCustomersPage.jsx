@@ -51,9 +51,11 @@ function getAccountStatus(statusFromDb, lastVisitDateString) {
 export default function OwnerCustomersPage() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [customers, setCustomers] = useState([])
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState(null)
+  const [customerToDelete, setCustomerToDelete] = useState(null)
   const [form, setForm] = useState({
     name: '',
     phone: '',
@@ -129,19 +131,32 @@ export default function OwnerCustomersPage() {
   }
 
   async function onDeleteCustomer(customer) {
-    const customerId = customer?.id || customer?.email
+    if (!customer) return
+    setCustomerToDelete(customer)
+    setDeleteConfirmOpen(true)
+  }
+
+  async function confirmDelete() {
+    if (!customerToDelete) return
+    const customerId = customerToDelete?.id || customerToDelete?.email
     if (!customerId) return
-    if (!window.confirm(`Delete customer ${customer.name}?`)) return
 
     try {
       setDeletingId(customerId)
       await api.del(`/api/owner/customers/${customerId}`)
       await loadCustomers()
+      setDeleteConfirmOpen(false)
+      setCustomerToDelete(null)
     } catch (err) {
       console.error(err)
     } finally {
       setDeletingId('')
     }
+  }
+
+  function cancelDelete() {
+    setDeleteConfirmOpen(false)
+    setCustomerToDelete(null)
   }
 
   const filteredCustomers = useMemo(() => {
@@ -226,6 +241,35 @@ export default function OwnerCustomersPage() {
         </form>
       </PortalModal>
 
+      <PortalModal
+        open={deleteConfirmOpen}
+        title="Delete Customer"
+        onClose={cancelDelete}
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={cancelDelete}>
+              Cancel
+            </button>
+            <button 
+              type="button" 
+              className="portal-modalBtn portal-modalBtnPrimary" 
+              onClick={confirmDelete}
+              disabled={deletingId === (customerToDelete?.id || customerToDelete?.email)}
+              style={{ backgroundColor: deletingId === (customerToDelete?.id || customerToDelete?.email) ? '#ccc' : '#e74c3c' }}
+            >
+              {deletingId === (customerToDelete?.id || customerToDelete?.email) ? 'Deleting...' : 'Delete'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: '15px', color: '#1f2937', marginBottom: '12px', lineHeight: '1.5', fontWeight: '500' }}>
+          Are you sure you want to delete <strong>{customerToDelete?.name}</strong>?
+        </p>
+        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '0' }}>
+          This action cannot be undone.
+        </p>
+      </PortalModal>
+
       <div className="portal-customer">
       <div className="portal-search portal-searchFull" role="search">
         <span className="portal-searchIcon" aria-hidden="true">
@@ -263,7 +307,7 @@ export default function OwnerCustomersPage() {
                   <td>{c.name}</td>
                   <td>{c.phone}</td>
                   <td>{c.email}</td>
-                  <td><span style={{ color: getAccountStatus(c.status, c.last).color, fontWeight: '600' }}>{getAccountStatus(c.status, c.last).status}</span></td>
+                  <td><span className="portal-invPill">{getAccountStatus(c.status, c.last).status}</span></td>
                   <td>{c.visits}</td>
                   <td>{c.last}</td>
                   <td>

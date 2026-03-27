@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { IoCalendarOutline, IoCheckmarkCircleOutline, IoTimeOutline } from 'react-icons/io5'
 import { useCustomerBookings } from '../hooks/useCustomerCommerce'
+import PortalModal from '../components/Layout portal/PortalModal.jsx'
+import { api } from '../lib/api.js'
 import '../styles/HistoryPage.css'
 
 function bookingStatusClass(status) {
@@ -16,10 +18,23 @@ function isC(status) {
   return String(status || '').trim().toLowerCase() === 'C'
 }
 
+function isCompleted(status) {
+  const value = String(status || '').trim().toLowerCase()
+  return value.includes('complete') || value.includes('confirm') || value.includes('done')
+}
+
 const BookingHistoryPage = () => {
   const navigate = useNavigate()
   const { bookings, loading, error, cancelBooking } = useCustomerBookings(100)
   const [cancellingId, setCancellingId] = useState('')
+  const [ratingModalOpen, setRatingModalOpen] = useState(false)
+  const [bookingToRate, setBookingToRate] = useState(null)
+  const [rating, setRating] = useState(5)
+  const [ratingComment, setRatingComment] = useState('')
+  const [submittingRating, setSubmittingRating] = useState(false)
+  const [resultModalOpen, setResultModalOpen] = useState(false)
+  const [resultMessage, setResultMessage] = useState('')
+  const [resultTitle, setResultTitle] = useState('')
 
   const handleCancel = async (booking) => {
     const bookingId = booking?.BookingId
@@ -38,6 +53,43 @@ const BookingHistoryPage = () => {
       alert(err?.message || 'Failed to cancel booking')
     } finally {
       setCancellingId('')
+    }
+  }
+
+  const openRatingModal = (booking) => {
+    setBookingToRate(booking)
+    setRating(5)
+    setRatingComment('')
+    setRatingModalOpen(true)
+  }
+
+  const closeRatingModal = () => {
+    setRatingModalOpen(false)
+    setBookingToRate(null)
+    setRating(5)
+    setRatingComment('')
+  }
+
+  const submitRating = async () => {
+    if (!bookingToRate?.BookingId) return
+    try {
+      setSubmittingRating(true)
+      const payload = {
+        bookingId: bookingToRate.BookingId,
+        rating: Number(rating),
+        comment: ratingComment.trim(),
+      }
+      await api.post('/api/customer/bookings/rating', payload)
+      closeRatingModal()
+      setResultTitle('Successfully!')
+      setResultMessage('Thank you for your review!')
+      setResultModalOpen(true)
+    } catch (err) {
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to submit rating')
+      setResultModalOpen(true)
+    } finally {
+      setSubmittingRating(false)
     }
   }
 
@@ -128,6 +180,15 @@ const BookingHistoryPage = () => {
                         {cancellingId === booking.BookingId ? 'Cancelling...' : 'Cancel Booking'}
                       </button>
                     </div>
+                  ) : isCompleted(booking.Status) ? (
+                    <div className="history-actions">
+                      <button
+                        className="history-rate-btn"
+                        onClick={() => openRatingModal(booking)}
+                      >
+                        Rate Service
+                      </button>
+                    </div>
                   ) : null}
                 </article>
               )
@@ -135,6 +196,87 @@ const BookingHistoryPage = () => {
           </div>
         )}
       </div>
+
+      <PortalModal
+        open={ratingModalOpen}
+        title="Rate Service"
+        onClose={closeRatingModal}
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={closeRatingModal}>
+              Cancel
+            </button>
+            <button 
+              type="button" 
+              className="portal-modalBtn portal-modalBtnPrimary" 
+              onClick={submitRating}
+              disabled={submittingRating}
+            >
+              {submittingRating ? 'Submitting...' : 'Submit Review'}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937', marginBottom: '8px', display: 'block' }}>
+              Your Rating
+            </label>
+            <div style={{ display: 'flex', gap: '8px', fontSize: '28px' }}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <span
+                  key={star}
+                  onClick={() => setRating(star)}
+                  style={{
+                    cursor: 'pointer',
+                    color: star <= rating ? '#fbbf24' : '#d1d5db',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  ★
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937', marginBottom: '8px', display: 'block' }}>
+              Your Comment (Optional)
+            </label>
+            <textarea
+              value={ratingComment}
+              onChange={(e) => setRatingComment(e.target.value)}
+              placeholder="Share your experience with this service..."
+              style={{
+                width: '100%',
+                minHeight: '100px',
+                padding: '10px',
+                border: '1px solid #e5e7eb',
+                borderRadius: '6px',
+                fontSize: '14px',
+                fontFamily: 'inherit',
+                resize: 'vertical',
+              }}
+            />
+          </div>
+        </div>
+      </PortalModal>
+
+      <PortalModal
+        open={resultModalOpen}
+        title={resultTitle}
+        onClose={() => setResultModalOpen(false)}
+      >
+        <p style={{ 
+          fontSize: '15px', 
+          color: '#1f2937', 
+          marginBottom: '12px', 
+          lineHeight: '1.6',
+          fontWeight: '500'
+        }}>
+          {resultMessage}
+        </p>
+      </PortalModal>
     </section>
   )
 }
