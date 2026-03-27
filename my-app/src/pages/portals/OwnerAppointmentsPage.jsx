@@ -220,9 +220,6 @@ export default function OwnerAppointmentsPage() {
     e.stopPropagation();
     if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') e.nativeEvent.stopImmediatePropagation();
     if (typeof console !== 'undefined' && console.debug) console.debug('OwnerAppointments: handleEditClick', { id: appt?.id, status: appt?.status, eventType: e.type, button: e.button });
-    // Normalize legacy or unexpected status values so the edit form
-    // doesn't submit an unknown 'delete' status which would be
-    // interpreted as a removal. Map 'delete'/'deleted' -> 'canceled'.
     const rawStatus = String(appt?.status || '').trim().toLowerCase();
     const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'canceled' : (appt?.status || 'pending');
     setEditingAppt({ ...appt, status: normalizedStatus });
@@ -242,7 +239,8 @@ export default function OwnerAppointmentsPage() {
     if (!window.confirm("Are you sure you want to delete this appointment??")) return;
     try {
       const id = appt.id || appt.BookingId;
-      await api.del(`/api/owner/appointments/${id}`);
+      // Mark appointment as deleted instead of hard-deleting it
+      await api.put(`/api/owner/appointments/${id}`, { status: 'delete' });
       await fetchData();
     } catch (err) {
       alert("Failed to delete appointment!");
@@ -324,7 +322,8 @@ export default function OwnerAppointmentsPage() {
     appointments
       .filter(appt => {
         const s = String(appt.status || '').toLowerCase();
-        return s !== 'delete' && s !== 'deleted' && s !== 'canceled' && s !== 'cancelled';
+        // Keep canceled appointments visible; only hide actual deleted markers
+        return s !== 'delete' && s !== 'deleted';
       })
       .filter(appt => isSameDay(appt.date || appt.startTime || appt.BookingTime, selectedDate)),
     [appointments, selectedDate]
@@ -334,7 +333,7 @@ export default function OwnerAppointmentsPage() {
     if (viewMode === 'list') {
       return appointments.filter(a => {
         const s = String(a.status || '').toLowerCase();
-        if (s === 'delete' || s === 'deleted' || s === 'canceled' || s === 'cancelled') return false;
+        if (s === 'delete' || s === 'deleted') return false;
         return selectedStaff === 'all' || String(a.staffId) === String(selectedStaff);
       });
     }
@@ -463,10 +462,6 @@ export default function OwnerAppointmentsPage() {
                             <div style={{ lineHeight: '1.2' }}>
                               <strong style={{ fontSize: '10.5px' }}>{appt.service} ({dur}m)</strong>
                               <span style={{ fontSize: '9px', display: 'block', fontWeight: 'bold', textTransform: 'capitalize' }}>• {appt.status}</span>
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                              <button type="button" className="edit-mini-btn" onClick={(e) => handleEditClick(e, appt)}>✎</button>
-                              <button type="button" className="delete-mini-btn" onClick={(e) => handleDeleteClick(e, appt)}>🗑</button>
                             </div>
                           </div>
                           <p style={{ fontSize: '11px', margin: '2px 0 0 0' }}>{appt.customer}</p>
