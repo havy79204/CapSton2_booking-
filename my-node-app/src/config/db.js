@@ -9,7 +9,7 @@ function getPool() {
       server: env.db.server,
       database: env.db.database,
 
-      // If using SQL Authentication
+      // Nếu dùng SQL Authentication
       ...(env.db.user && {
         user: env.db.user,
         password: env.db.password,
@@ -21,17 +21,17 @@ function getPool() {
 
         enableArithAbort: true,
 
-        // use instance if available
+        // dùng instance nếu có
         ...(env.db.instanceName && {
           instanceName: env.db.instanceName,
         }),
       },
 
-      // use port only when no instance is configured
+      // nếu KHÔNG dùng instance thì mới dùng port
       ...(!env.db.instanceName && env.db.port && { port: Number(env.db.port) }),
     }
 
-    // advanced TLS options (if any)
+    // TLS nâng cao (nếu có)
     if (env.db.tlsMinVersion || env.db.tlsCiphers) {
       config.options.cryptoCredentialsDetails = {
         ...(env.db.tlsMinVersion && {

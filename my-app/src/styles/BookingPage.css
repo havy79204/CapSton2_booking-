@@ -372,10 +372,11 @@
 .summary-head,
 .summary-service-row {
   display: grid;
-  grid-template-columns: 1.5fr 0.8fr 0.8fr;
+  grid-template-columns: 1.5fr 0.8fr 0.8fr auto;
   gap: 0.4rem;
   padding: 0.35rem 0;
   font-size: 0.82rem;
+  align-items: center;
 }
 
 .summary-head {
@@ -387,6 +388,28 @@
   color: var(--color-text-secondary);
   font-size: 0.85rem;
   margin: 0.6rem 0 0;
+}
+
+.booking-complete-btn {
+  border: none;
+  border-radius: 4px;
+  background: #10b981;
+  color: white;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.booking-complete-btn:hover {
+  background: #059669;
+}
+
+.booking-complete-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .total-lines {
@@ -591,7 +614,7 @@
 
   .summary-head,
   .summary-service-row {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     font-size: 0.75rem;
   }
 }
