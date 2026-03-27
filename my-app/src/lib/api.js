@@ -19,9 +19,9 @@ export function resolveApiImageUrl(rawPath) {
   }
 
   const normalized = value.replace(/\\/g, '/')
-
   const publicMarker = '/my-app/public/'
   const publicMarkerIndex = normalized.toLowerCase().indexOf(publicMarker)
+
   if (publicMarkerIndex >= 0) {
     const relative = normalized.slice(publicMarkerIndex + publicMarker.length).replace(/^\/+/, '')
     return `/${relative}`
@@ -111,6 +111,13 @@ export const api = {
   get: (path, options = {}) => request(path, { method: 'GET', ...(options || {}) }),
   post: (path, body) => request(path, { method: 'POST', body: JSON.stringify(body || {}) }),
   put: (path, body) => request(path, { method: 'PUT', body: JSON.stringify(body || {}) }),
-  delete: (path) => request(path, { method: 'DELETE' }),
-  del: (path) => request(path, { method: 'DELETE' }),
+  // Cho phép DELETE nhận body tương tự POST/PUT
+  delete: (path, body) => request(path, { 
+    method: 'DELETE', 
+    body: body ? JSON.stringify(body) : undefined 
+  }),
+  del: (path, body) => request(path, { 
+    method: 'DELETE', 
+    body: body ? JSON.stringify(body) : undefined 
+  }),
 }
