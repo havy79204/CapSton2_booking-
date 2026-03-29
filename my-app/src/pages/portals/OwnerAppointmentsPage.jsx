@@ -17,6 +17,8 @@ export default function OwnerAppointmentsPage() {
   const [selectedStaff, setSelectedStaff] = useState('all')
   const [selectedServiceIds, setSelectedServiceIds] = useState([])
   const [viewMode, setViewMode] = useState('calendar')
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [appointmentToDelete, setAppointmentToDelete] = useState(null)
 
   // ================= UTILS =================
   const normalizeTime = (t) => {
@@ -236,17 +238,27 @@ export default function OwnerAppointmentsPage() {
     e.stopPropagation();
     if (typeof console !== 'undefined' && console.debug) console.debug('OwnerAppointments: handleDeleteClick', { id: appt?.id, status: appt?.status, eventType: e.type, button: e.button });
     if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') e.nativeEvent.stopImmediatePropagation();
-    if (!window.confirm("Are you sure you want to delete this appointment??")) return;
+    setAppointmentToDelete(appt)
+    setDeleteConfirmOpen(true)
+  }
+
+  const confirmDelete = async () => {
+    if (!appointmentToDelete) return
     try {
-      const id = appt.id || appt.BookingId;
-      // Mark appointment as deleted instead of hard-deleting it
-      await api.put(`/api/owner/appointments/${id}`, { status: 'delete' });
-      await fetchData();
+      const id = appointmentToDelete.id || appointmentToDelete.BookingId
+      await api.put(`/api/owner/appointments/${id}`, { status: 'delete' })
+      await fetchData()
+      setDeleteConfirmOpen(false)
+      setAppointmentToDelete(null)
     } catch (err) {
-      alert("Failed to delete appointment!");
+      console.error('Failed to delete appointment:', err)
+      alert('Failed to delete appointment!')
     }
-    // ensure no other listeners run for this event
-    if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') e.nativeEvent.stopImmediatePropagation();
+  }
+
+  const cancelDelete = () => {
+    setDeleteConfirmOpen(false)
+    setAppointmentToDelete(null)
   };
 
   const toggleService = (id) => {
@@ -594,6 +606,37 @@ export default function OwnerAppointmentsPage() {
             <button type="submit" className="btn primary">{editingAppt ? "Save Changes" : "Create Appointment"}</button>
           </div>
         </form>
+      </PortalModal>
+
+      <PortalModal
+        open={deleteConfirmOpen}
+        title="Delete Appointment"
+        onClose={cancelDelete}
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={cancelDelete}>
+              Cancel
+            </button>
+            <button 
+              type="button" 
+              className="portal-modalBtn portal-modalBtnPrimary"
+              onClick={confirmDelete}
+              style={{ backgroundColor: '#e74c3c' }}
+            >
+              Delete
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: '15px', color: '#1f2937', marginBottom: '12px', lineHeight: '1.5', fontWeight: '500' }}>
+          Are you sure you want to delete this appointment?
+        </p>
+        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '0' }}>
+          <strong>Date:</strong> {String(appointmentToDelete?.date || 'N/A')} | <strong>Time:</strong> {String(appointmentToDelete?.time || 'N/A')} | <strong>Staff:</strong> {String(appointmentToDelete?.staffName || appointmentToDelete?.staff || 'N/A')}
+        </p>
+        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '0', marginTop: '8px' }}>
+          This action cannot be undone.
+        </p>
       </PortalModal>
     </div>
   );

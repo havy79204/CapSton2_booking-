@@ -1098,6 +1098,60 @@ async function createBooking(userIdInput, payload = {}) {
   const isReturningCustomer = await hasPreviousBookings(userId)
   const autoStaffId = !isReturningCustomer ? await getAutoAssignedStaffId() : null
 
+  // Calculate total duration from services
+  const staffServices = new Map()
+  for (const item of normalizedItems) {
+    const svcRes = await query(
+      `SELECT TOP 1 ServiceId, DurationMinutes
+       FROM Services
+       WHERE ServiceId = @serviceId
+         AND ${ACTIVE_SERVICE_WHERE}`,
+      { serviceId: item.serviceId }
+    )
+    const svc = svcRes.recordset?.[0]
+    if (svc) {
+      const duration = Number(svc.DurationMinutes || 30)
+      const staffId = item.staffId || null
+      if (staffId) {
+        staffServices.set(staffId, (staffServices.get(staffId) || 0) + duration * item.quantity)
+      }
+    }
+  }
+
+  // Check for booking conflicts for each staff member
+  for (const [staffId, totalDuration] of staffServices.entries()) {
+    if (!staffId) continue
+    
+    const bookingStart = when
+    const bookingEnd = new Date(bookingStart.getTime() + totalDuration * 60000)
+    const bookingDateStr = bookingStart.toISOString().split('T')[0]
+
+    // Check for overlapping appointments/bookings for this staff
+    const conflictRes = await query(
+      `SELECT TOP 1 b.BookingId
+       FROM Bookings b
+       INNER JOIN BookingServices bs ON b.BookingId = bs.BookingId
+       INNER JOIN Services s ON bs.ServiceId = s.ServiceId
+       WHERE bs.StaffId = @staffId
+         AND b.Status NOT IN ('cancelled', 'deleted', 'cancel')
+         AND CAST(CONVERT(VARCHAR(10), b.BookingTime, 120) AS DATE) = @date
+         AND b.BookingTime < @endTime
+         AND DATEADD(MINUTE, ISNULL(s.DurationMinutes, 30), b.BookingTime) > @startTime`,
+      {
+        staffId,
+        date: bookingDateStr,
+        startTime: bookingStart,
+        endTime: bookingEnd,
+      }
+    )
+
+    if (conflictRes.recordset && conflictRes.recordset.length > 0) {
+      const err = new Error('The selected specialist is not available at this time. Please choose another time slot or specialist.')
+      err.status = 409
+      throw err
+    }
+  }
+
   const bookingId = `BKG-${newId()}`
   await query(
     `INSERT INTO Bookings (BookingId, CustomerUserId, BookingTime, Status, Notes, CreatedAt)
