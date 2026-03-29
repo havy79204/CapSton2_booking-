@@ -103,6 +103,14 @@ const BookingPage = () => {
   const [selectedStaffId, setSelectedStaffId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [serviceSelections, setServiceSelections] = useState([])
+  const [completionModalOpen, setCompletionModalOpen] = useState(false)
+  const [bookingToComplete, setBookingToComplete] = useState(null)
+  const [completingBookingId, setCompletingBookingId] = useState(null)
+  const [resultModalOpen, setResultModalOpen] = useState(false)
+  const [resultMessage, setResultMessage] = useState('')
+  const [resultTitle, setResultTitle] = useState('')
+  const [promoMessage, setPromoMessage] = useState('')
+  const [appliedPromotion, setAppliedPromotion] = useState(null)
 
   const selectedServiceIdsForStaff = useMemo(() => {
     return serviceSelections
