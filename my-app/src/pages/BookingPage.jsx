@@ -15,12 +15,57 @@ import {
 } from '../hooks/useCustomerCommerce'
 import '../styles/BookingPage.css'
 
-function buildTimeSlots() {
+function parseTimeToMinutes(value) {
+  const m = String(value || '').trim().match(/^(\d{1,2}):(\d{2})$/)
+  if (!m) return null
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
+  return hh * 60 + mm
+}
+
+function minutesToTime(value) {
+  const hh = Math.floor(value / 60)
+  const mm = value % 60
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
+
+function getWeekdayKey(dateIso) {
+  const d = new Date(String(dateIso || '').trim())
+  if (Number.isNaN(d.getTime())) return null
+  const map = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+  return map[d.getDay()] || null
+}
+
+function formatPromotionType(promotion) {
+  const type = String(promotion?.discountType || '').toLowerCase()
+  const value = Number(promotion?.value || 0)
+  if (type === 'percentage') return `${value}% off`
+  if (type === 'fixed') return `$${value.toFixed(2)} off`
+  return 'Promotion'
+}
+
+function buildTimeSlots({ openTime, closeTime, slotMinutes, breakStart, breakEnd }) {
+  const open = parseTimeToMinutes(openTime)
+  const close = parseTimeToMinutes(closeTime)
+  const breakStartMin = parseTimeToMinutes(breakStart)
+  const breakEndMin = parseTimeToMinutes(breakEnd)
+  const slot = Math.max(5, Number(slotMinutes) || 30)
+
+  if (open === null || close === null || open >= close) return []
+
   const slots = []
-  for (let hour = 9; hour <= 19; hour += 1) {
-    slots.push(`${String(hour).padStart(2, '0')}:00`)
-    if (hour !== 19) slots.push(`${String(hour).padStart(2, '0')}:30`)
+  for (let minute = open; minute < close; minute += slot) {
+    const inBreak =
+      breakStartMin !== null &&
+      breakEndMin !== null &&
+      breakStartMin < breakEndMin &&
+      minute >= breakStartMin &&
+      minute < breakEndMin
+
+    if (!inBreak) slots.push(minutesToTime(minute))
   }
+
   return slots
 }
 
@@ -51,6 +96,8 @@ const BookingPage = () => {
   const [selectedStaffId, setSelectedStaffId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [serviceSelections, setServiceSelections] = useState([])
+  const [promoMessage, setPromoMessage] = useState('')
+  const [appliedPromotion, setAppliedPromotion] = useState(null)
 
   const selectedServiceIdsForStaff = useMemo(() => {
     return serviceSelections
@@ -101,7 +148,41 @@ const BookingPage = () => {
     return names
   }, [serviceSelections])
 
-  const availableTimeSlots = useMemo(() => buildTimeSlots(), [])
+  const bookingSettings = context?.bookingSettings || {}
+  const promotionEnabled = Boolean(bookingSettings.promotionEnabled)
+  const allowCustomerApply = bookingSettings.promotionAllowCustomerApply !== false
+
+  const selectedDayKey = useMemo(() => getWeekdayKey(selectedDate), [selectedDate])
+  const daySchedule = selectedDayKey ? bookingSettings?.weekdays?.[selectedDayKey] : null
+  const effectiveOpenTime = daySchedule?.openTime || bookingSettings.openTime || '08:00'
+  const effectiveCloseTime = daySchedule?.closeTime || bookingSettings.closeTime || '20:00'
+
+  const availableTimeSlots = useMemo(
+    () => buildTimeSlots({
+      openTime: effectiveOpenTime,
+      closeTime: effectiveCloseTime,
+      slotMinutes: bookingSettings.slotMinutes || 30,
+      breakStart: bookingSettings.breakStart,
+      breakEnd: bookingSettings.breakEnd,
+    }),
+    [
+      effectiveOpenTime,
+      effectiveCloseTime,
+      bookingSettings.slotMinutes,
+      bookingSettings.breakStart,
+      bookingSettings.breakEnd,
+    ],
+  )
+
+  useEffect(() => {
+    if (!availableTimeSlots.length) {
+      setSelectedTime('')
+      return
+    }
+    if (!availableTimeSlots.includes(selectedTime)) {
+      setSelectedTime(availableTimeSlots[0])
+    }
+  }, [availableTimeSlots, selectedTime])
 
   const filteredServices = useMemo(() => {
     return serviceSelections.filter((service) => {
@@ -132,11 +213,89 @@ const BookingPage = () => {
     0,
   )
 
-  const discount = giftCode.trim() ? Math.min(5, subtotal * 0.1) : 0
+  const discount = useMemo(() => {
+    if (!appliedPromotion) return 0
+    const value = Number(appliedPromotion.value || 0)
+    if (!Number.isFinite(value) || value <= 0) return 0
+
+    if (String(appliedPromotion.discountType || '').toLowerCase() === 'percentage') {
+      return Math.min(subtotal, (subtotal * Math.min(100, value)) / 100)
+    }
+
+    return Math.min(subtotal, value)
+  }, [appliedPromotion, subtotal])
   const total = Math.max(subtotal - discount, 0)
 
   const defaultAddress = context?.defaultAddress || null
   const currentUser = context?.user || null
+
+  const availablePromotions = useMemo(() => {
+    const list = Array.isArray(bookingSettings.promotions) ? bookingSettings.promotions : []
+    const now = new Date()
+
+    return list.filter((promo) => {
+      if (!promo || promo.isActive === false) return false
+      const code = String(promo.code || '').trim()
+      if (!code) return false
+
+      const start = promo.startDate ? new Date(promo.startDate) : null
+      const end = promo.endDate ? new Date(promo.endDate) : null
+      if (start && !Number.isNaN(start.getTime()) && now < start) return false
+      if (end && !Number.isNaN(end.getTime())) {
+        const inclusiveEnd = new Date(end)
+        inclusiveEnd.setHours(23, 59, 59, 999)
+        if (now > inclusiveEnd) return false
+      }
+
+      return true
+    })
+  }, [bookingSettings.promotions])
+
+  const applyPromotionCode = () => {
+    const code = String(giftCode || '').trim()
+    setPromoMessage('')
+
+    if (!code) {
+      setAppliedPromotion(null)
+      setPromoMessage('Please enter a promotion code.')
+      return
+    }
+
+    if (!promotionEnabled) {
+      setAppliedPromotion(null)
+      setPromoMessage('Promotions are currently disabled by salon settings.')
+      return
+    }
+
+    if (!allowCustomerApply) {
+      setAppliedPromotion(null)
+      setPromoMessage('This salon does not allow customers to apply promotion codes.')
+      return
+    }
+
+    const matched = availablePromotions.find(
+      (promo) => String(promo.code || '').trim().toUpperCase() === code.toUpperCase(),
+    )
+
+    if (!matched) {
+      setAppliedPromotion(null)
+      setPromoMessage('Invalid or expired promotion code.')
+      return
+    }
+
+    setAppliedPromotion(matched)
+    setGiftCode(String(matched.code || '').trim())
+    const programName = String(matched.title || '').trim() || String(matched.code || '').trim()
+    setPromoMessage(`Applied: ${programName} (${formatPromotionType(matched)}).`)
+  }
+
+  const pickPromotionSuggestion = (promo) => {
+    const nextCode = String(promo?.code || '').trim()
+    if (!nextCode) return
+    setGiftCode(nextCode)
+    setAppliedPromotion(null)
+    setPromoMessage('')
+  }
 
   const changeServiceQuantity = (serviceId, delta) => {
     setServiceSelections((prev) => prev.map((service) => {
@@ -158,6 +317,11 @@ const BookingPage = () => {
       return
     }
 
+    if (!selectedTime) {
+      alert('Please choose an available booking time.')
+      return
+    }
+
     try {
       setSubmitting(true)
       await createBooking({
@@ -165,7 +329,7 @@ const BookingPage = () => {
         time: selectedTime,
         notes,
         paymentMethod,
-        giftCode,
+        giftCode: allowCustomerApply ? giftCode : '',
         staffId: isReturningCustomer ? selectedStaffId : null,
         serviceItems: selectedServiceItems.map((service) => ({
           serviceId: service.ServiceId,
@@ -176,6 +340,8 @@ const BookingPage = () => {
       alert('Booking request submitted successfully!')
       setNotes('')
       setGiftCode('')
+      setAppliedPromotion(null)
+      setPromoMessage('')
       if (!isReturningCustomer) setSelectedStaffId('')
       setServiceSelections((prev) => prev.map((service) => ({ ...service, quantity: 0 })))
     } catch (err) {
@@ -291,6 +457,11 @@ const BookingPage = () => {
                 </div>
 
                 <p className="times-title">Available times</p>
+                {effectiveOpenTime && effectiveCloseTime ? (
+                  <p className="times-title" style={{ marginTop: 0 }}>
+                    Working hours: {effectiveOpenTime} - {effectiveCloseTime}
+                  </p>
+                ) : null}
                 <div className="time-grid">
                   {availableTimeSlots.map((slot) => (
                     <button
@@ -372,19 +543,68 @@ const BookingPage = () => {
                 </div>
 
                 <div className="gift-row-booking">
-                  <input
-                    type="text"
-                    placeholder="Enter Gift code..."
-                    value={giftCode}
-                    onChange={(event) => setGiftCode(event.target.value)}
-                  />
-                  <button type="button">Apply</button>
+                  {promotionEnabled && allowCustomerApply ? (
+                    <>
+                      <input
+                        type="text"
+                        placeholder="Enter promotion code..."
+                        value={giftCode}
+                        onChange={(event) => {
+                          setGiftCode(event.target.value)
+                          setAppliedPromotion(null)
+                          if (promoMessage) setPromoMessage('')
+                        }}
+                      />
+                      <button type="button" onClick={applyPromotionCode}>Apply</button>
+                    </>
+                  ) : promotionEnabled ? (
+                    <div className="summary-empty">This salon has disabled customer promotion codes.</div>
+                  ) : (
+                    <div className="summary-empty">Promotions are currently disabled by salon settings.</div>
+                  )}
                 </div>
+
+                {promotionEnabled && allowCustomerApply && availablePromotions.length > 0 ? (
+                  <div className="booking-promoSuggest">
+                    <div className="booking-promoSuggestTitle">Available programs</div>
+                    <div className="booking-promoSuggestList">
+                      {availablePromotions.map((promo, idx) => {
+                        const code = String(promo.code || '').trim()
+                        const name = String(promo.title || '').trim() || code
+                        return (
+                          <button
+                            key={`${code}-${idx}`}
+                            type="button"
+                            className={`booking-promoSuggestItem ${giftCode.trim().toUpperCase() === code.toUpperCase() ? 'active' : ''}`}
+                            onClick={() => pickPromotionSuggestion(promo)}
+                            title={`Use code ${code}`}
+                          >
+                            <span className="booking-promoSuggestName">{name}</span>
+                            <span className="booking-promoSuggestMeta">{formatPromotionType(promo)} • {code}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
+                {promoMessage ? <p className="summary-empty" style={{ marginTop: 8 }}>{promoMessage}</p> : null}
 
                 <div className="discount-row">
                   <span><IoTicketOutline /> Sale</span>
                   <span>-${discount.toFixed(2)}</span>
                 </div>
+
+                {appliedPromotion ? (
+                  <div className="booking-appliedPromo">
+                    <div className="booking-appliedPromoTitle">
+                      Program: {String(appliedPromotion.title || '').trim() || String(appliedPromotion.code || '').trim()}
+                    </div>
+                    <div className="booking-appliedPromoMeta">
+                      Type: {formatPromotionType(appliedPromotion)}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="booking-total-row">
                   <strong>Total</strong>
