@@ -10,6 +10,7 @@ export default function OwnerAppointmentsPage() {
   const [staffMembers, setStaffMembers] = useState([])
   const [customers, setCustomers] = useState([])
   const [services, setServices] = useState([])
+  const [businessHours, setBusinessHours] = useState({ openingHour: 8, closingHour: 20 })
 
   const [open, setOpen] = useState(false)
   const [editingAppt, setEditingAppt] = useState(null)
@@ -20,9 +21,33 @@ export default function OwnerAppointmentsPage() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [appointmentToDelete, setAppointmentToDelete] = useState(null)
 
+  const TIME_SLOT_MINUTES = 30
+  const TIME_CELL_HEIGHT = 64
+  const timelineStartMinutes = businessHours.openingHour * 60
+  const timelineEndMinutes = businessHours.closingHour * 60
+  const totalTimeSlots = Math.max(1, Math.floor((timelineEndMinutes - timelineStartMinutes) / TIME_SLOT_MINUTES) + 1)
+  const timelineHeight = totalTimeSlots * TIME_CELL_HEIGHT
+
+  const timeLabels = useMemo(() => {
+    return Array.from({ length: totalTimeSlots }, (_, i) => {
+      const totalMinutes = timelineStartMinutes + (i * TIME_SLOT_MINUTES)
+      const h = Math.floor(totalMinutes / 60)
+      const m = totalMinutes % 60
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    })
+  }, [timelineStartMinutes, totalTimeSlots])
+
   // ================= UTILS =================
+  const parseHourFromSetting = (value, fallback) => {
+    const m = String(value || '').match(/^(\d{1,2}):(\d{2})$/)
+    if (!m) return fallback
+    const hour = Number(m[1])
+    if (!Number.isFinite(hour) || hour < 0 || hour > 23) return fallback
+    return hour
+  }
+
   const normalizeTime = (t) => {
-    if (!t) return '09:00';
+    if (!t) return `${String(businessHours.openingHour).padStart(2, '0')}:00`;
     const match = String(t).match(/(\d+):(\d+)\s*(AM|PM|CH|SA)?/i);
     if (!match) return String(t);
     let hours = parseInt(match[1], 10);
@@ -33,12 +58,6 @@ export default function OwnerAppointmentsPage() {
       if ((modifier.toUpperCase() === 'AM' || modifier.toUpperCase() === 'SA') && hours === 12) hours = 0;
     }
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-  };
-
-  const calculateTopOffset = (timeStr) => {
-    const normalized = normalizeTime(timeStr);
-    const [hours, minutes] = normalized.split(':').map(Number);
-    return ((hours * 60 + minutes) - (9 * 60)) * 64 / 30;
   };
 
   const getStatusColor = (status) => {
@@ -215,7 +234,20 @@ export default function OwnerAppointmentsPage() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    fetchData();
+    ;(async () => {
+      try {
+        const map = (await api.get('/api/owner/settings')) || {}
+        const openingHour = parseHourFromSetting(map.ScheduleOpenTime || map.SalonOpenTime, 8)
+        const closingHour = parseHourFromSetting(map.ScheduleCloseTime || map.SalonCloseTime, 20)
+        const safeCloseHour = closingHour > openingHour ? closingHour : Math.min(openingHour + 1, 23)
+        setBusinessHours({ openingHour, closingHour: safeCloseHour })
+      } catch (err) {
+        console.error(err)
+      }
+    })()
+  }, []);
 
   const handleEditClick = (e, appt) => {
     e.preventDefault();
@@ -432,38 +464,49 @@ export default function OwnerAppointmentsPage() {
       {viewMode === 'calendar' ? (
         <div className="calendar-container">
           <div className="time-column" style={{ marginTop: '40px' }}>
-            {Array.from({ length: 25 }, (_, i) => {
-              const h = 9 + Math.floor(i / 2);
-              const m = i % 2 === 0 ? '00' : '30';
-              return h <= 21 ? <div key={i} className="time-cell">{`${String(h).padStart(2, '0')}:${m}`}</div> : null;
-            })}
+            {timeLabels.map((label) => (
+              <div key={label} className="time-cell">{label}</div>
+            ))}
           </div>
 
           <div className="staff-columns">
             {visibleStaff.map(staff => {
-              const staffAppts = filteredAppointments.filter(a => String(a.staffId) === String(staff.id || staff.UserId));
+              const staffAppts = filteredAppointments.filter(a => {
+                if (String(a.staffId) !== String(staff.id || staff.UserId)) return false;
+                const start = toMinutes(a.time);
+                const duration = Number(a.duration) || 30;
+                const end = start + duration;
+                return end > timelineStartMinutes && start < timelineEndMinutes;
+              });
               const columns = layoutAppointments(staffAppts);
 
               return (
                 <div key={staff.id || staff.UserId} className="staff-column">
                   <div className="staff-header">{staff.name || staff.Name}</div>
-                  <div className="staff-body" style={{ position: 'relative', height: '832px', backgroundColor: '#fff', marginTop: '40px' }}>
-                    {Array.from({ length: 25 }, (_, i) => (
-                      <div key={i} className="grid-cell" style={{ height: '64px', borderBottom: '1px solid #f0f0f0' }} />
+                  <div className="staff-body" style={{ position: 'relative', height: `${timelineHeight}px`, backgroundColor: '#fff', marginTop: '40px' }}>
+                    {Array.from({ length: totalTimeSlots }, (_, i) => (
+                      <div key={i} className="grid-cell" style={{ height: `${TIME_CELL_HEIGHT}px`, borderBottom: '1px solid #f0f0f0' }} />
                     ))}
 
                     {columns.map((col, colIndex) => col.map(appt => {
                       const dur = Number(appt.duration) || 30;
+                      const rawStart = toMinutes(appt.time);
+                      const rawEnd = rawStart + dur;
+                      const clampedStart = Math.max(rawStart, timelineStartMinutes);
+                      const clampedEnd = Math.min(rawEnd, timelineEndMinutes);
+                      const clampedDuration = clampedEnd - clampedStart;
+                      if (clampedDuration <= 0) return null;
+
                       return (
                         <div
                           key={appt.id}
                           className="appt-card"
                           style={{
                             position: 'absolute',
-                            top: calculateTopOffset(appt.time),
+                            top: ((clampedStart - timelineStartMinutes) / TIME_SLOT_MINUTES) * TIME_CELL_HEIGHT,
                             left: `${(colIndex * 100) / (columns.length || 1)}%`,
                             width: `${100 / (columns.length || 1)}%`,
-                            height: (dur / 30) * 64,
+                            height: (clampedDuration / TIME_SLOT_MINUTES) * TIME_CELL_HEIGHT,
                             background: getStatusColor(appt.status),
                             zIndex: 5,
                             padding: '4px 8px',
@@ -582,7 +625,15 @@ export default function OwnerAppointmentsPage() {
             </div>
             <div className="form-group" style={{ flex: 1 }}>
               <label>Time</label>
-              <input type="time" name="time" required defaultValue={editingAppt?.time || ""} />
+              <input
+                type="time"
+                name="time"
+                required
+                step="1800"
+                min={`${String(businessHours.openingHour).padStart(2, '0')}:00`}
+                max={`${String(businessHours.closingHour).padStart(2, '0')}:00`}
+                defaultValue={editingAppt?.time || `${String(businessHours.openingHour).padStart(2, '0')}:00`}
+              />
             </div>
           </div>
 

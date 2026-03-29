@@ -10,6 +10,22 @@ function roleLabel(roleId) {
   return `Role ${roleId}`
 }
 
+function normalizeRoleKey(value) {
+  if (value === undefined || value === null) return NaN
+
+  const num = Number(value)
+  if (Number.isFinite(num)) {
+    const asInt = Math.trunc(num)
+    if ([1, 2, 3].includes(asInt)) return asInt
+  }
+
+  const text = String(value).trim().toLowerCase()
+  if (text === '1' || text === 'admin' || text === 'owner') return 1
+  if (text === '2' || text === 'staff') return 2
+  if (text === '3' || text === 'customer') return 3
+  return NaN
+}
+
 export default function LoginPage() {
   const navigate = useNavigate()
   const [loadingRole, setLoadingRole] = React.useState(null)
@@ -22,7 +38,7 @@ export default function LoginPage() {
       try {
         const data = await api.post('/api/auth/quick-login', { roleId })
         setToken(data?.token || '')
-        const rk = Number(data?.user?.roleKey ?? roleId)
+        const rk = normalizeRoleKey(data?.user?.roleKey ?? data?.user?.role ?? roleId)
         if (rk === 1) {
           navigate('/portals/owner', { replace: true })
         } else {
