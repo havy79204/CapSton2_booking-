@@ -238,6 +238,16 @@ async function matchProductsByImageAnalysis(analysis = {}) {
   for (const modelName of models) {
     try {
       const model = genAI.getGenerativeModel({ model: modelName })
+      const maxTokensEnv = process.env.GEMINI_MAX_TOKENS
+      const maxTokens = (maxTokensEnv === undefined || maxTokensEnv === null || String(maxTokensEnv).trim() === '')
+        ? 1200
+        : (String(maxTokensEnv).toLowerCase() === 'unlimited' || Number(maxTokensEnv) === 0)
+          ? null
+          : Number(maxTokensEnv)
+
+      const genCfg = { temperature: 0.2 }
+      if (Number.isFinite(maxTokens) && maxTokens > 0) genCfg.maxOutputTokens = maxTokens
+
       const result = await aiClient.guard(() => model.generateContent({
         contents: [
           {
@@ -253,7 +263,7 @@ async function matchProductsByImageAnalysis(analysis = {}) {
             ],
           },
         ],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 1200 },
+        generationConfig: genCfg,
       }), { cost: 1 })
 
       const text = String(result?.response?.text?.() || '').trim()
@@ -865,6 +875,116 @@ async function getBookingAvailabilityContext(dt) {
   }
 }
 
+async function getDetailedAvailabilityForDate(dateIso, windowStartHour = 9, windowEndHour = 12, staffIdFilter = null) {
+  if (!dateIso) return { date: null, slots: [] }
+  // normalize dateIso to YYYY-MM-DD
+  const d = new Date(dateIso + 'T00:00:00')
+  if (Number.isNaN(d.getTime())) return { date: null, slots: [] }
+  const date = dateIso
+
+  // fetch staff availability rows for that exact date
+  const binds = { date }
+  const staffWhere = staffIdFilter ? 'AND sa.StaffId = @staffId' : ''
+  if (staffIdFilter) binds.staffId = staffIdFilter
+
+  const staffRes = await query(
+    `SELECT sa.StaffId, sa.StartHour, sa.EndHour, u.Name
+     FROM StaffAvailability sa
+     LEFT JOIN Staff st ON st.StaffId = sa.StaffId
+     LEFT JOIN Users u ON u.UserId = st.UserId
+     WHERE sa.WeekStartDate = @date
+     ${staffWhere}`,
+    binds
+  ).catch(() => ({ recordset: [] }))
+
+  const staffRows = (staffRes.recordset || []).map((r) => ({
+    staffId: r.StaffId,
+    name: r.Name || `NV-${r.StaffId}`,
+    startHour: Number.isFinite(Number(r.StartHour)) ? Number(r.StartHour) : null,
+    endHour: Number.isFinite(Number(r.EndHour)) ? Number(r.EndHour) : null,
+  }))
+
+  // If staffIdFilter provided but no staffRows found => staff has no schedule
+  if (staffIdFilter && (!staffRows || !staffRows.length)) {
+    return { date, slots: [], staffMissing: true }
+  }
+
+  // fetch bookings on that date (with assigned staff if any)
+  const bookingRes = await query(
+    `SELECT b.BookingTime, bs.StaffId
+     FROM Bookings b
+     LEFT JOIN BookingServices bs ON bs.BookingId = b.BookingId
+     WHERE CAST(b.BookingTime AS DATE) = @date
+       AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, '')))) IN ('pending','booked','confirmed','c')`,
+    { date }
+  ).catch(() => ({ recordset: [] }))
+
+  const bookedMap = new Map() // key: staffId or '*' for unassigned, value: Set of slotStarts 'HH:MM'
+  for (const r of bookingRes.recordset || []) {
+    const bt = r.BookingTime ? new Date(r.BookingTime) : null
+    if (!bt || Number.isNaN(bt.getTime())) continue
+    const hm = `${String(bt.getHours()).padStart(2, '0')}:00`
+    const sid = r.StaffId || '*'
+    if (!bookedMap.has(sid)) bookedMap.set(sid, new Set())
+    bookedMap.get(sid).add(hm)
+  }
+
+  const slots = []
+  for (let h = windowStartHour; h < windowEndHour; h += 1) {
+    const slotStart = `${String(h).padStart(2, '0')}:00`
+    const slotEnd = `${String(h + 1).padStart(2, '0')}:00`
+    const available = []
+    for (const s of staffRows) {
+      if (s.startHour === null || s.endHour === null) continue
+      // staff available if their availability covers the whole slot
+      if (s.startHour <= h && s.endHour >= (h + 1)) {
+        // check if this staff has a booking at this slot
+        const bookedSet = bookedMap.get(s.staffId) || new Set()
+        if (!bookedSet.has(slotStart)) available.push(s.name)
+      }
+    }
+    slots.push({ start: slotStart, end: slotEnd, available })
+  }
+
+  return { date, slots }
+}
+
+async function findStaffByName(prompt) {
+  const q = normalize(prompt)
+  if (!q) return null
+  // try simple LIKE match on Users.Name
+  const like = `%${q.slice(0, 100)}%`
+  const res = await query(
+    `SELECT TOP 5 s.StaffId, u.Name
+     FROM Staff s
+     LEFT JOIN Users u ON u.UserId = s.UserId
+     WHERE (@q = '' OR u.Name LIKE @like)
+     ORDER BY u.Name ASC`,
+    { q, like }
+  ).catch(() => ({ recordset: [] }))
+
+  const rows = res.recordset || []
+  if (!rows.length) return null
+
+  // prefer exact substring match of last token
+  const tokens = q.split(/\s+/).filter(Boolean).slice(-2)
+  for (const t of tokens.reverse()) {
+    const found = rows.find((r) => normalizeForCompare(r.Name || '').includes(normalizeForCompare(t)))
+    if (found) return { staffId: found.StaffId, name: found.Name }
+  }
+
+  // fallback to first row
+  return { staffId: rows[0].StaffId, name: rows[0].Name }
+}
+
+function detectWindowFromPrompt(prompt = '') {
+  const t = normalize(prompt)
+  if (/sáng|sang|buổi sáng|sang mai|sáng mai/.test(t)) return { start: 9, end: 12 }
+  if (/chiều|chieu|buổi chiều/.test(t)) return { start: 13, end: 17 }
+  if (/tối|toi|buổi tối/.test(t)) return { start: 18, end: 20 }
+  return null
+}
+
 function shouldAutoCreateBooking(prompt) {
   const t = normalize(prompt)
   return /xác nhận|xac nhan|đặt luôn|dat luon|chốt lịch|chot lich|ok đặt/.test(t)
@@ -1161,9 +1281,19 @@ async function tryGeminiSdk(fullPrompt, discoveredModels = null) {
   for (const modelName of models) {
     try {
       const model = genAI.getGenerativeModel({ model: modelName })
+      const maxTokensEnv = process.env.GEMINI_MAX_TOKENS
+      const maxTokens = (maxTokensEnv === undefined || maxTokensEnv === null || String(maxTokensEnv).trim() === '')
+        ? 700
+        : (String(maxTokensEnv).toLowerCase() === 'unlimited' || Number(maxTokensEnv) === 0)
+          ? null
+          : Number(maxTokensEnv)
+
+      const genCfg = { temperature: 0.25 }
+      if (Number.isFinite(maxTokens) && maxTokens > 0) genCfg.maxOutputTokens = maxTokens
+
       const result = await aiClient.guard(() => model.generateContent({
         contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
-        generationConfig: { temperature: 0.25, maxOutputTokens: 700 },
+        generationConfig: genCfg,
       }), { cost: 1 })
       const text = result?.response?.text?.() || ''
       if (String(text).trim()) return String(text).trim()
@@ -1184,26 +1314,38 @@ async function tryGeminiHttp(fullPrompt, discoveredModels = null) {
   const discovered = discoveredModels || await discoverAvailableModels()
   const attempts = []
 
+  // prepare generationConfig based on GEMINI_MAX_TOKENS env var
+  const maxTokensEnvHttp = process.env.GEMINI_MAX_TOKENS
+  const maxTokensHttp = (maxTokensEnvHttp === undefined || maxTokensEnvHttp === null || String(maxTokensEnvHttp).trim() === '')
+    ? 700
+    : (String(maxTokensEnvHttp).toLowerCase() === 'unlimited' || Number(maxTokensEnvHttp) === 0)
+      ? null
+      : Number(maxTokensEnvHttp)
+
+  const genCfgHttp = { temperature: 0.25 }
+  if (Number.isFinite(maxTokensHttp) && maxTokensHttp > 0) genCfgHttp.maxOutputTokens = maxTokensHttp
+
   for (const modelName of discovered.generateContentModels) {
     attempts.push({
       url: `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`,
       body: {
         contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
-        generationConfig: { temperature: 0.25, maxOutputTokens: 700 },
+        generationConfig: genCfgHttp,
       },
       parser: (data) => data?.candidates?.[0]?.content?.parts?.[0]?.text || data?.candidates?.[0]?.content || '',
     })
   }
 
   for (const modelName of discovered.generateTextModels) {
+    const body = {
+      prompt: { text: fullPrompt },
+      temperature: 0.25,
+      candidateCount: 1,
+    }
+    if (Number.isFinite(maxTokensHttp) && maxTokensHttp > 0) body.maxOutputTokens = maxTokensHttp
     attempts.push({
       url: `https://generativelanguage.googleapis.com/v1beta3/models/${modelName}:generateText`,
-      body: {
-        prompt: { text: fullPrompt },
-        temperature: 0.25,
-        candidateCount: 1,
-        maxOutputTokens: 700,
-      },
+      body,
       parser: (data) => data?.candidates?.[0]?.output || '',
     })
   }
@@ -1229,7 +1371,7 @@ async function tryGeminiHttp(fullPrompt, discoveredModels = null) {
         url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent',
         body: {
           contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
-          generationConfig: { temperature: 0.25, maxOutputTokens: 700 },
+          generationConfig: genCfgHttp,
         },
         parser: (data) => data?.candidates?.[0]?.content?.parts?.[0]?.text || data?.candidates?.[0]?.content || '',
       },
@@ -1239,7 +1381,7 @@ async function tryGeminiHttp(fullPrompt, discoveredModels = null) {
           prompt: { text: fullPrompt },
           temperature: 0.25,
           candidateCount: 1,
-          maxOutputTokens: 700,
+          ...(Number.isFinite(maxTokensHttp) && maxTokensHttp > 0 ? { maxOutputTokens: maxTokensHttp } : {}),
         },
         parser: (data) => data?.candidates?.[0]?.output || '',
       }
@@ -1262,10 +1404,27 @@ async function tryGeminiHttp(fullPrompt, discoveredModels = null) {
   for (const item of attempts) {
     const url = `${item.url}?key=${apiKey}`
     try {
+      // respect GEMINI_MAX_TOKENS env var; if set to 'unlimited' or 0 omit maxOutputTokens
+      const maxTokensEnv = process.env.GEMINI_MAX_TOKENS
+      const maxTokens = (maxTokensEnv === undefined || maxTokensEnv === null || String(maxTokensEnv).trim() === '')
+        ? (item.body.generationConfig && item.body.generationConfig.maxOutputTokens) || null
+        : (String(maxTokensEnv).toLowerCase() === 'unlimited' || Number(maxTokensEnv) === 0)
+          ? null
+          : Number(maxTokensEnv)
+
+      const body = JSON.parse(JSON.stringify(item.body))
+      if (body.generationConfig) {
+        if (Number.isFinite(maxTokens) && maxTokens > 0) {
+          body.generationConfig.maxOutputTokens = maxTokens
+        } else {
+          delete body.generationConfig.maxOutputTokens
+        }
+      }
+
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item.body),
+        body: JSON.stringify(body),
       })
 
       const headers = {}
@@ -1675,6 +1834,78 @@ async function generateAIResponse(prompt, userId = null, options = {}) {
       orderCatalogCtx,
     })
     if (autoAddToCartAnswer) return autoAddToCartAnswer
+
+    // If user asks for free slots in a natural window (e.g., "sáng mai có khung giờ nào trống"),
+    // compute detailed hourly availability from DB and return a deterministic reply.
+    try {
+      const window = detectWindowFromPrompt(prompt)
+      const wantsWindowInfo = Boolean(window && /khung giờ|khung gio|mấy giờ|may gio|trống|trong|còn trống|có/.test(normalize(prompt)))
+      if (intent === 'booking' && wantsWindowInfo) {
+        // determine date: prefer parsedDateTime.date, otherwise use natural keywords (mai/ngày kia)
+        let dateIso = parsedDateTime?.date || null
+        if (!dateIso) {
+          // look for 'mai' or 'ngày kia'
+          const t = normalize(prompt)
+          const now = new Date()
+          if (t.includes('ngày kia') || t.includes('ngay kia')) {
+            const dt = new Date(now); dt.setDate(dt.getDate() + 2); dateIso = toIsoDate(dt)
+          } else if (t.includes('mai') || t.includes('tomorrow')) {
+            const dt = new Date(now); dt.setDate(dt.getDate() + 1); dateIso = toIsoDate(dt)
+          }
+        }
+        if (dateIso) {
+          // detect whether the user mentioned a specific staff
+          const maybeStaff = await findStaffByName(prompt)
+          let avail
+          if (maybeStaff) {
+            avail = await getDetailedAvailabilityForDate(dateIso, window.start, window.end, maybeStaff.staffId)
+            if (avail && avail.staffMissing) {
+              return `Nhân viên ${maybeStaff.name} không có lịch làm vào ngày ${dateIso}.`
+            }
+
+            // format availability only for that staff
+            if (avail && Array.isArray(avail.slots) && avail.slots.length) {
+              const lines = [`Khung giờ cho ${maybeStaff.name} ngày ${avail.date}:`]
+              let anyFree = false
+              for (const s of avail.slots) {
+                // available array lists staff names available in this slot
+                const isFree = Array.isArray(s.available) && s.available.includes(maybeStaff.name)
+                if (isFree) {
+                  anyFree = true
+                  lines.push(`${s.start}-${s.end}: Rảnh`)
+                }
+              }
+              if (!anyFree) return `Nhân viên ${maybeStaff.name} không rảnh khung giờ nào trong khoảng ${window.start}h-${window.end}h ngày ${dateIso}.`
+              return lines.join('\n')
+            }
+            // fallback
+            return `Nhân viên ${maybeStaff.name} không có lịch làm rõ ràng cho ngày ${dateIso}.`
+          }
+
+          // no specific staff mentioned: return all staff availability
+          avail = await getDetailedAvailabilityForDate(dateIso, window.start, window.end)
+          if (avail && Array.isArray(avail.slots) && avail.slots.length) {
+            const lines = [`Khung giờ trống cho ngày ${avail.date}:`]
+            for (const s of avail.slots) {
+              if (Array.isArray(s.available) && s.available.length) {
+                lines.push(`${s.start}-${s.end}: Nhân viên rảnh: ${s.available.join(', ')}`)
+              } else {
+                lines.push(`${s.start}-${s.end}: Không có nhân viên rảnh`)
+              }
+            }
+            return lines.join('\n')
+          }
+          // fallback to bookingCtx alternatives (times without staff mapping)
+          if (bookingCtx && Array.isArray(bookingCtx.alternatives) && bookingCtx.alternatives.length) {
+            return `Ngày ${dateIso} có các khung giờ trống (gợi ý): ${bookingCtx.alternatives.join(', ')}`
+          }
+          return `Mình chưa tìm thấy khung giờ trống rõ ràng cho ngày ${dateIso}. Bạn muốn mình liệt kê khung giờ theo giờ cụ thể (ví dụ: 9h đến 12h) không?`
+        }
+      }
+    } catch (availErr) {
+      // ignore and continue to AI generation
+      console.warn('availability check failed', String(availErr?.message || availErr))
+    }
 
     if (intent === 'booking' && shouldAutoCreateBooking(prompt) && userId && parsedDateTime && mentionedServices.length) {
       try {

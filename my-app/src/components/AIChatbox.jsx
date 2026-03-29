@@ -7,9 +7,9 @@ import { useCustomerCart } from '../hooks/useCustomerCommerce'
 import '../styles/AIChatbox.css'
 
 export default function AIChatbox() {
-  const { sessionId, sessions, messages, loading, sendMessage, sendImage, selectSession, listSessions } = useAIChat()
+  const { sessionId, sessions, messages, loading, sendMessage, sendImage, selectSession, createSession, listSessions, deleteSession } = useAIChat()
   const { me, loading: authLoading } = useAuthMe()
-  const { addItem, busy: cartBusy } = useCustomerCart()
+  const { busy: cartBusy } = useCustomerCart()
 
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
@@ -204,16 +204,7 @@ export default function AIChatbox() {
     setPendingImages([])
   }
 
-  async function handleAddProductToCart(productId) {
-    if (!productId) return
-    try {
-      await addItem({ productId, quantity: 1 })
-      window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'success', message: 'Đã thêm sản phẩm vào giỏ hàng', timeoutMs: 2500 } }))
-    } catch (err) {
-      const msg = (err && err.message) || 'Không thể thêm vào giỏ hàng'
-      window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'error', message: msg, timeoutMs: 4000 } }))
-    }
-  }
+  // Chatbox no longer performs orders; only suggests products/services.
 
   function parseAnalysisPayload(rawContent) {
     try {
@@ -263,23 +254,18 @@ export default function AIChatbox() {
     try {
       const ok = window.confirm('Do you want to delete this chat session? The action will delete the related messages.')
       if (!ok) return
-      await api.delete(`/api/customer/ai-chat/sessions/${encodeURIComponent(sid)}`)
-      await (typeof listSessions === 'function' ? listSessions() : Promise.resolve())
-      // if deleted session was active, collapse side
-      if (String(sid) === String(sessionId)) {
-        // select first remaining session if any
-        const remaining = sessions?.filter((s) => String(s?.SessionId || s?.sessionId || s?.id) !== String(sid)) || []
-        if (remaining.length > 0) {
-          selectSession(remaining[0]?.SessionId || remaining[0]?.sessionId || remaining[0]?.id)
-        } else {
-          // no sessions left - collapse
-          setCollapsed(true)
-        }
+      if (typeof deleteSession === 'function') {
+        await deleteSession(sid)
+      } else {
+        await api.delete(`/api/customer/ai-chat/sessions/${encodeURIComponent(sid)}`)
+        await (typeof listSessions === 'function' ? listSessions() : Promise.resolve())
+        setCollapsed(true)
       }
       setMenuOpenId(null)
     } catch (err) {
       const msg = (err && err.message) || 'Dont delete session'
-      window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'error', message: msg, timeoutMs: 4000 } }))
+      try { window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'error', message: msg, timeoutMs: 4000 } })) } catch (e) { void e }
+      try { if (typeof window !== 'undefined') window.alert(`Lỗi khi xóa session: ${msg}`) } catch (e) { void e }
     }
   }
 
@@ -295,7 +281,27 @@ export default function AIChatbox() {
         window.location.href = '/login'
         return
       }
+      // If current session exists but has no messages, delete it first
+      try {
+        if (sessionId && Array.isArray(messages) && messages.length === 0) {
+          if (typeof deleteSession === 'function') {
+            await deleteSession(sessionId)
+          } else {
+            try { await api.delete(`/api/customer/ai-chat/sessions/${encodeURIComponent(sessionId)}`) } catch (e) { void e }
+          }
+        }
+      } catch (err) {
+        console.error('auto-delete empty session error', err)
+      }
+
       // Create a new session; name is optional and can be edited later
+      try {
+        if (typeof createSession === 'function') {
+          await createSession()
+        }
+      } catch (err) {
+        console.error('createSession error', err)
+      }
       setText('')
       setCollapsed(false)
       setTimeout(() => inputRef.current?.focus?.(), 120)
@@ -375,9 +381,9 @@ export default function AIChatbox() {
                           <div className="analysis-title">Dịch vụ gợi ý</div>
                           <div className="analysis-chips">
                             {payload.suggestedServices.map((s) => (
-                              <a key={s.ServiceId || s.Name} className="analysis-chip" href={`/service/${s.ServiceId || ''}`}>
+                              <span key={s.ServiceId || s.Name} className="analysis-chip suggestion">
                                 {s.Name}
-                              </a>
+                              </span>
                             ))}
                           </div>
                         </div>
@@ -390,7 +396,6 @@ export default function AIChatbox() {
                               <div className="analysis-product" key={p.ProductId || p.Name}>
                                 <div className="analysis-product-name">{p.Name}</div>
                                 <div className="analysis-product-actions">
-                                  <button type="button" onClick={() => handleAddProductToCart(p.ProductId)} disabled={cartBusy || !p.ProductId}>Thêm vào giỏ hàng</button>
                                   <a href={`/product/${p.ProductId || ''}`}>Xem chi tiết</a>
                                 </div>
                               </div>
