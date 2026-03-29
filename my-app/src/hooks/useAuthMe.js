@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
+import { getToken } from '../lib/auth'
 
 export const AUTH_ME_UPDATED_EVENT = 'auth-me-updated'
 
@@ -15,6 +16,10 @@ export function useAuthMe() {
   const refresh = useCallback(async () => {
     try {
       setLoading(true)
+      if (!getToken()) {
+        setMe(null)
+        return null
+      }
       const data = await api.get('/api/auth/me')
       const withVersion = data ? { ...data, _avatarVersion: Date.now() } : null
       setMe(withVersion)
@@ -33,6 +38,10 @@ export function useAuthMe() {
     const loadMe = async () => {
       try {
         setLoading(true)
+        if (!getToken()) {
+          if (isMounted) setMe(null)
+          return
+        }
         const data = await api.get('/api/auth/me')
         if (isMounted) {
           const withVersion = data ? { ...data, _avatarVersion: Date.now() } : null
