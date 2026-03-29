@@ -10,7 +10,16 @@ import {
   IconClock,
   IconUsers,
 } from '../../components/Layout portal/PortalIcons.jsx'
-import { api } from '../../lib/api.js'
+import { api, resolveApiImageUrl } from '../../lib/api.js'
+
+function emitPortalToast({ type, message, timeoutMs }) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(
+    new CustomEvent('portal:toast', {
+      detail: { type, message, timeoutMs },
+    })
+  )
+}
 
 // --- Helper Functions ---
 function parseIsoDateLocal(value) {
@@ -51,6 +60,27 @@ function parseTimeToMinutes(value) {
   return Number(m[1]) * 60 + Number(m[2])
 }
 
+function parseHourFromSetting(value, fallback) {
+  const minutes = parseTimeToMinutes(value)
+  if (minutes === null) return fallback
+  const hour = Math.floor(minutes / 60)
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return fallback
+  return hour
+}
+
+function getWeekdayKey(isoDate) {
+  const d = parseIsoDateLocal(isoDate)
+  if (!d) return 'mon'
+  const day = d.getDay()
+  if (day === 1) return 'mon'
+  if (day === 2) return 'tue'
+  if (day === 3) return 'wed'
+  if (day === 4) return 'thu'
+  if (day === 5) return 'fri'
+  if (day === 6) return 'sat'
+  return 'sun'
+}
+
 function isIsoDateString(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))
 }
@@ -73,14 +103,22 @@ function parseScheduleQueryState(search) {
       staffId: params.get('modalStaffId') || '',
       date: params.get('modalDate') || '',
       oldDate: params.get('modalOldDate') || '',
-      start: params.get('modalStart') || '08:00',
-      end: params.get('modalEnd') || '17:00',
+      start: params.get('modalStart') || '',
+      end: params.get('modalEnd') || '',
       oldLabel: params.get('modalOldLabel') || '',
     },
   }
 }
 
-function StaffAvatar({ initial }) {
+function StaffAvatar({ initial, avatarUrl, name }) {
+  const src = resolveApiImageUrl(avatarUrl)
+  if (src) {
+    return (
+      <div className="portal-staffAvatar">
+        <img src={src} alt={name || 'Staff'} />
+      </div>
+    )
+  }
   return <div className="portal-staffAvatar">{initial}</div>
 }
 
@@ -107,15 +145,53 @@ export default function OwnerSchedulePage() {
   const [initialQuery] = useState(() => parseScheduleQueryState(location.search))
   const initialModal = initialQuery.modal
 
-  const businessHours = useMemo(() => ({ openingHour: 8, closingHour: 20 }), [])
-  const TIMELINE_START = businessHours.openingHour * 60
-  const TIMELINE_END = businessHours.closingHour * 60
-  const TIMELINE_DURATION = TIMELINE_END - TIMELINE_START
-
   const initialTodayIso = formatIsoDateLocal(new Date())
-  const initialDefaultStart = minutesToTimeString(TIMELINE_START)
-  const initialDefaultEnd = minutesToTimeString(TIMELINE_START + 240)
+  const [scheduleHoursByDay, setScheduleHoursByDay] = useState({
+    mon: { openingHour: 8, closingHour: 20 },
+    tue: { openingHour: 8, closingHour: 20 },
+    wed: { openingHour: 8, closingHour: 20 },
+    thu: { openingHour: 8, closingHour: 20 },
+    fri: { openingHour: 8, closingHour: 20 },
+    sat: { openingHour: 8, closingHour: 20 },
+    sun: { openingHour: 8, closingHour: 20 },
+  })
   const defaultShiftDuration = 240
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const map = (await api.get('/api/owner/settings')) || {}
+        const defaultOpeningHour = parseHourFromSetting(map.ScheduleOpenTime || map.SalonOpenTime, 8)
+        const defaultClosingHour = parseHourFromSetting(map.ScheduleCloseTime || map.SalonCloseTime, 20)
+
+        const buildHours = (openKey, closeKey) => {
+          const openingHour = parseHourFromSetting(map[openKey], defaultOpeningHour)
+          const closingHour = parseHourFromSetting(map[closeKey], defaultClosingHour)
+          const safeCloseHour = closingHour > openingHour ? closingHour : Math.min(openingHour + 1, 23)
+          return { openingHour, closingHour: safeCloseHour }
+        }
+
+        if (!cancelled) {
+          setScheduleHoursByDay({
+            mon: buildHours('ScheduleMonOpenTime', 'ScheduleMonCloseTime'),
+            tue: buildHours('ScheduleTueOpenTime', 'ScheduleTueCloseTime'),
+            wed: buildHours('ScheduleWedOpenTime', 'ScheduleWedCloseTime'),
+            thu: buildHours('ScheduleThuOpenTime', 'ScheduleThuCloseTime'),
+            fri: buildHours('ScheduleFriOpenTime', 'ScheduleFriCloseTime'),
+            sat: buildHours('ScheduleSatOpenTime', 'ScheduleSatCloseTime'),
+            sun: buildHours('ScheduleSunOpenTime', 'ScheduleSunCloseTime'),
+          })
+        }
+      } catch (err) {
+        console.error(err)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const [open, setOpen] = useState(initialModal.isOpen)
   const [weekStart, setWeekStart] = useState(
@@ -126,12 +202,31 @@ export default function OwnerSchedulePage() {
   const [viewMode, setViewMode] = useState(initialQuery.view || 'week')
   const [selectedDate, setSelectedDate] = useState(initialQuery.date || '')
 
+  function getHoursForDate(isoDate) {
+    const weekdayKey = getWeekdayKey(isoDate || initialTodayIso)
+    return scheduleHoursByDay[weekdayKey] || { openingHour: 8, closingHour: 20 }
+  }
+
+  function getDefaultShiftWindow(isoDate) {
+    const hours = getHoursForDate(isoDate)
+    const startMin = hours.openingHour * 60
+    const endLimit = hours.closingHour * 60
+    const endMin = Math.min(startMin + defaultShiftDuration, endLimit)
+    const safeEndMin = endMin > startMin ? endMin : Math.min(startMin + 60, startMin + defaultShiftDuration)
+    return {
+      start: minutesToTimeString(startMin),
+      end: minutesToTimeString(safeEndMin),
+    }
+  }
+
+  const initialModalDefaults = getDefaultShiftWindow(initialModal.date || selectedDate || initialTodayIso)
+
   const [form, setForm] = useState({
     staffId: initialModal.staffId || '',
     date: initialModal.date || '',
     oldDate: initialModal.oldDate || '',
-    start: initialModal.start || initialDefaultStart,
-    end: initialModal.end || initialDefaultEnd,
+    start: initialModal.start || initialModalDefaults.start,
+    end: initialModal.end || initialModalDefaults.end,
     isEditing: initialModal.mode === 'edit',
     oldLabel: initialModal.mode === 'edit' ? (initialModal.oldLabel || '') : '',
   })
@@ -140,6 +235,7 @@ export default function OwnerSchedulePage() {
   const [columns, setColumns] = useState([])
   const [staffRows, setStaffRows] = useState([])
   const [formError, setFormError] = useState('')
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
   // --- API Logic ---
   async function refreshSchedule(nextWeekStart) {
@@ -174,13 +270,29 @@ export default function OwnerSchedulePage() {
     0,
   )
 
+  const selectedBusinessHours = useMemo(() => {
+    const baseDate = selectedDate || initialTodayIso
+    return getHoursForDate(baseDate)
+  }, [selectedDate, scheduleHoursByDay, initialTodayIso])
+
   const quickSelectOptions = useMemo(() => {
+    const quickStart = selectedBusinessHours.openingHour * 60
+    const quickEnd = selectedBusinessHours.closingHour * 60
+    const quickDuration = Math.max(60, quickEnd - quickStart)
+    const segment = Math.max(60, Math.round((quickDuration / 3) / 30) * 30)
+    const firstStart = quickStart
+    const firstEnd = Math.min(firstStart + segment, quickEnd)
+    const secondStart = firstEnd
+    const secondEnd = Math.min(secondStart + segment, quickEnd)
+    const thirdStart = secondEnd
+    const thirdEnd = quickEnd
+
     return [
-      { label: 'Morning', start: minutesToTimeString(businessHours.openingHour * 60), end: minutesToTimeString(12 * 60) },
-      { label: 'Afternoon', start: minutesToTimeString(12 * 60), end: minutesToTimeString(16 * 60) },
-      { label: 'Evening', start: minutesToTimeString(16 * 60), end: minutesToTimeString(businessHours.closingHour * 60) },
-    ]
-  }, [businessHours])
+      { label: 'Morning', start: minutesToTimeString(firstStart), end: minutesToTimeString(firstEnd) },
+      { label: 'Afternoon', start: minutesToTimeString(secondStart), end: minutesToTimeString(secondEnd) },
+      { label: 'Evening', start: minutesToTimeString(thirdStart), end: minutesToTimeString(thirdEnd) },
+    ].filter((opt) => parseTimeToMinutes(opt.start) < parseTimeToMinutes(opt.end))
+  }, [selectedBusinessHours])
 
   const columnsWithIso = useMemo(() => {
     return (columns || []).map((column, index) => ({
@@ -257,31 +369,44 @@ export default function OwnerSchedulePage() {
   }
 
   function close() {
+    const defaults = getDefaultShiftWindow(selectedDate || initialTodayIso)
     setOpen(false)
+    setDeleteConfirmOpen(false)
     setFormError('')
     setForm({
       staffId: '',
       date: initialTodayIso,
       oldDate: '',
-      start: initialDefaultStart,
-      end: initialDefaultEnd,
+      start: defaults.start,
+      end: defaults.end,
       isEditing: false,
       oldLabel: '',
     })
+  }
+
+  function requestDeleteShift() {
+    if (!form.staffId || !form.date || !form.oldLabel) {
+      setFormError('Missing shift information. Please reopen the shift and try again.')
+      emitPortalToast({ type: 'error', message: 'Missing shift information. Please reopen and try again.' })
+      return
+    }
+    setDeleteConfirmOpen(true)
   }
 
   // --- Handle Delete Shift ---
   async function onDeleteShift() {
     if (!form.staffId || !form.date || !form.oldLabel) {
       setFormError('Missing shift information. Please reopen the shift and try again.')
+      emitPortalToast({ type: 'error', message: 'Missing shift information. Please reopen and try again.' })
       return
     }
-    if (!window.confirm('Are you sure you want to delete this shift?')) return
     try {
+      setDeleteConfirmOpen(false)
       setFormError('')
       const normalizedDate = normalizeFormDateForApi(form.date)
       if (!normalizedDate) {
         setFormError('Delete failed: Invalid date format.')
+        emitPortalToast({ type: 'error', message: 'Delete failed: Invalid date format.' })
         return
       }
       await api.delete('/api/owner/schedule/shifts', {
@@ -290,6 +415,7 @@ export default function OwnerSchedulePage() {
         label: form.oldLabel,
       })
       await refreshSchedule(weekStart)
+      emitPortalToast({ type: 'success', message: 'Shift deleted successfully.' })
       close()
     } catch (err) {
       setFormError(`Delete failed: ${err.message || 'System error'}`)
@@ -302,6 +428,7 @@ export default function OwnerSchedulePage() {
     e.preventDefault()
     if (!form.staffId || !form.date) {
       setFormError('Please select staff and date.')
+      emitPortalToast({ type: 'error', message: 'Please select staff and date.' })
       return
     }
     try {
@@ -309,6 +436,7 @@ export default function OwnerSchedulePage() {
       const normalizedDate = normalizeFormDateForApi(form.date)
       if (!normalizedDate) {
         setFormError('Operation failed: Invalid date format.')
+        emitPortalToast({ type: 'error', message: 'Operation failed: Invalid date format.' })
         return
       }
       await api.post('/api/owner/schedule/shifts', {
@@ -320,6 +448,7 @@ export default function OwnerSchedulePage() {
         oldLabel: form.oldLabel,
       })
       await refreshSchedule(weekStart)
+      emitPortalToast({ type: 'success', message: form.isEditing ? 'Shift updated successfully.' : 'Shift created successfully.' })
       close()
     } catch (err) {
       setFormError(`Operation failed: ${err.message || 'System error'}`)
@@ -343,6 +472,33 @@ export default function OwnerSchedulePage() {
     })
   }, [viewMode, dayColumnDate, staffRows])
 
+  const dayShiftBounds = useMemo(() => {
+    if (!dayColumnDate) return { min: null, max: null }
+    let min = null
+    let max = null
+
+    for (const staff of staffRows) {
+      const shifts = staff?.shifts?.[dayColumnDate] || []
+      for (const label of shifts) {
+        const parts = String(label || '').split('-').map((t) => t.trim())
+        const startMin = parseTimeToMinutes(parts[0])
+        const endMin = parseTimeToMinutes(parts[1])
+        if (startMin === null || endMin === null) continue
+        min = min === null ? startMin : Math.min(min, startMin)
+        max = max === null ? endMin : Math.max(max, endMin)
+      }
+    }
+
+    return { min, max }
+  }, [dayColumnDate, staffRows])
+
+  const dayConfiguredHours = getHoursForDate(dayColumnIsoDate || selectedDate || initialTodayIso)
+  const configuredStart = dayConfiguredHours.openingHour * 60
+  const configuredEnd = dayConfiguredHours.closingHour * 60
+  const TIMELINE_START = dayShiftBounds.min === null ? configuredStart : Math.min(configuredStart, dayShiftBounds.min)
+  const TIMELINE_END = dayShiftBounds.max === null ? configuredEnd : Math.max(configuredEnd, dayShiftBounds.max)
+  const TIMELINE_DURATION = Math.max(60, TIMELINE_END - TIMELINE_START)
+
   return (
     <div className="schedule-page portal-cardInner">
 
@@ -357,7 +513,7 @@ export default function OwnerSchedulePage() {
         footer={
           <>
             {form.isEditing && (
-              <button type="button" className="portal-modalBtn" style={{ color: 'red', marginRight: 'auto' }} onClick={onDeleteShift}>
+              <button type="button" className="portal-modalBtn" style={{ color: 'red', marginRight: 'auto' }} onClick={requestDeleteShift}>
                 Delete
               </button>
             )}
@@ -467,6 +623,26 @@ export default function OwnerSchedulePage() {
         </form>
       </PortalModal>
 
+      <PortalModal
+        open={deleteConfirmOpen}
+        title="Confirm delete"
+        variant="confirm"
+        onClose={() => setDeleteConfirmOpen(false)}
+        modalClassName="schedule-deleteConfirmModal"
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={() => setDeleteConfirmOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="portal-modalBtn danger" onClick={onDeleteShift}>
+              Delete
+            </button>
+          </>
+        }
+      >
+        <p style={{ margin: 0 }}>Are you sure you want to delete this shift?</p>
+      </PortalModal>
+
       {/* --- KPI SECTION --- */}
       <div className="schedule-page portal-grid3" style={{ marginTop: 18 }}>
         <PortalCard>
@@ -497,7 +673,7 @@ export default function OwnerSchedulePage() {
               <IconCalendar />
             </div>
             <div>
-              <div className="portal-miniKpiLabel">Tổng số Lịch hẹn</div>
+              <div className="portal-miniKpiLabel">Total Appointments</div>
               <div className="portal-miniKpiValue">{staffRows.reduce((sum, s) => sum + Object.keys(s.shifts).length, 0)}</div>
             </div>
           </div>
@@ -564,12 +740,13 @@ export default function OwnerSchedulePage() {
               type="button"
               className="portal-primaryBtn"
               onClick={() => {
+                const defaults = getDefaultShiftWindow(initialTodayIso)
                 setForm({
                   staffId: '',
                   date: initialTodayIso,
                   oldDate: '',
-                  start: initialDefaultStart,
-                  end: initialDefaultEnd,
+                  start: defaults.start,
+                  end: defaults.end,
                   isEditing: false,
                   oldLabel: '',
                 })
@@ -604,7 +781,7 @@ export default function OwnerSchedulePage() {
                   <tr key={s.staffId || s.name}>
                     <td className="portal-scheduleTd portal-scheduleTdStaff">
                       <div className="portal-staffCell">
-                        <StaffAvatar initial={s.initial} />
+                        <StaffAvatar initial={s.initial} avatarUrl={s.avatarUrl} name={s.name} />
                         <div className="portal-staffMeta">
                           <div className="portal-staffName">{s.name}</div>
                           <div className="portal-staffRole">{s.role}</div>
@@ -623,12 +800,13 @@ export default function OwnerSchedulePage() {
                                   label={label}
                                   onClick={() => {
                                     const parts = label.split('-').map((t) => t.trim())
+                                    const defaults = getDefaultShiftWindow(c.isoDate || initialTodayIso)
                                     setForm({
                                       staffId: s.staffId,
                                       date: c.isoDate || '',
                                       oldDate: c.isoDate || '',
-                                      start: parts[0] || '08:00',
-                                      end: parts[1] || '17:00',
+                                      start: parts[0] || defaults.start,
+                                      end: parts[1] || defaults.end,
                                       isEditing: true,
                                       oldLabel: label,
                                     })
@@ -640,12 +818,13 @@ export default function OwnerSchedulePage() {
                               <div
                                 className="portal-off"
                                 onClick={() => {
+                                  const defaults = getDefaultShiftWindow(c.isoDate || initialTodayIso)
                                   setForm({
                                     staffId: s.staffId,
                                     date: c.isoDate || '',
                                     oldDate: '',
-                                    start: initialDefaultStart,
-                                    end: initialDefaultEnd,
+                                    start: defaults.start,
+                                    end: defaults.end,
                                     isEditing: false,
                                     oldLabel: '',
                                   })
@@ -677,10 +856,10 @@ export default function OwnerSchedulePage() {
                 Time
               </div>
               <div className="portal-dayTimelineScale">
-                {Array.from({ length: businessHours.closingHour - businessHours.openingHour + 1 }).map((_, idx) => {
-                  const hour = businessHours.openingHour + idx
+                {Array.from({ length: Math.floor(TIMELINE_DURATION / 60) + 1 }).map((_, idx) => {
+                  const hour = Math.floor((TIMELINE_START / 60) + idx)
                   const percent = ((hour * 60 - TIMELINE_START) / TIMELINE_DURATION) * 100
-                  const edgeClass = idx === 0 ? 'is-first' : idx === businessHours.closingHour - businessHours.openingHour ? 'is-last' : ''
+                  const edgeClass = idx === 0 ? 'is-first' : idx === Math.floor(TIMELINE_DURATION / 60) ? 'is-last' : ''
                   return (
                     <div key={hour} className={`portal-dayTimelineTick ${edgeClass}`.trim()} style={{ left: `${percent}%` }}>
                       <span>{String(hour).padStart(2, '0')}:00</span>
@@ -696,7 +875,7 @@ export default function OwnerSchedulePage() {
                 <div key={s.staffId} className="portal-dayTimelineRow">
                   <div className="portal-dayTimelineLabel" style={{ width: '120px' }}>
                     <div className="portal-staffCell" style={{ gap: 6 }}>
-                      <StaffAvatar initial={s.initial} />
+                      <StaffAvatar initial={s.initial} avatarUrl={s.avatarUrl} name={s.name} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div className="portal-staffName" style={{ fontSize: '12px' }}>
                           {s.name}

@@ -1,6 +1,7 @@
 const { query, newId } = require('../config/query')
 const { detectRoleKey } = require('./roles.service')
 const { toStaffListItem } = require('../models/staff.model')
+const { getSettingsMap } = require('./settings.service')
 const fs = require('fs/promises')
 const path = require('path')
 
@@ -207,8 +208,8 @@ function sortStaffItems(items, sortBy) {
     if (sortBy === 'bookings_asc') return Number(a.totalBookings || 0) - Number(b.totalBookings || 0)
     if (sortBy === 'salary_desc') return Number(b.totalSalary || 0) - Number(a.totalSalary || 0)
     if (sortBy === 'salary_asc') return Number(a.totalSalary || 0) - Number(b.totalSalary || 0)
-    if (sortBy === 'tip_desc') return Number(b.totalTip || 0) - Number(a.totalTip || 0)
-    if (sortBy === 'tip_asc') return Number(a.totalTip || 0) - Number(b.totalTip || 0)
+    if (sortBy === 'commission_desc') return Number(b.totalCommission || 0) - Number(a.totalCommission || 0)
+    if (sortBy === 'commission_asc') return Number(a.totalCommission || 0) - Number(b.totalCommission || 0)
     if (sortBy === 'hours_desc') return Number(b.workingHours || 0) - Number(a.workingHours || 0)
     if (sortBy === 'hours_asc') return Number(a.workingHours || 0) - Number(b.workingHours || 0)
     return String(a.name || '').localeCompare(String(b.name || ''), 'vi')
@@ -499,6 +500,46 @@ async function buildTipAggregationSql(period) {
     ) tipAgg ON tipAgg.StaffId = s.StaffId`
 }
 
+function calculateCommission(revenue, tiers = {}) {
+  const tierLow = tiers.commissionTierLow !== undefined && tiers.commissionTierLow !== null ? Number(tiers.commissionTierLow) : 500000
+  const rateLow = tiers.commissionRateLow !== undefined && tiers.commissionRateLow !== null ? Number(tiers.commissionRateLow) : 0.10
+  const tierHigh = tiers.commissionTierHigh !== undefined && tiers.commissionTierHigh !== null ? Number(tiers.commissionTierHigh) : 2000000
+  const rateHigh = tiers.commissionRateHigh !== undefined && tiers.commissionRateHigh !== null ? Number(tiers.commissionRateHigh) : 0.15
+
+  if (revenue >= tierHigh) {
+    return revenue * rateHigh
+  }
+  if (revenue >= tierLow && revenue < tierHigh) {
+    return revenue * rateLow
+  }
+  return 0
+}
+
+async function buildCommissionAggregationSql(period) {
+  const bookingDateColumn = await firstExistingColumn('Bookings', ['BookingTime', 'CreatedAt', 'UpdatedAt'])
+  if (!bookingDateColumn) {
+    return 'LEFT JOIN (SELECT CAST(NULL AS NVARCHAR(50)) AS StaffId, CAST(0 AS DECIMAL(18,2)) AS TotalCommissionRevenue WHERE 1=0) commAgg ON commAgg.StaffId = s.StaffId'
+  }
+
+  const commRangeCondition = period === 'all' || !bookingDateColumn
+    ? ''
+    : `AND b.[${bookingDateColumn}] >= @rangeStartAt AND b.[${bookingDateColumn}] < @rangeEndAt`
+
+  return `
+    LEFT JOIN (
+      SELECT
+        bs.StaffId,
+        SUM(ISNULL(COALESCE(bs.Price, sv.Price), 0)) AS TotalCommissionRevenue
+      FROM BookingServices bs
+      LEFT JOIN Bookings b ON b.BookingId = bs.BookingId
+      LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+      WHERE bs.StaffId IS NOT NULL
+        AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')
+        ${commRangeCondition}
+      GROUP BY bs.StaffId
+    ) commAgg ON commAgg.StaffId = s.StaffId`
+}
+
 async function getStaffSkillSchema() {
   try {
     const hasStaffSkills = await tableExists('StaffSkills')
@@ -765,10 +806,11 @@ async function listStaff(options = {}) {
   }
 
   const skillSchema = await getStaffSkillSchema()
-  const [bookingsAggSql, workingHoursAggSql, tipAggSql] = await Promise.all([
+  const [bookingsAggSql, workingHoursAggSql, commissionAggSql, settingsMap] = await Promise.all([
     buildBookingsAggregationSql(period),
     buildWorkingHoursAggregationSql(period),
-    buildTipAggregationSql(period),
+    buildCommissionAggregationSql(period),
+    getSettingsMap(),
   ])
 
   const result = await query(
@@ -784,13 +826,13 @@ async function listStaff(options = {}) {
         r.DisplayName AS RoleName,
         ISNULL(bsAgg.TotalBookings, 0) AS TotalBookings,
         ISNULL(shiftAgg.WorkingHours, 0) AS WorkingHours,
-        ISNULL(tipAgg.TotalTip, 0) AS TotalTip
+        ISNULL(commAgg.TotalCommissionRevenue, 0) AS TotalCommissionRevenue
       FROM Staff s
       LEFT JOIN Users u ON u.UserId = s.UserId
       LEFT JOIN Roles r ON r.RoleKey = u.RoleKey
       ${bookingsAggSql}
       ${workingHoursAggSql}
-      ${tipAggSql}
+      ${commissionAggSql}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(s.Status, '')))) <> 'INACTIVE'
         AND UPPER(LTRIM(RTRIM(ISNULL(u.Status, '')))) <> 'INACTIVE'
         ${keywordSql}
@@ -802,7 +844,52 @@ async function listStaff(options = {}) {
   const baseItems = (result.recordset || []).map(toStaffListItem)
   const staffIds = baseItems.map((x) => String(x.id || '').trim()).filter(Boolean)
   const skillMap = await getStaffSkillMap(staffIds, skillSchema)
-  const enrichedItems = baseItems.map((item) => enrichStaffItem(item, skillMap.get(String(item.id || '').trim()) || []))
+  
+  // Load commission tiers from owner settings (with defaults)
+  let commissionTiers = {}
+  
+  if (Array.isArray(settingsMap.CommissionTiers) && settingsMap.CommissionTiers.length > 0) {
+    // Use new dynamic tiers if available
+    const sortedTiers = settingsMap.CommissionTiers.sort((a, b) => (a.threshold || 0) - (b.threshold || 0))
+    const tier1Threshold = sortedTiers[0].threshold !== undefined && sortedTiers[0].threshold !== null ? Number(sortedTiers[0].threshold) : 500000
+    const tier1Rate = sortedTiers[0].rate !== undefined && sortedTiers[0].rate !== null ? Number(sortedTiers[0].rate) : 0.10
+    const tier2Threshold = sortedTiers.length > 1 && sortedTiers[1].threshold !== undefined && sortedTiers[1].threshold !== null ? Number(sortedTiers[1].threshold) : tier1Threshold
+    const tier2Rate = sortedTiers.length > 1 && sortedTiers[1].rate !== undefined && sortedTiers[1].rate !== null ? Number(sortedTiers[1].rate) : tier1Rate
+    commissionTiers = {
+      commissionTierLow: tier1Threshold,
+      commissionRateLow: tier1Rate,
+      commissionTierHigh: tier2Threshold,
+      commissionRateHigh: tier2Rate,
+    }
+  } else {
+    // Fallback to old format
+    const tierLow = settingsMap.CommissionTierLow !== undefined && settingsMap.CommissionTierLow !== null ? Number(settingsMap.CommissionTierLow) : 500000
+    const rateLow = settingsMap.CommissionRateLow !== undefined && settingsMap.CommissionRateLow !== null ? Number(settingsMap.CommissionRateLow) : 0.10
+    const tierHigh = settingsMap.CommissionTierHigh !== undefined && settingsMap.CommissionTierHigh !== null ? Number(settingsMap.CommissionTierHigh) : 2000000
+    const rateHigh = settingsMap.CommissionRateHigh !== undefined && settingsMap.CommissionRateHigh !== null ? Number(settingsMap.CommissionRateHigh) : 0.15
+    commissionTiers = {
+      commissionTierLow: tierLow,
+      commissionRateLow: rateLow,
+      commissionTierHigh: tierHigh,
+      commissionRateHigh: rateHigh,
+    }
+  }
+  
+  // Calculate commission tiers from completed service revenue.
+  const itemsWithCommission = baseItems.map((item) => {
+    const commissionBaseRevenue = Number(item.totalCommissionRevenue || 0)
+    const totalCommission = calculateCommission(commissionBaseRevenue, commissionTiers)
+    const totalSalary = (item.workingHours * 25000) + Math.round(totalCommission)
+    
+    return {
+      ...item,
+      totalCommissionRevenue: commissionBaseRevenue,
+      totalCommission: Math.round(totalCommission),
+      totalSalary: Math.round(totalSalary),
+    }
+  })
+  
+  const enrichedItems = itemsWithCommission.map((item) => enrichStaffItem(item, skillMap.get(String(item.id || '').trim()) || []))
 
   const keywordLower = keyword.toLocaleLowerCase('vi')
   const keywordFiltered = keywordLower
