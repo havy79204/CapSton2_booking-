@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { api } from '../lib/api'
+import { api, showPortalToast } from '../lib/api'
 import { getToken } from '../lib/auth'
 
 export default function useAIChat() {
@@ -45,6 +45,61 @@ export default function useAIChat() {
       setMessages(data || [])
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function deleteSession(sid) {
+    if (!sid) return
+    // Optimistically remove the session locally for immediate UI feedback
+    const prev = sessions || []
+    const filtered = prev.filter((s) => String(s?.SessionId || s?.sessionId || s?.id) !== String(sid))
+    setSessions(filtered)
+    // If deleted session was active, clear messages/UI immediately
+    let reverted = false
+    if (String(sid) === String(sessionId)) {
+      if (filtered.length > 0) {
+        const nextId = filtered[0]?.SessionId || filtered[0]?.sessionId || filtered[0]?.id
+        setSessionId(nextId)
+        // load messages for new active session
+        try { await loadMessages(nextId) } catch (e) { void e }
+      } else {
+        setSessionId(null)
+        setMessages([])
+      }
+    }
+
+    try {
+      console.log('deleteSession: sending DELETE for', sid)
+      await api.delete(`/api/customer/ai-chat/sessions/${encodeURIComponent(sid)}`)
+      // ensure server-side list is synced
+      const all = await listSessions()
+      setSessions(Array.isArray(all) ? all : [])
+      try { showPortalToast({ type: 'success', message: 'Đã xóa phiên trò chuyện' }) } catch (e) { void e }
+      console.log('deleteSession: success', sid)
+      return true
+    } catch (err) {
+      console.error('deleteSession api error', err)
+      try { showPortalToast({ type: 'error', message: (err && err.message) || 'Không xóa được phiên', timeoutMs: 4000 }) } catch (e) { void e }
+      try {
+        if (typeof window !== 'undefined') {
+          const msg = (err && err.message) || 'Không xóa được phiên'
+          // fallback visible alert for debugging when portal toast is not shown
+          window.alert(`Lỗi xóa session: ${msg}`)
+        }
+      } catch (e) { void e }
+      // rollback local state to previous on failure
+      try { setSessions(prev) } catch (e) { void e }
+      // restore previous active session/messages if we cleared them
+      if (String(sid) === String(sessionId)) {
+        try {
+          if (prev.length > 0) {
+            const prevActive = prev[0]?.SessionId || prev[0]?.sessionId || prev[0]?.id
+            setSessionId(prevActive)
+            await loadMessages(prevActive)
+          }
+        } catch (e) { void e }
+      }
+      throw err
     }
   }
 
@@ -106,5 +161,5 @@ export default function useAIChat() {
     if (sessionId) loadMessages(sessionId)
   }, [sessionId])
 
-  return { sessionId, sessions, messages, loading, createSession, loadMessages, selectSession, listSessions, sendMessage, sendImage }
+  return { sessionId, sessions, messages, loading, createSession, loadMessages, selectSession, listSessions, sendMessage, sendImage, deleteSession }
 }
