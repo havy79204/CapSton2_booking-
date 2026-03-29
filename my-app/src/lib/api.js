@@ -91,6 +91,17 @@ async function request(path, options) {
 
   if (!res.ok) {
     const message = json?.error || json?.message || res.statusText
+    // If unauthorized, notify the app so it can decide how to handle re-authentication.
+    if (res.status === 401) {
+      try {
+        emitPortalToast({ type: 'error', message: json?.message || 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.', timeoutMs: 4000 })
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('portal:auth-required', { detail: { path, status: 401, message: json?.message || null } }))
+        }
+      } catch (e) {
+        void e;
+      }
+    }
     if (isOwnerMutation(path, method)) {
       emitPortalToast({ type: 'error', message: message || 'Sorry, something went wrong. Please try again.' })
     }

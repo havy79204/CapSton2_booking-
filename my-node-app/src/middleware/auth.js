@@ -20,6 +20,14 @@ function requireAuth(req, res, next) {
   try {
     const payload = jwt.verify(token, env.auth.jwtSecret)
     req.user = payload
+    // normalize a simple userId on the request for convenience (may be numeric or string)
+    const maybeId = payload?.sub || payload?.userId || payload?.UserId || payload?.id || payload?.uid || null
+    req.userId = maybeId !== undefined && maybeId !== null ? String(maybeId) : null
+    if (!env || env.nodeEnv !== 'production') {
+      try {
+        console.debug('[requireAuth] authenticated user payload keys:', Object.keys(payload || {}), 'userId:', req.userId)
+      } catch (e) { /* ignore logging errors */ }
+    }
     next()
   } catch (err) {
     res.status(401).json({ ok: false, error: 'Invalid or expired token' })
