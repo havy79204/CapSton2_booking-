@@ -2082,63 +2082,126 @@
 .portal-modalOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.55);
+  background: radial-gradient(
+    circle at 20% 20%,
+    rgba(15, 23, 42, 0.18),
+    rgba(15, 23, 42, 0.62)
+  );
   display: grid;
   place-items: center;
   padding: 22px;
   z-index: 50;
+  backdrop-filter: blur(2px);
 }
 
 .portal-modal {
   width: min(560px, 92vw);
   gap: 10px;
   padding: 11px 22px;
-  border-radius: 9px;
-  background: #ffffff;
-
-  border: 1px solid #e5e7eb;
-
+  border-radius: 12px;
+  background: linear-gradient(170deg, #fffdfa, #f8f4ec);
+  border: 1px solid rgba(178, 146, 97, 0.28);
   color: #1f2937;
   font-weight: 800;
   letter-spacing: 0.3px;
-
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-
+  box-shadow:
+    0 24px 50px rgba(15, 23, 42, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 10px 30px rgba(0, 0, 0, 0.1);
   cursor: pointer;
   transition: all 0.3s ease;
   position: relative;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .portal-modalHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 18px 18px 10px;
+  padding: 16px 18px 10px;
+}
+
+.portal-modalTitleWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.portal-modalIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+}
+
+.portal-modalIcon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.portal-modalIcon-confirm,
+.portal-modalIcon-info {
+  color: #815c28;
+  background: rgba(255, 248, 229, 0.9);
+  border-color: rgba(167, 126, 61, 0.35);
+}
+
+.portal-modalIcon-success {
+  color: #0f766e;
+  background: rgba(220, 252, 231, 0.95);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.portal-modalIcon-warning {
+  color: #92400e;
+  background: rgba(254, 243, 199, 0.95);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.portal-modalIcon-error {
+  color: #b91c1c;
+  background: rgba(254, 226, 226, 0.95);
+  border-color: rgba(239, 68, 68, 0.35);
 }
 
 .portal-modalTitle {
-  font-weight: 950;
+  font-weight: 900;
   font-size: 18px;
+  color: #111827;
 }
 
 .portal-modalClose {
   width: 34px;
   height: 34px;
   border-radius: 12px;
-  border: 1px solid rgba(229, 231, 235, 0.95);
-  background: var(--surface);
+  border: 1px solid rgba(209, 213, 219, 0.95);
+  background: #ffffff;
   cursor: pointer;
   display: grid;
   place-items: center;
   font-size: 18px;
   line-height: 1;
-  color: rgba(15, 23, 42, 0.7);
+  color: rgba(15, 23, 42, 0.78);
+}
+
+.portal-modalClose:hover {
+  background: #f8fafc;
+}
+
+.portal-modalClose:focus-visible {
+  outline: 2px solid rgba(129, 92, 40, 0.45);
+  outline-offset: 2px;
 }
 
 .portal-modalBody {
-  padding: 0 18px 16px;
+  padding: 4px 18px 16px;
+  color: #374151;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .portal-modalFooter {
@@ -2146,6 +2209,18 @@
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+.portal-modal-success .portal-modalTitle {
+  color: #065f46;
+}
+
+.portal-modal-error .portal-modalTitle {
+  color: #991b1b;
+}
+
+.portal-modal-warning .portal-modalTitle {
+  color: #92400e;
 }
 
 .portal-modalBtn {

@@ -5,6 +5,56 @@
   gap: 20px;
 }
 
+/* ===== COMMISSION TIER BUTTONS ===== */
+.settings-page .portal-tierDeleteBtn {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #ffcdd2;
+  background: #fee;
+  color: #d32f2f;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.settings-page .portal-tierDeleteBtn:hover:not(:disabled) {
+  background: #ffcdd2;
+  border-color: #ff9999;
+}
+
+.settings-page .portal-tierDeleteBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-page .portal-tierAddBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(24, 144, 255, 0.3);
+  background: rgba(24, 144, 255, 0.1);
+  color: #1890ff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.settings-page .portal-tierAddBtn:hover {
+  border-color: #1890ff;
+  background: rgba(24, 144, 255, 0.15);
+  color: #0050b3;
+}
+
+.settings-page .portal-tierAddBtn:active {
+  background: rgba(24, 144, 255, 0.2);
+}
+
 /* ===== TABS ===== */
 .settings-page .portal-settingsTabs {
   margin-bottom: 10px;
@@ -29,8 +79,8 @@
 
 .settings-page .portal-segBtn.active {
   display: inline-flex;
-  align-items: center;    
-  justify-content: center; 
+  align-items: center;
+  justify-content: center;
   gap: 10px;
   padding: 11px 22px;
   border-radius: 999px;
@@ -52,16 +102,14 @@
   letter-spacing: 0.3px;
 
   box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.4),
-    inset 0 -2px 6px rgba(0,0,0,0.2),
-    0 10px 30px rgba(0,0,0,0.35);
+    inset 0 1px 1px rgba(255, 255, 255, 0.4),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.2),
+    0 10px 30px rgba(0, 0, 0, 0.35);
 
   cursor: pointer;
   transition: all 0.3s ease;
   position: relative;
   overflow: hidden;
-
-
 }
 
 /* ===== CARD ===== */
@@ -120,6 +168,31 @@
   border-radius: 10px;
   border: 1px solid var(--border);
   outline: none;
+  color: #000;
+  font-family: inherit;
+}
+
+.settings-page .portal-input::placeholder,
+.settings-page .portal-select::placeholder {
+  color: #666;
+  opacity: 0.8;
+}
+
+.settings-page .portal-select option {
+  color: #000;
+  background: white;
+  padding: 4px;
+}
+
+.settings-page .portal-textarea {
+  min-height: 96px;
+  resize: vertical;
+  color: #000;
+}
+
+.settings-page .portal-textarea::placeholder {
+  color: #666;
+  opacity: 0.8;
 }
 
 .settings-page .portal-inputWithIcon {
@@ -199,6 +272,62 @@
   color: var(--text-muted);
 }
 
+/* Weekday schedule block: keep existing palette, improve readability/contrast */
+.settings-page .portal-settingsWeekdayHeader {
+  margin-bottom: 8px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.settings-page .portal-settingsWeekdayHint {
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: color-mix(in srgb, var(--text) 75%, white 25%);
+}
+
+.settings-page .portal-settingsWeekdayList {
+  gap: 10px;
+}
+
+.settings-page .portal-settingsWeekdayRow {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, #8b6f37 30%);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 88%, #f3e5bd 12%);
+}
+
+.settings-page .portal-settingsWeekdayRow .portal-settingsRowTitle {
+  color: color-mix(in srgb, var(--text) 85%, #4f3a16 15%);
+}
+
+.settings-page .portal-settingsWeekdayTimeRange {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-page .portal-settingsWeekdayInput {
+  width: 130px;
+  border-color: color-mix(in srgb, var(--border) 65%, #8b6f37 35%);
+  background: color-mix(in srgb, var(--surface) 92%, #fff7de 8%);
+  color: #000;
+}
+
+.settings-page .portal-settingsWeekdayInput::placeholder {
+  color: #666;
+  opacity: 0.8;
+}
+
+.settings-page .portal-settingsWeekdayInput:focus {
+  border-color: #8b6f37;
+  box-shadow: 0 0 0 2px rgba(139, 111, 55, 0.2);
+}
+
+.settings-page .portal-settingsWeekdaySeparator {
+  color: color-mix(in srgb, var(--text) 75%, #4f3a16 25%);
+  font-weight: 700;
+}
+
 /* ===== SWITCH ===== */
 .settings-page .portal-switch {
   width: 44px;
@@ -212,8 +341,8 @@
 
 .settings-page .portal-switch.on {
   display: inline-flex;
-  align-items: center;    
-  justify-content: center; 
+  align-items: center;
+  justify-content: center;
   gap: 10px;
   padding: 11px 22px;
   border-radius: 999px;
@@ -235,16 +364,14 @@
   letter-spacing: 0.3px;
 
   box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.4),
-    inset 0 -2px 6px rgba(0,0,0,0.2),
-    0 10px 30px rgba(0,0,0,0.35);
+    inset 0 1px 1px rgba(255, 255, 255, 0.4),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.2),
+    0 10px 30px rgba(0, 0, 0, 0.35);
 
   cursor: pointer;
   transition: all 0.3s ease;
   position: relative;
   overflow: hidden;
-
-
 }
 
 .settings-page .portal-switchKnob {
@@ -277,8 +404,8 @@
 /* ===== BUTTON ===== */
 .settings-page .portal-primaryBtnCompact {
   display: inline-flex;
-  align-items: center;    
-  justify-content: center; 
+  align-items: center;
+  justify-content: center;
   gap: 10px;
   padding: 11px 22px;
   border-radius: 999px;
@@ -300,16 +427,14 @@
   letter-spacing: 0.3px;
 
   box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.4),
-    inset 0 -2px 6px rgba(0,0,0,0.2),
-    0 10px 30px rgba(0,0,0,0.35);
+    inset 0 1px 1px rgba(255, 255, 255, 0.4),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.2),
+    0 10px 30px rgba(0, 0, 0, 0.35);
 
   cursor: pointer;
   transition: all 0.3s ease;
   position: relative;
   overflow: hidden;
-
-
 }
 
 /* ===== RESPONSIVE ===== */
@@ -325,5 +450,178 @@
   .settings-page .portal-profileTop {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .settings-page .portal-settingsWeekdayRow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .settings-page .portal-settingsWeekdayInput {
+    width: 120px;
+  }
+}
+
+/* ===== INPUT ERROR STATE ===== */
+.settings-page .portal-input-error,
+.settings-page .portal-input-error:focus {
+  border-color: #d32f2f;
+  background-color: rgba(211, 47, 47, 0.05);
+  box-shadow: 0 0 0 2px rgba(211, 47, 47, 0.1);
+}
+
+.settings-page .portal-fieldError {
+  color: #d32f2f;
+  font-size: 12px;
+  margin-top: 4px;
+  display: block;
+}
+
+.settings-page .portal-fieldHint {
+  color: #666;
+  font-size: 12px;
+  margin-top: 4px;
+  display: block;
+}
+
+/* ===== PROMOTION ITEM ===== */
+.settings-page .portal-promotionItem {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.settings-page .portal-promotionItemHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.settings-page .portal-promotionRemoveBtn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #ffcdd2;
+  background: #fee;
+  color: #d32f2f;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.settings-page .portal-promotionRemoveBtn:hover {
+  background: #ffcdd2;
+}
+
+/* ===== OUTLINE BUTTON ===== */
+.settings-page .portal-outlineBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.settings-page .portal-outlineBtn:hover {
+  border-color: #8b6f37;
+  background: rgba(139, 111, 55, 0.05);
+  color: #4f3a16;
+}
+
+.settings-page .portal-outlineBtn:active {
+  background: rgba(139, 111, 55, 0.1);
+}
+
+/* ===== WORKING HOURS GRID ===== */
+.settings-page .portal-workingHoursGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 14px;
+  background: linear-gradient(
+    135deg,
+    rgba(139, 111, 55, 0.03) 0%,
+    rgba(243, 229, 189, 0.05) 100%
+  );
+  border: 1px solid rgba(139, 111, 55, 0.1);
+  border-radius: 12px;
+}
+
+.settings-page .portal-workingHoursGrid .portal-field {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-page .portal-workingHoursGrid .portal-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #4f3a16;
+  font-weight: 700;
+}
+
+.settings-page .portal-workingHoursGrid .portal-input {
+  width: 100%;
+  padding: 14px 12px;
+  font-size: 15px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid rgba(139, 111, 55, 0.15);
+  transition: all 0.3s ease;
+  box-sizing: border-box;
+}
+
+.settings-page .portal-workingHoursGrid .portal-input:hover {
+  border-color: rgba(139, 111, 55, 0.3);
+  background: white;
+}
+
+.settings-page .portal-workingHoursGrid .portal-input:focus {
+  border-color: #8b6f37;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(139, 111, 55, 0.15);
+}
+
+.settings-page .portal-workingHoursGrid .portal-inputWithIcon {
+  position: relative;
+  display: flex;
+}
+
+/* Show icon ONLY on first item (Opening Time and Break Start) */
+.settings-page .portal-workingHoursGrid > :nth-child(1) .portal-inputIcon {
+  color: #8b6f37 !important;
+  opacity: 0.7 !important;
+  right: 12px !important;
+  position: absolute !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  display: flex !important;
+  width: auto !important;
+  height: auto !important;
+}
+
+/* Hide ALL icons in grid */
+.settings-page .portal-workingHoursGrid .portal-inputIcon {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+@media (max-width: 768px) {
+  .settings-page .portal-workingHoursGrid {
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 }

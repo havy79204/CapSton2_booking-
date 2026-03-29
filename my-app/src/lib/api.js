@@ -72,6 +72,10 @@ function emitPortalToast({ type, message, timeoutMs }) {
   )
 }
 
+export function showPortalToast({ type = 'success', message = '', timeoutMs }) {
+  emitPortalToast({ type, message, timeoutMs })
+}
+
 async function request(path, options) {
   const method = String(options?.method || 'GET').toUpperCase()
   const token = getToken()

@@ -449,8 +449,78 @@
   cursor: pointer;
 }
 
+.booking-promoSuggest {
+  margin-top: 0.45rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #fcfaf6;
+  padding: 0.45rem;
+}
+
+.booking-promoSuggestTitle {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  margin-bottom: 0.35rem;
+}
+
+.booking-promoSuggestList {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.booking-promoSuggestItem {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 0.4rem 0.55rem;
+  cursor: pointer;
+}
+
+.booking-promoSuggestItem.active {
+  border-color: var(--color-secondary);
+  background: #faf7f3;
+}
+
+.booking-promoSuggestName {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.booking-promoSuggestMeta {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
 .discount-row {
   color: #b9838b;
+}
+
+.booking-appliedPromo {
+  margin-top: 0.35rem;
+  margin-bottom: 0.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #f8f5ef;
+  padding: 0.45rem 0.6rem;
+}
+
+.booking-appliedPromoTitle {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.booking-appliedPromoMeta {
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
 }
 
 .booking-total-row {

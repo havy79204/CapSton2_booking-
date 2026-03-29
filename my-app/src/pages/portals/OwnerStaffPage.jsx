@@ -38,8 +38,8 @@ const STAFF_SORT_OPTIONS = new Set([
   'bookings_desc',
   'salary_asc',
   'salary_desc',
-  'tip_asc',
-  'tip_desc',
+  'commission_asc',
+  'commission_desc',
 ])
 
 function normalizeInputText(value) {
@@ -231,7 +231,7 @@ function formatDateInputValue(value) {
 }
 
 export default function OwnerStaffPage() {
-  const LOAD_BATCH_SIZE = 10
+  const PAGE_SIZE = 10
   const STAFF_FETCH_SIZE = 1000
   const navigate = useNavigate()
   const location = useLocation()
@@ -250,19 +250,17 @@ export default function OwnerStaffPage() {
     const sortByRaw = String(params.get('sortBy') || '').trim()
     const sortByValue = STAFF_SORT_OPTIONS.has(sortByRaw) ? sortByRaw : 'name_asc'
 
-    const visibleRaw = Number.parseInt(String(params.get('visible') || ''), 10)
-    const visibleValue = Number.isFinite(visibleRaw) && visibleRaw > 0
-      ? Math.max(LOAD_BATCH_SIZE, visibleRaw)
-      : LOAD_BATCH_SIZE
+    const pageRaw = Number.parseInt(String(params.get('page') || ''), 10)
+    const pageValue = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1
 
     return {
       keyword,
       period,
       date,
       sortBy: sortByValue,
-      visibleCount: visibleValue,
+      currentPage: pageValue,
     }
-  }, [LOAD_BATCH_SIZE])
+  }, [])
 
   if (!initialUrlStateRef.current) {
     initialUrlStateRef.current = parseListStateFromSearch(location.search)
@@ -282,7 +280,7 @@ export default function OwnerStaffPage() {
   const [timePeriod, setTimePeriod] = useState(() => initialUrlStateRef.current?.period || 'all')
   const [selectedDate, setSelectedDate] = useState(() => initialUrlStateRef.current?.date || todayDateInputValue())
   const [sortBy, setSortBy] = useState(() => initialUrlStateRef.current?.sortBy || 'name_asc')
-  const [visibleCount, setVisibleCount] = useState(() => initialUrlStateRef.current?.visibleCount || LOAD_BATCH_SIZE)
+  const [currentPage, setCurrentPage] = useState(() => initialUrlStateRef.current?.currentPage || 1)
 
   function getSortDirection(field) {
     if (sortBy === `${field}_asc`) return 'asc'
@@ -292,7 +290,7 @@ export default function OwnerStaffPage() {
 
   function setSortField(field, direction) {
     setSortBy(`${field}_${direction}`)
-    setVisibleCount(LOAD_BATCH_SIZE)
+    setCurrentPage(1)
   }
 
   function toggleSortField(field) {
@@ -338,6 +336,11 @@ export default function OwnerStaffPage() {
     specialtyCategoryIds: [],
   })
   const [detailErrors, setDetailErrors] = useState({})
+  const [deleteConfirm, setDeleteConfirm] = useState({
+    open: false,
+    member: null,
+    closeAfterDelete: false,
+  })
 
   const fetchStaffMembers = useCallback(async (signal) => {
     const params = new URLSearchParams({
@@ -391,7 +394,7 @@ export default function OwnerStaffPage() {
     setTimePeriod((prev) => (prev === next.period ? prev : next.period))
     setSelectedDate((prev) => (prev === next.date ? prev : next.date))
     setSortBy((prev) => (prev === next.sortBy ? prev : next.sortBy))
-    setVisibleCount((prev) => (prev === next.visibleCount ? prev : next.visibleCount))
+    setCurrentPage((prev) => (prev === next.currentPage ? prev : next.currentPage))
   }, [location.search, parseListStateFromSearch])
 
   useEffect(() => {
@@ -403,7 +406,7 @@ export default function OwnerStaffPage() {
     nextParams.set('period', timePeriod)
     nextParams.set('date', selectedDate)
     nextParams.set('sortBy', sortBy)
-    nextParams.set('visible', String(Math.max(LOAD_BATCH_SIZE, Number(visibleCount || LOAD_BATCH_SIZE))))
+    nextParams.set('page', String(Math.max(1, Number(currentPage || 1))))
     if (currentStaffId) nextParams.set('staffId', currentStaffId)
 
     const currentSearch = currentParams.toString()
@@ -417,7 +420,7 @@ export default function OwnerStaffPage() {
       },
       { replace: true }
     )
-  }, [debouncedQuery, timePeriod, selectedDate, sortBy, visibleCount, LOAD_BATCH_SIZE, location.pathname, location.search, navigate])
+  }, [debouncedQuery, timePeriod, selectedDate, sortBy, currentPage, location.pathname, location.search, navigate])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -666,10 +669,25 @@ export default function OwnerStaffPage() {
     }
   }
 
+  function requestDeleteStaff(member, options = {}) {
+    if (!member?.id) return
+    setDeleteConfirm({
+      open: true,
+      member,
+      closeAfterDelete: Boolean(options.closeAfterDelete),
+    })
+  }
+
+  function closeDeleteConfirm() {
+    setDeleteConfirm({
+      open: false,
+      member: null,
+      closeAfterDelete: false,
+    })
+  }
+
   async function onDeleteStaff(member, options = {}) {
     if (!member?.id) return
-    const accepted = window.confirm(`Are you sure you want to delete employee "${member.name || member.id}"?`)
-    if (!accepted) return
     try {
       await api.delete(`/api/owner/staff/${member.id}`)
       await loadStaffMembers()
@@ -679,6 +697,8 @@ export default function OwnerStaffPage() {
       }
     } catch (err) {
       console.error(err)
+    } finally {
+      closeDeleteConfirm()
     }
   }
 
@@ -731,8 +751,17 @@ export default function OwnerStaffPage() {
     }
   }
 
-  const visibleStaffMembers = staffMembers.slice(0, Math.max(LOAD_BATCH_SIZE, visibleCount))
-  const hasMoreStaff = visibleStaffMembers.length < staffMembers.length
+  const totalRows = staffMembers.length
+  const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE))
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages)
+  const pageStart = (safeCurrentPage - 1) * PAGE_SIZE
+  const visibleStaffMembers = staffMembers.slice(pageStart, pageStart + PAGE_SIZE)
+
+  useEffect(() => {
+    if (currentPage !== safeCurrentPage) {
+      setCurrentPage(safeCurrentPage)
+    }
+  }, [currentPage, safeCurrentPage])
 
   const detailStatusValue = String(detailForm.status || 'Active')
   const detailStatusClassName = detailStatusValue.toLowerCase() === 'inactive'
@@ -881,7 +910,7 @@ export default function OwnerStaffPage() {
               <button
                 type="button"
                 className="portal-modalBtn danger"
-                onClick={() => onDeleteStaff(selectedStaff, { closeAfterDelete: true })}
+                onClick={() => requestDeleteStaff(selectedStaff, { closeAfterDelete: true })}
                 disabled={detailLoading || !selectedStaff?.id}
               >
                 Delete
@@ -1009,6 +1038,33 @@ export default function OwnerStaffPage() {
         )}
       </PortalModal>
 
+      <PortalModal
+        open={deleteConfirm.open}
+        title="Confirm delete"
+        variant="confirm"
+        onClose={closeDeleteConfirm}
+        modalClassName="staff-deleteConfirmModal"
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={closeDeleteConfirm}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="portal-modalBtn danger"
+              onClick={() => onDeleteStaff(deleteConfirm.member, { closeAfterDelete: deleteConfirm.closeAfterDelete })}
+              disabled={!deleteConfirm.member?.id}
+            >
+              Delete
+            </button>
+          </>
+        }
+      >
+        <p style={{ margin: 0 }}>
+          Are you sure you want to delete employee "{deleteConfirm.member?.name || deleteConfirm.member?.id || 'this staff member'}"?
+        </p>
+      </PortalModal>
+
       <div className="staff-filterRow">
         <label className="portal-field staff-filterField staff-filterSearchField">
           <span className="portal-label">Search</span>
@@ -1022,7 +1078,7 @@ export default function OwnerStaffPage() {
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value)
-                setVisibleCount(LOAD_BATCH_SIZE)
+                setCurrentPage(1)
               }}
             />
           </div>
@@ -1035,7 +1091,7 @@ export default function OwnerStaffPage() {
             value={timePeriod}
             onChange={(e) => {
               setTimePeriod(e.target.value)
-              setVisibleCount(LOAD_BATCH_SIZE)
+              setCurrentPage(1)
             }}
           >
             <option value="all">All</option>
@@ -1055,7 +1111,7 @@ export default function OwnerStaffPage() {
             onChange={(e) => {
               setSelectedDate(e.target.value || todayDateInputValue())
               setTimePeriod('day')
-              setVisibleCount(LOAD_BATCH_SIZE)
+              setCurrentPage(1)
             }}
           />
         </label>
@@ -1104,8 +1160,8 @@ export default function OwnerStaffPage() {
                 </th>
                 <th>
                   <div className="staff-sortHeader">
-                    <span>Tip</span>
-                    {renderSortButton('tip', 'tip')}
+                    <span>Commission</span>
+                    {renderSortButton('commission', 'commission')}
                   </div>
                 </th>
                 <th>Actions</th>
@@ -1132,7 +1188,7 @@ export default function OwnerStaffPage() {
                     <td>{formatWorkingHours(m.workingHours)}</td>
                     <td>{Number(m.totalBookings || 0)}</td>
                     <td>{formatMoney(m.totalSalary)}</td>
-                    <td>{formatMoney(m.totalTip)}</td>
+                    <td>{formatMoney(m.totalCommission)}</td>
                     <td>
                       <div className="staff-actions">
                         <button type="button" className="portal-ghostBtn" onClick={() => openDetail(m, 'view')}>
@@ -1153,18 +1209,27 @@ export default function OwnerStaffPage() {
           </table>
         </div>
 
-        {hasMoreStaff ? (
-          <div className="staff-pagination">
-            <button
-              type="button"
-              className="portal-ghostBtn staff-loadMoreBtn"
-              disabled={staffLoading}
-              onClick={() => setVisibleCount((prev) => prev + LOAD_BATCH_SIZE)}
-            >
-              Load more
-            </button>
-          </div>
-        ) : null}
+        <div className="staff-pagination">
+          <button
+            type="button"
+            className="staff-paginationBtn"
+            disabled={staffLoading || safeCurrentPage <= 1}
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            aria-label="Previous page"
+          >
+            ‹
+          </button>
+          <span className="staff-paginationText">Page {safeCurrentPage} / {totalPages}</span>
+          <button
+            type="button"
+            className="staff-paginationBtn"
+            disabled={staffLoading || safeCurrentPage >= totalPages}
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            aria-label="Next page"
+          >
+            ›
+          </button>
+        </div>
       </PortalCard>
     </div>
   )

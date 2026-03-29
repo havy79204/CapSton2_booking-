@@ -162,6 +162,35 @@ export function IconAlertTriangle() {
   )
 }
 
+export function IconCheckCircle() {
+  return (
+    <IconBase>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8.5 12.5l2.3 2.3 4.7-4.9" />
+    </IconBase>
+  )
+}
+
+export function IconInfo() {
+  return (
+    <IconBase>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 10v6" />
+      <path d="M12 7h.01" />
+    </IconBase>
+  )
+}
+
+export function IconXCircle() {
+  return (
+    <IconBase>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.5 9.5l5 5" />
+      <path d="M14.5 9.5l-5 5" />
+    </IconBase>
+  )
+}
+
 export function IconStore() {
   return (
     <IconBase>
@@ -215,6 +244,14 @@ export function IconCube() {
   )
 }
 
+export function IconStar() {
+  return (
+    <IconBase>
+      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+    </IconBase>
+  )
+}
+
 export default {
   IconGrid,
   IconCalendar,
@@ -232,10 +269,14 @@ export default {
   IconMail,
   IconDownload,
   IconAlertTriangle,
+  IconCheckCircle,
+  IconInfo,
+  IconXCircle,
   IconStore,
   IconCevronDown,
   IconCevronLeft,
   IconCevronRight,
   IconDollar,
   IconCube,
+  IconStar,
 }

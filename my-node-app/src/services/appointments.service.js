@@ -1,5 +1,122 @@
 const { query, newId } = require('../config/query')
 const { toAppointmentListItem } = require('../models/appointment.model')
+const { getSettingsMap } = require('./settings.service')
+
+function calculateCommission(revenue, tiers = {}) {
+  const tierLow = tiers.CommissionTierLow !== undefined && tiers.CommissionTierLow !== null ? Number(tiers.CommissionTierLow) : (tiers.commissionTierLow !== undefined && tiers.commissionTierLow !== null ? Number(tiers.commissionTierLow) : 500000)
+  const rateLow = tiers.CommissionRateLow !== undefined && tiers.CommissionRateLow !== null ? Number(tiers.CommissionRateLow) : (tiers.commissionRateLow !== undefined && tiers.commissionRateLow !== null ? Number(tiers.commissionRateLow) : 0.10)
+  const tierHigh = tiers.CommissionTierHigh !== undefined && tiers.CommissionTierHigh !== null ? Number(tiers.CommissionTierHigh) : (tiers.commissionTierHigh !== undefined && tiers.commissionTierHigh !== null ? Number(tiers.commissionTierHigh) : 2000000)
+  const rateHigh = tiers.CommissionRateHigh !== undefined && tiers.CommissionRateHigh !== null ? Number(tiers.CommissionRateHigh) : (tiers.commissionRateHigh !== undefined && tiers.commissionRateHigh !== null ? Number(tiers.commissionRateHigh) : 0.15)
+
+  if (revenue >= tierHigh) {
+    return revenue * rateHigh
+  }
+  if (revenue >= tierLow && revenue < tierHigh) {
+    return revenue * rateLow
+  }
+  return 0
+}
+
+function normalizeAppointmentStatus(status) {
+  const normalizedStatusInput = String(status || '').trim().toLowerCase()
+  if (normalizedStatusInput === 'completed' || normalizedStatusInput === 'complete' || normalizedStatusInput === 'done') return 'Completed'
+  if (normalizedStatusInput === 'canceled' || normalizedStatusInput === 'cancelled' || normalizedStatusInput === 'delete' || normalizedStatusInput === 'deleted') return 'Canceled'
+  if (normalizedStatusInput === 'booked' || normalizedStatusInput === 'confirmed' || normalizedStatusInput === 'confirm') return 'Booked'
+  if (normalizedStatusInput === 'pending') return 'Pending'
+  return status || 'Booked'
+}
+
+async function applyCommissionForCompletedBooking(bookingId, staffId) {
+  try {
+    let targetStaffId = staffId
+    if (!targetStaffId) {
+      const bookingRes = await query(
+        `SELECT TOP 1 bs.StaffId
+         FROM BookingServices bs
+         WHERE bs.BookingId = @bookingId`,
+        { bookingId }
+      )
+      targetStaffId = bookingRes.recordset?.[0]?.StaffId
+    }
+
+    if (!targetStaffId) {
+      console.log(`[COMMISSION CALC] No staffId found for booking ${bookingId}, skip`)
+      return
+    }
+
+    const settingsMap = await getSettingsMap()
+    let commissionTiers = {}
+    
+    if (Array.isArray(settingsMap.CommissionTiers) && settingsMap.CommissionTiers.length > 0) {
+      // Use new dynamic tiers if available
+      const sortedTiers = settingsMap.CommissionTiers.sort((a, b) => (a.threshold || 0) - (b.threshold || 0))
+      const tier1Threshold = sortedTiers[0].threshold !== undefined && sortedTiers[0].threshold !== null ? Number(sortedTiers[0].threshold) : 500000
+      const tier1Rate = sortedTiers[0].rate !== undefined && sortedTiers[0].rate !== null ? Number(sortedTiers[0].rate) : 0.10
+      const tier2Threshold = sortedTiers.length > 1 && sortedTiers[1].threshold !== undefined && sortedTiers[1].threshold !== null ? Number(sortedTiers[1].threshold) : tier1Threshold
+      const tier2Rate = sortedTiers.length > 1 && sortedTiers[1].rate !== undefined && sortedTiers[1].rate !== null ? Number(sortedTiers[1].rate) : tier1Rate
+      commissionTiers = {
+        CommissionTierLow: tier1Threshold,
+        CommissionRateLow: tier1Rate,
+        CommissionTierHigh: tier2Threshold,
+        CommissionRateHigh: tier2Rate,
+      }
+    } else {
+      // Fallback to old format
+      const tierLow = settingsMap.CommissionTierLow !== undefined && settingsMap.CommissionTierLow !== null ? Number(settingsMap.CommissionTierLow) : 500000
+      const rateLow = settingsMap.CommissionRateLow !== undefined && settingsMap.CommissionRateLow !== null ? Number(settingsMap.CommissionRateLow) : 0.10
+      const tierHigh = settingsMap.CommissionTierHigh !== undefined && settingsMap.CommissionTierHigh !== null ? Number(settingsMap.CommissionTierHigh) : 2000000
+      const rateHigh = settingsMap.CommissionRateHigh !== undefined && settingsMap.CommissionRateHigh !== null ? Number(settingsMap.CommissionRateHigh) : 0.15
+      commissionTiers = {
+        CommissionTierLow: tierLow,
+        CommissionRateLow: rateLow,
+        CommissionTierHigh: tierHigh,
+        CommissionRateHigh: rateHigh,
+      }
+    }
+
+    const bookingServicesRes = await query(
+      `SELECT bs.BookingServiceId, COALESCE(bs.Price, sv.Price, 0) AS Price
+       FROM BookingServices bs
+       LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+       WHERE bs.BookingId = @bookingId`,
+      { bookingId }
+    )
+
+    if (!bookingServicesRes.recordset || bookingServicesRes.recordset.length === 0) {
+      console.log(`[COMMISSION CALC] No BookingServices for booking ${bookingId}, skip`)
+      return
+    }
+
+    const staffRevenueRes = await query(
+      `SELECT
+        SUM(ISNULL(COALESCE(bs.Price, sv.Price), 0)) as TotalRevenue
+       FROM BookingServices bs
+      JOIN Bookings b ON b.BookingId = bs.BookingId
+      LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+       WHERE bs.StaffId = @staffId
+         AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')`,
+      { staffId: targetStaffId }
+    )
+
+    const totalRevenue = Number(staffRevenueRes.recordset?.[0]?.TotalRevenue || 0)
+    const totalCommissionAmount = calculateCommission(totalRevenue, commissionTiers)
+    const commissionPercentage = totalRevenue > 0 ? (totalCommissionAmount / totalRevenue) : 0
+
+    for (const bs of bookingServicesRes.recordset || []) {
+      const commissionAmount = bs.Price * commissionPercentage
+      await query(
+        'UPDATE BookingServices SET CommissionAmount = @commissionAmount WHERE BookingServiceId = @bookingServiceId',
+        {
+          commissionAmount: commissionAmount > 0 ? Math.round(commissionAmount) : 0,
+          bookingServiceId: bs.BookingServiceId,
+        }
+      )
+    }
+  } catch (err) {
+    console.error('[appointments.service] Error calculating commission:', err.message)
+    console.error('[appointments.service] Stack:', err.stack)
+  }
+}
 
 async function listAppointments() {
   const result = await query(
@@ -11,7 +128,7 @@ async function listAppointments() {
     b.Notes,
     cu.Name AS CustomerName,
 
-    -- ✅ SERVICE NAMES
+    -- SERVICE NAMES
     ISNULL(STUFF((
         SELECT ', ' + sv.Name
         FROM BookingServices bs2
@@ -20,7 +137,7 @@ async function listAppointments() {
         FOR XML PATH('')
     ), 1, 2, ''), 'No Service') AS AllServices,
 
-    -- ✅ SERVICE IDS (FIX CHÍNH)
+    -- SERVICE IDS (FIX CHINH)
     ISNULL(STUFF((
         SELECT ',' + CAST(bs2.ServiceId AS VARCHAR)
         FROM BookingServices bs2
@@ -28,7 +145,7 @@ async function listAppointments() {
         FOR XML PATH('')
     ), 1, 1, ''), '') AS ServiceIds,
 
-    -- ✅ TOTAL DURATION
+    -- TOTAL DURATION
     ISNULL((
         SELECT SUM(ISNULL(sv2.DurationMinutes, 0))
         FROM BookingServices bs3
@@ -63,7 +180,8 @@ ORDER BY b.BookingTime DESC`
 }
 
 async function createAppointment(payload) {
-  const { customerUserId, serviceIds, staffId, date, time, notes } = payload || {}
+  const { customerUserId, serviceIds, staffId, date, time, notes, status } = payload || {}
+  const statusToSave = normalizeAppointmentStatus(status)
 
 if (!Array.isArray(serviceIds) || serviceIds.length === 0) {
   throw new Error('At least one service is required')
@@ -124,12 +242,12 @@ await query(
     bookingId,
     customerUserId,
     bookingTime: when,
-    status: 'Booked',
+    status: statusToSave,
     notes: notes || null,
   }
 )
 
-// 🔥 loop insert services
+// Loop insert services
 for (let serviceId of serviceIds) {
   const svc = await query(
     'SELECT Price FROM Services WHERE ServiceId = @serviceId',
@@ -150,7 +268,11 @@ for (let serviceId of serviceIds) {
   )
 }
 
-// ✅ THÊM DÒNG NÀY
+if (String(statusToSave).toLowerCase() === 'completed') {
+  await applyCommissionForCompletedBooking(bookingId, staffId)
+}
+
+// Return created booking id
 return { id: bookingId }
 }
 
@@ -201,7 +323,15 @@ async function getAppointmentById(bookingId) {
 }
 
 async function updateAppointment(bookingId, payload) {
+  console.log(`\n[APPT UPDATE] ========== START ==========`)
+  console.log(`[APPT UPDATE] BookingId: ${bookingId}`)
+  console.log(`[APPT UPDATE] Payload:`, JSON.stringify(payload, null, 2))
+  
   const { customerUserId, serviceIds, staffId, date, time, notes, status } = payload || {}
+  const normalizedStatusInput = String(status || '').trim().toLowerCase()
+  const statusToSave = normalizeAppointmentStatus(status)
+  
+  console.log(`[APPT UPDATE] Extracted: status="${status}", normalized="${normalizedStatusInput}", saveAs="${statusToSave}", staffId="${staffId}")`)
 
   const when = new Date(`${date}T${time}:00`)
   if (Number.isNaN(when.getTime())) {
@@ -235,20 +365,20 @@ async function updateAppointment(bookingId, payload) {
       customerUserId,
       bookingTime: when,
       notes: notes || null,
-      status: status || 'Booked',
+      status: statusToSave,
     }
   )
 
-  // =================🔥 FIX MULTIPLE SERVICES =================
+  // ================= FIX MULTIPLE SERVICES =================
 
   if (Array.isArray(serviceIds) && serviceIds.length > 0) {
-    // ❌ XÓA hết service cũ
+    // Delete all old services
     await query(
       'DELETE FROM BookingServices WHERE BookingId = @bookingId',
       { bookingId }
     )
 
-    // ✅ INSERT lại toàn bộ service mới
+    // Insert all new services
     for (let serviceId of serviceIds) {
       const svc = await query(
         'SELECT Price FROM Services WHERE ServiceId = @serviceId',
@@ -270,6 +400,16 @@ async function updateAppointment(bookingId, payload) {
     }
   }
 
+  // ===== CALCULATE COMMISSION IF STATUS = 'COMPLETED' =====
+  // This runs regardless of whether serviceIds was provided
+  const normalizedStatus = String(statusToSave || '').trim().toLowerCase()
+  console.log(`[UPDATE APPT] BookingId=${bookingId}, staffId=${staffId}, status=${status}, savedStatus=${statusToSave}, normalized=${normalizedStatus}`)
+  
+  if (normalizedStatus === 'completed') {
+    await applyCommissionForCompletedBooking(bookingId, staffId)
+  }
+
+  console.log(`[APPT UPDATE] ========== END ==========\n`)
   return { id: bookingId }
 }
 
