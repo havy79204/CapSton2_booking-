@@ -1,9 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api, resolveApiImageUrl } from '../lib/api'
 
-/**
- * Hook to fetch homepage data from backend
- */
 export function useHomepage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -30,9 +27,6 @@ export function useHomepage() {
   return { data, loading, error }
 }
 
-/**
- * Hook to fetch services from backend
- */
 export function useServices() {
   const [services, setServices] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -77,9 +71,7 @@ export function useServices() {
   return { services, loading, error }
 }
 
-/**
- * Hook to fetch products from backend
- */
+
 export function useProducts() {
   const [products, setProducts] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -124,9 +116,6 @@ export function useProducts() {
   return { products, loading, error }
 }
 
-/**
- * Hook to fetch reviews from backend
- */
 export function useReviews(limit = 10) {
   const [reviews, setReviews] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -159,9 +148,6 @@ export function useReviews(limit = 10) {
   return { reviews, loading, error }
 }
 
-/**
- * Hook to get reviews by service from DB
- */
 export function useServiceReviews(serviceId, limit = 50) {
   const [reviews, setReviews] = useState([])
   const [ratingSummary, setRatingSummary] = useState({ AverageRating: 0, ReviewCount: 0 })
@@ -220,9 +206,6 @@ export function useServiceReviews(serviceId, limit = 50) {
   }
 }
 
-/**
- * Hook to get rating for product
- */
 export function useProductRating(productId) {
   const [ratingSummary, setRatingSummary] = useState({ AverageRating: 0, ReviewCount: 0 })
   const [loading, setLoading] = useState(true)
@@ -255,9 +238,6 @@ export function useProductRating(productId) {
   return { ratingSummary, loading, error }
 }
 
-/**
- * Hook to get reviews by product from DB
- */
 export function useProductReviews(productId, limit = 50) {
   const [reviews, setReviews] = useState([])
   const [ratingSummary, setRatingSummary] = useState({ AverageRating: 0, ReviewCount: 0 })
@@ -316,9 +296,6 @@ export function useProductReviews(productId, limit = 50) {
   }
 }
 
-/**
- * Hook to fetch salon stats from backend
- */
 export function useSalonStats() {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)

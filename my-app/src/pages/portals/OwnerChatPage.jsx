@@ -362,9 +362,9 @@ export default function OwnerChatPage() {
               <div className="owner-chatHint">No matching conversations.</div>
             ) : null}
 
-            {filteredThreads.map((thread) => (
+            {filteredThreads.map((thread, idx) => (
               <button
-                key={thread.id}
+                key={`${thread.id}-${idx}`}
                 type="button"
                 className={`owner-chatThread ${thread.id === activeThreadId ? 'active' : ''}`}
                 onClick={() => setActiveThreadId(thread.id)}
@@ -400,8 +400,8 @@ export default function OwnerChatPage() {
               <div className="owner-chatHint">No messages yet. Send a greeting to the customer.</div>
             ) : null}
 
-            {messages.map((msg) => (
-              <React.Fragment key={msg.id}>
+            {messages.map((msg, idx) => (
+              <React.Fragment key={`${msg.id}-${msg.createdAt || idx}`}>
                 {firstNewMessageId && msg.id === firstNewMessageId ? (
                   <div className="owner-chatNewDivider">New messages</div>
                 ) : null}

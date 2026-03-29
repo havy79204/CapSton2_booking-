@@ -1,0 +1,450 @@
+.gemini-container {
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 0;
+  box-sizing: border-box;
+  background: linear-gradient(180deg, rgba(6,182,212,0.06) 0%, rgba(99,102,241,0.03) 40%);
+  backdrop-filter: blur(6px);
+}
+
+.gemini-card {
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  background: linear-gradient(180deg, #ffffffcc, #ffffffee);
+  border-radius: 0;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.gemini-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(15,23,42,0.04);
+}
+.menu-icon { background:transparent; border:none; font-size:18px; cursor:pointer; padding:8px; border-radius:8px }
+.brand { font-weight:700; letter-spacing:0.2px; opacity:0.9 }
+
+.gemini-body {
+  flex: 1 1 auto;
+  padding: 28px 22px;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  min-height: 0;
+}
+
+.gemini-body.center {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+}
+
+.chat-list {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 28px;
+}
+
+.msg {
+  max-width: 78%;
+  padding: 12px 16px;
+  border-radius: 14px;
+  margin: 4px 0;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.msg.user {
+  background: linear-gradient(90deg,#4f46e5,#7c3aed);
+  color: white;
+  margin-left: auto;
+}
+
+.msg.ai {
+  background: rgba(243,244,246,0.9);
+  color: #0f172a;
+}
+
+.msg-image {
+  max-width: 280px;
+  width: 100%;
+  border-radius: 10px;
+  display: block;
+  border: 1px solid rgba(15,23,42,0.08);
+  margin-bottom: 8px;
+}
+
+.analysis-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.analysis-text {
+  font-weight: 600;
+}
+
+.analysis-advice {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.analysis-suggest-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.analysis-title {
+  font-size: 13px;
+  color: #475569;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.analysis-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.analysis-chip {
+  text-decoration: none;
+  border: 1px solid rgba(15,23,42,0.1);
+  color: #0f172a;
+  background: #fff;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.analysis-products {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.analysis-product {
+  border: 1px solid rgba(15,23,42,0.08);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255,255,255,0.8);
+}
+
+.analysis-product-name {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.analysis-product-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.analysis-product-actions button {
+  background: linear-gradient(90deg,#0ea5e9,#0284c7);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.analysis-product-actions a {
+  text-decoration: none;
+  font-size: 12px;
+  color: #0369a1;
+  font-weight: 600;
+}
+
+/* INPUT fixed to bottom of card */
+.gemini-input {
+  position: relative;
+  bottom: auto;
+  z-index: 10;
+  display: flex;
+  justify-content: center; /* center the input area */
+  gap: 12px;
+  padding: 12px 18px; /* standard padding, we'll nudge the input itself */
+  border-top: 1px solid rgba(15,23,42,0.04);
+  background: linear-gradient(180deg, rgba(255,255,255,0.85), rgba(255,255,255,0.95));
+  align-items: center;
+  margin-top: auto;
+  margin-bottom: 18px;
+}
+
+.input-shell {
+  position: relative;
+  flex: 0 1 660px;
+  max-width: 660px;
+  width: 100%;
+}
+
+.gemini-input .chat-text-input {
+  width: 100%;
+  padding: 12px 16px;
+  padding-left: 50px;
+  border-radius: 999px;
+  border: 1px solid rgba(15,23,42,0.08);
+  outline: none;
+  font-size: 15px;
+  background: #fff;
+  min-width: 0;
+}
+
+.gemini-input button {
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(90deg,#06b6d4,#06a5c2);
+  color: white;
+  cursor: pointer;
+}
+
+.gemini-input .upload-inside-btn {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #e2e8f0;
+  color: #0f172a;
+  border: 1px solid rgba(15,23,42,0.08);
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 999px;
+}
+
+.pending-image-row {
+  padding: 0 18px 12px;
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pending-image-summary {
+  font-size: 12px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.pending-image-list {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pending-image-card {
+  width: 118px;
+  height: 118px;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid rgba(15,23,42,0.12);
+  background: #f8fafc;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+}
+
+.pending-image-large {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pending-image-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 6px;
+}
+
+.pending-image-actions button {
+  border: none;
+  background: rgba(2,6,23,0.9);
+  color: #fff;
+  border-radius: 999px;
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.pending-add-card {
+  width: 118px;
+  height: 118px;
+  border-radius: 10px;
+  border: 1px dashed rgba(15,23,42,0.25);
+  background: rgba(148, 163, 184, 0.12);
+  color: #0f172a;
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pending-image-footer button {
+  border: none;
+  background: transparent;
+  color: #0369a1;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Sessions drawer overlay */
+.sessions-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8,10,14,0.3);
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  z-index: 60;
+}
+.sessions-panel {
+  width: 320px;
+  max-width: 80%;
+  background: #fff;
+  border-right: 1px solid rgba(15,23,42,0.04);
+  padding: 12px;
+  box-shadow: 6px 0 30px rgba(2,6,23,0.08);
+  display: flex;
+  flex-direction: column;
+}
+.panel-header { display:flex; align-items:center; justify-content:space-between; padding:6px 4px 12px 4px }
+.close-btn { background:transparent; border:none; font-size:16px; cursor:pointer }
+.sessions-list { display:flex; flex-direction:column; gap:8px; overflow:auto; padding-bottom:12px }
+.session-item { display:flex; align-items:center; gap:10px; padding:10px; border-radius:8px; background:transparent; border:none; cursor:pointer; text-align:left }
+.session-item.active { background: rgba(6,182,212,0.06) }
+.session-avatar { width:36px; height:36px; border-radius:50%; background:#f3f4f6; display:flex; align-items:center; justify-content:center; font-weight:600 }
+.session-label { white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.no-sessions { opacity:0.6; font-size:14px; padding:8px }
+
+/* session action menu */
+.session-item { display:flex; align-items:center; justify-content:space-between; }
+.session-main { display:flex; align-items:center; gap:10px; padding:10px; border-radius:8px; background:transparent; border:none; cursor:pointer; text-align:left; flex:1 }
+.session-actions { position: relative; display:flex; align-items:center; margin-left:6px }
+.session-menu-btn { background:transparent; border:none; font-size:18px; padding:6px 8px; cursor:pointer }
+.session-menu { position: absolute; right: 0; top: calc(100% + 6px); background: #fff; border: 1px solid rgba(15,23,42,0.06); box-shadow: 0 6px 16px rgba(2,6,23,0.08); border-radius:8px; display:flex; flex-direction:column; min-width:120px; z-index:50 }
+.session-menu button { border:none; background:transparent; padding:8px 12px; text-align:left; cursor:pointer }
+.session-menu button:hover { background: rgba(6,182,212,0.06) }
+
+/* New chat button in sidebar */
+.new-chat { padding: 8px 6px; }
+.new-chat .new-chat-btn { display:flex; align-items:center; gap:10px; width:100%; padding:8px 10px; border-radius:10px; background:transparent; border:none; cursor:pointer; }
+.new-chat .new-chat-btn .icon { width:36px; height:36px; border-radius:50%; background:#f3f4f6; display:flex; align-items:center; justify-content:center; font-weight:600 }
+.new-chat .new-chat-btn .label { white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.gemini-side.collapsed .new-chat { padding: 6px 0 }
+.gemini-side.collapsed .new-chat .new-chat-btn { justify-content:center; padding:6px }
+.gemini-side.collapsed .new-chat .label { display:none }
+
+
+/* responsive */
+@media (max-width: 880px) {
+  .gemini-card { width: 100%; height: 100vh; border-radius: 0; margin-left: 0 }
+  .gemini-input input { font-size: 14px; max-width: 100% }
+  .chat-list { padding-bottom: 24px }
+  .gemini-input { margin-bottom: 12px }
+
+  /* Mobile: make sidebar slide over content instead of resizing layout */
+  .gemini-side {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 320px;
+    max-width: 80%;
+    transform: translateX(-110%);
+    transition: transform 240ms ease;
+    z-index: 90;
+    box-shadow: 8px 0 30px rgba(2,6,23,0.12);
+    background: #fff;
+  }
+
+  /* When container has side-open class, reveal sidebar */
+  .side-open .gemini-side {
+    transform: translateX(0);
+  }
+
+  /* ensure main card stays full width underneath */
+  .gemini-card { width: 100%; }
+
+  /* small adjustment to header layout on mobile */
+  .gemini-side .panel-header { padding: 12px 10px }
+}
+
+/* Desktop: show persistent sidebar; hide overlay */
+@media (min-width: 881px) {
+  .sessions-overlay { display: none }
+
+  .gemini-container { justify-content: flex-start }
+
+  .gemini-side { display: block; background: #fff; border-right: 1px solid rgba(15,23,42,0.04); height: 100vh; box-shadow: 4px 0 20px rgba(2,6,23,0.04); }
+  .gemini-side .side-inner { display:flex; flex-direction:column; padding: 12px; height:100%; }
+  .gemini-side .panel-header { display:flex; align-items:center; gap:12px; padding-bottom:12px }
+  .gemini-side .sessions-list { overflow:auto; padding-bottom:12px }
+
+  .gemini-side { width: 260px; flex: 0 0 260px; }
+  .gemini-side.collapsed { width: 72px; flex: 0 0 72px; }
+
+  /* Use flex layout for the main card so it won't be pushed by wide children */
+  .gemini-card { flex: 1 1 auto; min-width: 0; transition: margin 220ms ease; }
+  /* Sidebar changes its flex-basis (and width) when collapsed; gemini-card adapts */
+  .gemini-side { transition: flex-basis 220ms ease, width 220ms ease; }
+
+  /* keep header icons on one row and left-aligned */
+  .gemini-side .panel-header { justify-content: flex-start }
+  /* slightly nudge the new-chat left so the icon aligns under the menu icon */
+  .gemini-side .panel-header .new-chat { margin-left: 8px; transform: translateX(-8px); }
+
+  /* When collapsed: stack menu + new-chat vertically and center them */
+  .gemini-side.collapsed .panel-header { flex-direction: column; align-items: center; justify-content: flex-start; gap: 10px; padding-top: 12px }
+  .gemini-side.collapsed .menu-icon { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; padding:0; background:#f3f4f6; border:none; font-size:16px }
+  .gemini-side.collapsed .new-chat .icon { width:34px; height:34px }
+  /* svg icon sizing and alignment */
+  .panel-header .menu-icon { display:flex; align-items:center; justify-content:center; padding:6px; background:transparent; border:none }
+  .panel-header .menu-icon svg { width:20px; height:20px; color:#0f172a }
+  .new-chat-btn .icon { display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:50%; background:#f3f4f6 }
+  .new-chat-btn .icon svg { width:18px; height:18px; color:#061826 }
+
+/* nudge the edit icon slightly left so it lines up with the menu icon */
+.new-chat .icon { transform: translateX(-15px); }
+.gemini-side.collapsed .new-chat .icon { transform: none; }
+  .gemini-side.collapsed .new-chat { margin-left:0 }
+
+  /* ensure when expanded the stacked icons align horizontally (same x coordinate) */
+  .gemini-side:not(.collapsed) .panel-header { align-items: center }
+  .gemini-side:not(.collapsed) .panel-header .menu-icon { margin-right: 4px }
+}
