@@ -356,6 +356,13 @@ const BookingPage = () => {
       return
     }
 
+    // Prevent booking if there's a scheduling conflict
+    const conflicts = checkBookingConflict()
+    if (conflicts) {
+      alert('Selected time conflicts with existing bookings. Please choose another time or staff.')
+      return
+    }
+
     try {
       setSubmitting(true)
       await createBooking({
