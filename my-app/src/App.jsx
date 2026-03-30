@@ -17,6 +17,7 @@ import OwnerChatPage from './pages/portals/OwnerChatPage.jsx'
 import OwnerCustomerDetailPage from './pages/portals/OwnerCustomerDetailPage.jsx'
 import Header from './components/Header.jsx'
 import Footer from './components/Footer.jsx'
+import AIChatbox from './components/AIChatbox.jsx'
 import HomePage from './pages/HomePage.jsx'
 import ServiceDetail from './pages/ServiceDetail.jsx'
 import ProductDetail from './pages/ProductDetail.jsx'
@@ -82,6 +83,7 @@ function App() {
         }
       >
         <Route index element={<HomePage />} />
+        <Route path="ai-chat" element={<AIChatbox />} />
         <Route path="service/:id" element={<ServiceDetail />} />
         <Route path="product/:id" element={<ProductDetail />} />
         <Route path="profile" element={<ProfilePage />} />

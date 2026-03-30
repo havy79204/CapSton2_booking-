@@ -16,6 +16,7 @@ import {
 import {
 } from '../lib/mockData';
 import { useProductReviews, useProducts } from '../hooks/useHomepage';
+import PortalModal from '../components/Layout portal/PortalModal.jsx';
 import { resolveApiImageUrl } from '../lib/api.js';
 import { useCustomerCart } from '../hooks/useCustomerCommerce';
 import '../styles/ProductDetail.css';
@@ -26,6 +27,8 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const { addItem, updateItem, cart, busy: cartBusy } = useCustomerCart();
+  const [cartModalOpen, setCartModalOpen] = useState(false);
+  const [cartMessage, setCartMessage] = useState('');
   
   const productVariants = [];
   
@@ -79,13 +82,14 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
     const qty = Number(quantity || 1);
     
     if (!product.ProductId) {
-      alert('Error: Product ID is missing. Cannot add to cart.');
+      setCartMessage('Error: Product ID is missing. Cannot add to cart.');
+      setCartModalOpen(true);
       return;
     }
     
     if (!currentStock || currentStock <= 0) {
-      console.error('❌ Product out of stock');
-      alert('Product is out of stock.');
+      setCartMessage('Product is out of stock.');
+      setCartModalOpen(true);
       return;
     }
     
@@ -96,21 +100,25 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
       const totalQty = currentQty + qty;
       
       if (totalQty > currentStock) {
-        alert(`Cannot add ${qty} more - only ${currentStock - currentQty} available (already have ${currentQty} in cart)`);
+        setCartMessage(`Cannot add ${qty} more - only ${currentStock - currentQty} available (already have ${currentQty} in cart)`);
+        setCartModalOpen(true);
         return;
       }
       
       try {
         await updateItem(existingItem.CartItemId, { quantity: totalQty });
-        alert(`Updated quantity to ${totalQty}!`);
+        setCartMessage(`Updated quantity to ${totalQty}!`);
+        setCartModalOpen(true);
       } catch (err) {
         const errorMsg = err?.message || err?.body?.error || 'Failed to update quantity';
-        alert(errorMsg);
+        setCartMessage(errorMsg);
+        setCartModalOpen(true);
       }
     } else {
       // Product not in cart - add normally
       if (qty > currentStock) {
-        alert(`Quantity exceeds available stock (${currentStock} available)`);
+        setCartMessage(`Quantity exceeds available stock (${currentStock} available)`);
+        setCartModalOpen(true);
         return;
       }
 
@@ -119,10 +127,12 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
           productId: product.ProductId,
           quantity: qty,
         });
-        alert(`Added ${qty} ${product.Name} to cart!`);
+        setCartMessage(`Added ${qty} ${product.Name} to cart!`);
+        setCartModalOpen(true);
       } catch (err) {
         const errorMsg = err?.message || err?.body?.error || 'Failed to add item to cart';
-        alert(errorMsg);
+        setCartMessage(errorMsg);
+        setCartModalOpen(true);
       }
     }
   };
@@ -304,6 +314,22 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
           </div>
         </div>
       </div>
+
+      <PortalModal
+        open={cartModalOpen}
+        title={cartMessage.includes('Error') || cartMessage.includes('out of stock') ? 'Notice' : 'Cart Updated'}
+        onClose={() => setCartModalOpen(false)}
+      >
+        <p style={{ 
+          fontSize: '15px', 
+          color: '#1f2937', 
+          marginBottom: '12px', 
+          lineHeight: '1.6',
+          fontWeight: '500'
+        }}>
+          {cartMessage}
+        </p>
+      </PortalModal>
     </section>
   );
 };

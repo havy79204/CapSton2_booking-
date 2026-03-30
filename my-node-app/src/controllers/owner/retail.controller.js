@@ -12,7 +12,8 @@ function getActor(req) {
 }
 
 const getRetailProducts = asyncHandler(async (req, res) => {
-  const data = await retailService.listRetailProducts()
+  const opts = req.query || {}
+  const data = await retailService.listRetailProducts(opts)
   res.json({ ok: true, data })
 })
 

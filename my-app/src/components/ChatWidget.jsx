@@ -27,6 +27,47 @@ function mergeMessageList(prev, incoming) {
   return [...prev, incoming];
 }
 
+function buildImageUrl(src) {
+  if (!src) return src;
+  const trimmed = String(src).trim().replace(/^[`'"]+|[`'"]+$/g, '');
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith('/')) return `${SOCKET_BASE}${trimmed}`;
+  return trimmed;
+}
+
+function renderMessageContent(text) {
+  if (!text) return null;
+  const cleaned = String(text);
+  const imgRegex = /(https?:\/\/\S+?\.(?:png|jpe?g|gif|webp|svg))|(\/uploads\/\S+?\.(?:png|jpe?g|gif|webp|svg))/gi;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+  while ((match = imgRegex.exec(cleaned))) {
+    const index = match.index;
+    if (index > lastIndex) {
+      parts.push(cleaned.slice(lastIndex, index));
+    }
+    const src = match[0].replace(/^[`'"]+|[`'"]+$/g, '');
+    parts.push({ img: buildImageUrl(src) });
+    lastIndex = imgRegex.lastIndex;
+  }
+  if (lastIndex < cleaned.length) parts.push(cleaned.slice(lastIndex));
+
+  return parts.map((part, i) => (
+    typeof part === 'string'
+      ? <span key={i}>{part}</span>
+      : (
+        <img
+          key={i}
+          src={part.img}
+          alt="attachment"
+          className="chat-msg-image"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        />
+      )
+  ));
+}
+
 const ChatWidget = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -206,8 +247,8 @@ const ChatWidget = () => {
             {!loading && !messages.length ? <div className="chat-error">Start a conversation with the shop.</div> : null}
             {error ? <div className="chat-error">{error}</div> : null}
 
-            {messages.map((message) => (
-              <div key={message.id}>
+            {messages.map((message, idx) => (
+              <div key={`${message.id}-${message.createdAt || idx}`}>
                 {firstNewMessageId && message.id === firstNewMessageId ? (
                   <div className="chat-new-divider">New messages</div>
                 ) : null}
@@ -216,7 +257,7 @@ const ChatWidget = () => {
                   className={`chat-message-row ${message.sender === 'user' ? 'user' : 'shop'}`}
                 >
                   <div className="chat-message-bubble">
-                    <p>{message.text}</p>
+                    <div className="chat-message-content">{renderMessageContent(message.text)}</div>
                     <span>{formatTime(message.createdAt)}</span>
                   </div>
                 </div>

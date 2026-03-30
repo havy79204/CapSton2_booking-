@@ -15,6 +15,7 @@ router.post('/addresses/:addressId/default', requireAuth, controller.postSetDefa
 router.get('/bookings', requireAuth, controller.getBookings)
 router.post('/bookings', requireAuth, controller.postBooking)
 router.post('/bookings/:bookingId/cancel', requireAuth, controller.postCancelBooking)
+router.post('/bookings/rating', requireAuth, controller.postBookingRating)
 router.get('/orders', requireAuth, controller.getOrders)
 router.post('/orders/:orderId/cancel', requireAuth, controller.postCancelOrder)
 

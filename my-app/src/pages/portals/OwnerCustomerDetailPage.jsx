@@ -107,6 +107,11 @@ export default function OwnerCustomerDetailPage() {
             phone: data.phone || '',
             email: data.email || '',
           })
+          // Initialize account disabled flag from DB status when available
+          if (data && data.status) {
+            const s = String(data.status || '').toLowerCase()
+            setIsAccountDisabled(s === 'inactive' || s === 'deleted')
+          }
         })
         .catch((err) => {
           console.error('Failed to load customer:', err)
@@ -121,6 +126,10 @@ export default function OwnerCustomerDetailPage() {
                   phone: found.phone || '',
                   email: found.email || '',
                 })
+                if (found && found.status) {
+                  const s = String(found.status || '').toLowerCase()
+                  setIsAccountDisabled(s === 'inactive' || s === 'deleted')
+                }
               }
             })
             .catch((e) => console.error('Failed to load customers list:', e))
@@ -129,9 +138,9 @@ export default function OwnerCustomerDetailPage() {
       api
         .get(`/api/owner/customers/${customerId}/bookings`)
         .then((data) => {
-          console.log('Bookings loaded:', data)
-          setBookings(Array.isArray(data) ? data : [])
-        })
+            if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) console.debug('OwnerCustomerDetail: bookings count', Array.isArray(data) ? data.length : 0)
+            setBookings(Array.isArray(data) ? data : [])
+          })
         .catch((err) => {
           console.warn('Failed to load bookings:', err.message)
           setBookings([])
@@ -140,9 +149,9 @@ export default function OwnerCustomerDetailPage() {
       api
         .get(`/api/owner/customers/${customerId}/orders`)
         .then((data) => {
-          console.log('Orders loaded:', data)
-          setOrders(Array.isArray(data) ? data : [])
-        })
+            if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) console.debug('OwnerCustomerDetail: orders count', Array.isArray(data) ? data.length : 0)
+            setOrders(Array.isArray(data) ? data : [])
+          })
         .catch((err) => {
           console.warn('Failed to load orders:', err.message)
           setOrders([])
@@ -158,8 +167,27 @@ export default function OwnerCustomerDetailPage() {
     setOpenEdit(true)
   }
 
-  function toggleAccountStatus() {
-    setIsAccountDisabled(!isAccountDisabled)
+  async function toggleAccountStatus() {
+    const newDisabled = !isAccountDisabled
+    // Optimistic UI update
+    setIsAccountDisabled(newDisabled)
+
+    if (!customer?.id) return
+
+    try {
+      const statusValue = newDisabled ? 'Inactive' : 'Active'
+      await api.put(`/api/owner/customers/${customer.id}`, { status: statusValue })
+      const updated = await api.get(`/api/owner/customers/${customer.id}`)
+      setCustomer(updated)
+      if (updated && updated.status) {
+        const s = String(updated.status || '').toLowerCase()
+        setIsAccountDisabled(s === 'inactive' || s === 'deleted')
+      }
+    } catch (err) {
+      console.error('Failed to toggle account status:', err)
+      // Revert optimistic UI change on error
+      setIsAccountDisabled(!newDisabled)
+    }
   }
 
   async function onSubmitEdit(e) {
@@ -184,6 +212,24 @@ export default function OwnerCustomerDetailPage() {
       console.error(err)
     }
   }
+
+  // Compute account status: prefer DB `customer.status` when available,
+  // otherwise fall back to last-visit heuristic (getAccountStatus).
+  const accountStatus = useMemo(() => {
+    if (customer && customer.status) {
+      const s = String(customer.status || '').trim().toLowerCase()
+      if (s === 'active') {
+        return { status: 'Active', color: '#28a745', icon: '✓' }
+      }
+      if (s === 'inactive' || s === 'deleted') {
+        return { status: 'Inactive', color: '#dc3545', icon: '✕' }
+      }
+      // Unknown explicit status: show as provided string
+      return { status: String(customer.status || ''), color: '#6c757d', icon: '?' }
+    }
+
+    return getAccountStatus(customer?.last, isAccountDisabled)
+  }, [customer, isAccountDisabled])
 
   const filteredBookings = useMemo(() => {
     const now = new Date()
@@ -337,11 +383,11 @@ export default function OwnerCustomerDetailPage() {
               <div>
                 <div style={{ fontSize: '13px', color: '#666', marginBottom: '4px' }}>Account Status</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '20px', color: getAccountStatus(customer.last, isAccountDisabled).color }}>
-                    {getAccountStatus(customer.last, isAccountDisabled).icon}
+                  <span style={{ fontSize: '20px', color: accountStatus.color }}>
+                    {accountStatus.icon}
                   </span>
-                  <span style={{ fontSize: '16px', fontWeight: '600', color: getAccountStatus(customer.last, isAccountDisabled).color }}>
-                    {getAccountStatus(customer.last, isAccountDisabled).status}
+                  <span style={{ fontSize: '16px', fontWeight: '600', color: accountStatus.color }}>
+                    {accountStatus.status}
                   </span>
                 </div>
               </div>
@@ -471,29 +517,39 @@ export default function OwnerCustomerDetailPage() {
             {filteredOrders.length === 0 ? (
               <div className="portal-emptyState">No orders</div>
             ) : (
-              filteredOrders.map((order) => (
-                <div key={order.OrderId} className="portal-orderListCard">
-                  <div className="portal-orderDetailsBox">
-                    <h3 className="portal-orderId">#{order.OrderId}</h3>
-                    <div className="portal-orderItems">
-                      {(order.Items || []).map((item, idx) => (
-                        <span key={`${order.OrderId}-${idx}`}>
-                          {item.ProductName} x {item.Quantity}
-                        </span>
-                      ))}
+              filteredOrders.map((order, orderIdx) => {
+                const id = String(order.OrderId || order.orderId || order.Id || order.id || '').trim()
+                const displayId = id ? `#${id}` : `#${orderIdx + 1}`
+                return (
+                  <div key={id || orderIdx} className="portal-orderListCard">
+                    <div className="portal-orderDetailsBox">
+                      <h3 className="portal-orderId">{displayId}</h3>
+
+                      <div className="portal-orderItems" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {(order.Items || []).map((item, idx) => (
+                          <div key={`${id || orderIdx}-${idx}`} className="portal-orderItem">
+                            <span style={{ fontWeight: 600 }}>{item.ProductName || item.Name || 'Item'}</span>
+                            <span style={{ marginLeft: 8, color: '#666' }}>x {item.Quantity || 1}</span>
+                          </div>
+                        ))}
+                        {order.Items && order.Items.length === 0 ? (
+                          <div className="portal-orderItem">No items</div>
+                        ) : null}
+                      </div>
+
+                      <p className="portal-orderPayment">Payment: {order.PaymentStatus || order.Payment || 'N/A'}</p>
                     </div>
-                    <p className="portal-orderPayment">Payment: {order.PaymentStatus || 'N/A'}</p>
+                    <div className="portal-orderStatusBox">
+                      <span className={`portal-orderStatusBadge ${mapOrderStatusClass(order.Status)}`}>
+                        <IoCheckmarkCircle /> {normalizeOrderStatus(order.Status)}
+                      </span>
+                      <p className="portal-orderDate">
+                        {order.CreatedAt ? new Date(order.CreatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
+                      </p>
+                    </div>
                   </div>
-                  <div className="portal-orderStatusBox">
-                    <span className={`portal-orderStatusBadge ${mapOrderStatusClass(order.Status)}`}>
-                      <IoCheckmarkCircle /> {normalizeOrderStatus(order.Status)}
-                    </span>
-                    <p className="portal-orderDate">
-                      {new Date(order.CreatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </p>
-                  </div>
-                </div>
-              ))
+                )
+              })
             )}
           </div>
         </div>

@@ -19,9 +19,9 @@ export function resolveApiImageUrl(rawPath) {
   }
 
   const normalized = value.replace(/\\/g, '/')
-
   const publicMarker = '/my-app/public/'
   const publicMarkerIndex = normalized.toLowerCase().indexOf(publicMarker)
+
   if (publicMarkerIndex >= 0) {
     const relative = normalized.slice(publicMarkerIndex + publicMarker.length).replace(/^\/+/, '')
     return `/${relative}`
@@ -72,6 +72,10 @@ function emitPortalToast({ type, message, timeoutMs }) {
   )
 }
 
+export function showPortalToast({ type = 'success', message = '', timeoutMs }) {
+  emitPortalToast({ type, message, timeoutMs })
+}
+
 async function request(path, options) {
   const method = String(options?.method || 'GET').toUpperCase()
   const token = getToken()
@@ -91,6 +95,17 @@ async function request(path, options) {
 
   if (!res.ok) {
     const message = json?.error || json?.message || res.statusText
+    // If unauthorized, notify the app so it can decide how to handle re-authentication.
+    if (res.status === 401) {
+      try {
+        emitPortalToast({ type: 'error', message: json?.message || 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.', timeoutMs: 4000 })
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('portal:auth-required', { detail: { path, status: 401, message: json?.message || null } }))
+        }
+      } catch (e) {
+        void e;
+      }
+    }
     if (isOwnerMutation(path, method)) {
       emitPortalToast({ type: 'error', message: message || 'Sorry, something went wrong. Please try again.' })
     }
@@ -111,6 +126,13 @@ export const api = {
   get: (path, options = {}) => request(path, { method: 'GET', ...(options || {}) }),
   post: (path, body) => request(path, { method: 'POST', body: JSON.stringify(body || {}) }),
   put: (path, body) => request(path, { method: 'PUT', body: JSON.stringify(body || {}) }),
-  delete: (path) => request(path, { method: 'DELETE' }),
-  del: (path) => request(path, { method: 'DELETE' }),
+  // Cho phép DELETE nhận body tương tự POST/PUT
+  delete: (path, body) => request(path, { 
+    method: 'DELETE', 
+    body: body ? JSON.stringify(body) : undefined 
+  }),
+  del: (path, body) => request(path, { 
+    method: 'DELETE', 
+    body: body ? JSON.stringify(body) : undefined 
+  }),
 }

@@ -105,6 +105,14 @@ const env = {
     locale: process.env.VNPAY_LOCALE ? String(process.env.VNPAY_LOCALE).trim() : 'vn',
     currency: process.env.VNPAY_CURRENCY ? String(process.env.VNPAY_CURRENCY).trim() : 'VND',
   },
+  ngrok: {
+    enabled: asBool(process.env.NGROK_ENABLED, false),
+    authToken: process.env.NGROK_AUTH_TOKEN ? String(process.env.NGROK_AUTH_TOKEN).trim() : '',
+    region: process.env.NGROK_REGION ? String(process.env.NGROK_REGION).trim() : '',
+    bin: process.env.NGROK_BIN ? String(process.env.NGROK_BIN).trim() : '',
+    frontendEnabled: asBool(process.env.NGROK_FRONTEND_ENABLED, false),
+    frontendPort: asInt(process.env.NGROK_FRONTEND_PORT, 5173),
+  },
 }
 
 module.exports = { env }

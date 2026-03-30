@@ -10,6 +10,8 @@ function toCustomerListItem(row) {
     note: '',
     visits: Number(row.Visits || 0),
     last: row.LastBooking ? formatDmy(row.LastBooking) : '',
+    // Use status from DB when available. Normalize to Title case.
+    status: row.Status ? String(row.Status).trim() : 'Active',
   }
 }
 

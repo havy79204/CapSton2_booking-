@@ -521,6 +521,13 @@
   align-items: center;
 }
 
+.booking-action-buttons {
+  display: flex;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-xs);
+}
+
+
 .booking-status {
   display: inline-flex;
   align-items: center;
@@ -617,6 +624,18 @@
 
 .action-btn.review:hover {
   background: #e5a600;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.action-btn.rate {
+  background: #fbbf24;
+  color: #1f2937;
+  font-weight: 700;
+}
+
+.action-btn.rate:hover {
+  background: #f59e0b;
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
 }

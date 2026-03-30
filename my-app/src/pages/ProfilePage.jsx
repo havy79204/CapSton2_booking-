@@ -19,6 +19,7 @@ import {
   IoTrash,
 } from 'react-icons/io5'
 import { api, resolveApiImageUrl } from '../lib/api'
+import PortalModal from '../components/Layout portal/PortalModal.jsx'
 import { notifyAuthMeUpdated } from '../hooks/useAuthMe'
 import { useAuthMe } from '../hooks/useAuthMe'
 import {
@@ -32,7 +33,6 @@ import '../styles/ProfilePage.css'
 function mapBookingStatusClass(status) {
   const s = String(status || '').toLowerCase()
   if (s.includes('confirm')) return 'status-confirmed'
-  if (s.includes('C')) return 'status-C'
   if (s.includes('complete')) return 'status-completed'
   if (s.includes('cancel')) return 'status-cancelled'
   return ''
@@ -49,7 +49,7 @@ function mapOrderStatusClass(status) {
 function normalizeOrderStatus(status) {
   const s = String(status || '').trim().toLowerCase()
   if (!s) return 'Pending'
-  if (s === 'c' || s === 'pending') return 'Pending'
+  if (s === 'pending') return 'Pending'
   if (s === 'processing') return 'Processing'
   if (s === 'shipping' || s === 'shipped' || s === 'delivering' || s === 'in transit') return 'Shipping'
   if (s === 'completed' || s === 'complete' || s === 'delivered') return 'Completed'
@@ -59,17 +59,18 @@ function normalizeOrderStatus(status) {
 }
 
 function isCStatus(status) {
-  return String(status || '').trim().toLowerCase() === 'C'
+  // treat 'pending' as cancellable (previously 'C')
+  return String(status || '').trim().toLowerCase() === 'pending'
 }
 
 const ProfileHeader = ({ user, bookings, orders, onEditProfile, onManageAddresses, reviewsCount }) => {
   const now = new Date()
   const upcomingCount = bookings.filter((b) => {
     const t = new Date(b.BookingTime)
-    return (String(b.Status || '').toLowerCase().includes('confirm') || String(b.Status || '').toLowerCase().includes('C')) && t > now
+    return (String(b.Status || '').toLowerCase().includes('confirm') || String(b.Status || '').toLowerCase().includes('pending')) && t > now
   }).length
 
-  const CCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('C')).length
+  const CCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('pending')).length
   const inProgressCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('progress')).length
   const completedCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('complete')).length
   // Use provided reviewsCount (from API) when available; otherwise fall back to completed bookings
@@ -131,7 +132,7 @@ const ProfileHeader = ({ user, bookings, orders, onEditProfile, onManageAddresse
   )
 }
 
-const MyBookingSection = ({ bookings, onCancelBooking, cancellingBookingId, initialTab = 'All' }) => {
+const MyBookingSection = ({ bookings, onCancelBooking, onRateBooking, cancellingBookingId, initialTab = 'All' }) => {
   const [activeTab, setActiveTab] = useState(initialTab)
   const navigate = useNavigate()
 
@@ -140,15 +141,21 @@ const MyBookingSection = ({ bookings, onCancelBooking, cancellingBookingId, init
   }, [initialTab])
 
   const filteredBookings = useMemo(() => {
-    const now = new Date()
     return bookings.filter((booking) => {
       const status = String(booking.Status || '').toLowerCase()
-      const time = new Date(booking.BookingTime)
       if (activeTab === 'All') return true
-      if (activeTab === 'Past') return status.includes('complete') || time < now
-      return status.includes('cancel')
+      if (activeTab === 'Completed') return status.includes('complete') || status.includes('done')
+      if (activeTab === 'Pending') return status.includes('pending') || status.includes('wait')
+      if (activeTab === 'Booked') return status.includes('book') || status.includes('confirm')
+      if (activeTab === 'Cancelled') return status.includes('cancel')
+      return true
     })
   }, [bookings, activeTab])
+
+  const isCompleted = (status) => {
+    const s = String(status || '').toLowerCase()
+    return s.includes('complete') || s.includes('done')
+  }
 
   return (
     <section className="my-booking-section">
@@ -162,7 +169,9 @@ const MyBookingSection = ({ bookings, onCancelBooking, cancellingBookingId, init
 
         <div className="booking-tabs">
           <button className={`tab-btn ${activeTab === 'All' ? 'active' : ''}`} onClick={() => setActiveTab('All')}>All Service Booking</button>
-          <button className={`tab-btn ${activeTab === 'Past' ? 'active' : ''}`} onClick={() => setActiveTab('Past')}>Past</button>
+          <button className={`tab-btn ${activeTab === 'Completed' ? 'active' : ''}`} onClick={() => setActiveTab('Completed')}>Completed</button>
+          <button className={`tab-btn ${activeTab === 'Pending' ? 'active' : ''}`} onClick={() => setActiveTab('Pending')}>Pending</button>
+          <button className={`tab-btn ${activeTab === 'Booked' ? 'active' : ''}`} onClick={() => setActiveTab('Booked')}>Booked</button>
           <button className={`tab-btn ${activeTab === 'Cancelled' ? 'active' : ''}`} onClick={() => setActiveTab('Cancelled')}>Cancelled</button>
         </div>
 
@@ -190,18 +199,24 @@ const MyBookingSection = ({ bookings, onCancelBooking, cancellingBookingId, init
                   <div className="booking-info">
                     <span className={`booking-status ${mapBookingStatusClass(booking.Status)}`}><IoCheckmarkCircle /> {booking.Status}</span>
                     <p className="booking-time">{date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</p>
-                  </div>
-                  <div className="booking-user"><span>{booking.CustomerUserId}</span></div>
-                  <div className="booking-actions">
-                    {isCStatus(booking.Status) ? (
-                      <button
-                        className="action-btn cancel"
-                        onClick={() => onCancelBooking?.(booking)}
-                        disabled={cancellingBookingId === booking.BookingId}
-                      >
-                        {cancellingBookingId === booking.BookingId ? 'Cancelling...' : 'Cancel Booking'}
-                      </button>
-                    ) : null}
+                    <div className="booking-action-buttons">
+                      {isCompleted(booking.Status) ? (
+                        <button
+                          className="action-btn rate"
+                          onClick={() => onRateBooking?.(booking)}
+                        >
+                          Rate Service
+                        </button>
+                      ) : isCStatus(booking.Status) ? (
+                        <button
+                          className="action-btn cancel"
+                          onClick={() => onCancelBooking?.(booking)}
+                          disabled={cancellingBookingId === booking.BookingId}
+                        >
+                          {cancellingBookingId === booking.BookingId ? 'Cancelling...' : 'Cancel Booking'}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               )
@@ -542,7 +557,6 @@ const AddressesModal = ({
 }
 
 const ProfilePage = () => {
-  const navigate = useNavigate()
   const { me: authMe } = useAuthMe()
   const { context, loading: contextLoading, error: contextError, refresh: refreshContext } = useCustomerContext()
   const {
@@ -570,11 +584,23 @@ const ProfilePage = () => {
 
   const [showEditModal, setShowEditModal] = useState(false)
   const [showAddressModal, setShowAddressModal] = useState(false)
+  const [cancelBookingConfirmOpen, setCancelBookingConfirmOpen] = useState(false)
+  const [bookingToCancel, setBookingToCancel] = useState(null)
+  const [cancelOrderConfirmOpen, setCancelOrderConfirmOpen] = useState(false)
+  const [orderToCancel, setOrderToCancel] = useState(null)
+  const [ratingModalOpen, setRatingModalOpen] = useState(false)
+  const [bookingToRate, setBookingToRate] = useState(null)
+  const [rating, setRating] = useState(5)
+  const [ratingComment, setRatingComment] = useState('')
+  const [submittingRating, setSubmittingRating] = useState(false)
   const [savingProfile, setSavingProfile] = useState(false)
   const [me, setMe] = useState(null)
   const [userReviewsCount, setUserReviewsCount] = useState(null)
   const [cancellingBookingId, setCancellingBookingId] = useState('')
   const [cancellingOrderId, setCancellingOrderId] = useState('')
+  const [resultModalOpen, setResultModalOpen] = useState(false)
+  const [resultMessage, setResultMessage] = useState('')
+  const [resultTitle, setResultTitle] = useState('')
   const user = me || authMe || context?.user || null
   const bookingTabFromUrl = (() => {
     const query = new URLSearchParams(window.location.search)
@@ -688,17 +714,23 @@ const ProfilePage = () => {
   }
 
   const handleCancelBooking = async (booking) => {
-    const bookingId = booking?.BookingId
-    if (!bookingId) return
+    if (!booking?.BookingId) return
     if (!isCStatus(booking?.Status)) {
-      alert('Only C bookings can be cancelled')
+      alert('Only pending bookings can be cancelled')
       return
     }
-    if (!window.confirm('Cancel this C booking?')) return
+    setBookingToCancel(booking)
+    setCancelBookingConfirmOpen(true)
+  }
+
+  const confirmCancelBooking = async () => {
+    if (!bookingToCancel?.BookingId) return
+    const bookingId = bookingToCancel.BookingId
     try {
       setCancellingBookingId(bookingId)
       await cancelBooking(bookingId)
-      alert('Booking cancelled successfully')
+      setCancelBookingConfirmOpen(false)
+      setBookingToCancel(null)
     } catch (err) {
       alert(err?.message || 'Failed to cancel booking')
     } finally {
@@ -706,23 +738,75 @@ const ProfilePage = () => {
     }
   }
 
+  const cancelCancelBooking = () => {
+    setCancelBookingConfirmOpen(false)
+    setBookingToCancel(null)
+  }
+
   const handleCancelOrder = async (order) => {
-    const orderId = order?.OrderId
-    if (!orderId) return
+    if (!order?.OrderId) return
     if (!isCStatus(order?.Status)) {
-      alert('Only C orders can be cancelled')
+      alert('Only pending orders can be cancelled')
       return
     }
-    if (!window.confirm('Cancel this C order?')) return
+    setOrderToCancel(order)
+    setCancelOrderConfirmOpen(true)
+  }
+
+  const confirmCancelOrder = async () => {
+    if (!orderToCancel?.OrderId) return
+    const orderId = orderToCancel.OrderId
     try {
       setCancellingOrderId(orderId)
       await cancelOrder(orderId)
-      alert('Order cancelled successfully')
-      navigate('/orders')
+      setCancelOrderConfirmOpen(false)
+      setOrderToCancel(null)
     } catch (err) {
       alert(err?.message || 'Failed to cancel order')
     } finally {
       setCancellingOrderId('')
+    }
+  }
+
+  const cancelCancelOrder = () => {
+    setCancelOrderConfirmOpen(false)
+    setOrderToCancel(null)
+  }
+
+  const openRatingModal = (booking) => {
+    setBookingToRate(booking)
+    setRating(5)
+    setRatingComment('')
+    setRatingModalOpen(true)
+  }
+
+  const closeRatingModal = () => {
+    setRatingModalOpen(false)
+    setBookingToRate(null)
+    setRating(5)
+    setRatingComment('')
+  }
+
+  const submitRating = async () => {
+    if (!bookingToRate?.BookingId) return
+    try {
+      setSubmittingRating(true)
+      const payload = {
+        bookingId: bookingToRate.BookingId,
+        rating: Number(rating),
+        comment: ratingComment.trim(),
+      }
+      await api.post('/api/customer/bookings/rating', payload)
+      closeRatingModal()
+      setResultTitle('Successfully!')
+      setResultMessage('Thank you for your review!')
+      setResultModalOpen(true)
+    } catch (err) {
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to submit rating')
+      setResultModalOpen(true)
+    } finally {
+      setSubmittingRating(false)
     }
   }
 
@@ -746,6 +830,7 @@ const ProfilePage = () => {
           <MyBookingSection
             bookings={bookings}
             onCancelBooking={handleCancelBooking}
+            onRateBooking={openRatingModal}
             cancellingBookingId={cancellingBookingId}
             initialTab={bookingTabFromUrl}
           />
@@ -777,6 +862,145 @@ const ProfilePage = () => {
         onSetDefault={handleSetDefault}
         saving={addressesBusy}
       />
+
+      <PortalModal
+        open={cancelBookingConfirmOpen}
+        title="Cancel Booking"
+        onClose={cancelCancelBooking}
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={cancelCancelBooking}>
+              Back
+            </button>
+            <button 
+              type="button" 
+              className="portal-modalBtn portal-modalBtnPrimary" 
+              onClick={confirmCancelBooking}
+              disabled={cancellingBookingId === bookingToCancel?.BookingId}
+              style={{ backgroundColor: cancellingBookingId === bookingToCancel?.BookingId ? '#ccc' : '#e74c3c' }}
+            >
+              {cancellingBookingId === bookingToCancel?.BookingId ? 'Cancelling...' : 'Cancel Booking'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: '15px', color: '#1f2937', marginBottom: '12px', lineHeight: '1.5', fontWeight: '500' }}>
+          Are you sure you want to cancel this booking?
+        </p>
+        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '0' }}>
+          This action cannot be undone.
+        </p>
+      </PortalModal>
+
+      <PortalModal
+        open={cancelOrderConfirmOpen}
+        title="Cancel Order"
+        onClose={cancelCancelOrder}
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={cancelCancelOrder}>
+              Back
+            </button>
+            <button 
+              type="button" 
+              className="portal-modalBtn portal-modalBtnPrimary" 
+              onClick={confirmCancelOrder}
+              disabled={cancellingOrderId === orderToCancel?.OrderId}
+              style={{ backgroundColor: cancellingOrderId === orderToCancel?.OrderId ? '#ccc' : '#e74c3c' }}
+            >
+              {cancellingOrderId === orderToCancel?.OrderId ? 'Cancelling...' : 'Cancel Order'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: '15px', color: '#1f2937', marginBottom: '12px', lineHeight: '1.5', fontWeight: '500' }}>
+          Are you sure you want to cancel this order?
+        </p>
+        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '0' }}>
+          This action cannot be undone.
+        </p>
+      </PortalModal>
+
+      <PortalModal
+        open={ratingModalOpen}
+        title="Rate Service"
+        onClose={closeRatingModal}
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={closeRatingModal}>
+              Cancel
+            </button>
+            <button 
+              type="button" 
+              className="portal-modalBtn portal-modalBtnPrimary" 
+              onClick={submitRating}
+              disabled={submittingRating}
+            >
+              {submittingRating ? 'Submitting...' : 'Submit Review'}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937', marginBottom: '8px', display: 'block' }}>
+              Your Rating
+            </label>
+            <div style={{ display: 'flex', gap: '8px', fontSize: '28px' }}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <span
+                  key={star}
+                  onClick={() => setRating(star)}
+                  style={{
+                    cursor: 'pointer',
+                    color: star <= rating ? '#fbbf24' : '#d1d5db',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  ★
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937', marginBottom: '8px', display: 'block' }}>
+              Your Comment (Optional)
+            </label>
+            <textarea
+              value={ratingComment}
+              onChange={(e) => setRatingComment(e.target.value)}
+              placeholder="Share your experience with this service..."
+              style={{
+                width: '100%',
+                minHeight: '100px',
+                padding: '10px',
+                border: '1px solid #e5e7eb',
+                borderRadius: '6px',
+                fontSize: '14px',
+                fontFamily: 'inherit',
+                resize: 'vertical',
+              }}
+            />
+          </div>
+        </div>
+      </PortalModal>
+
+      <PortalModal
+        open={resultModalOpen}
+        title={resultTitle}
+        onClose={() => setResultModalOpen(false)}
+      >
+        <p style={{ 
+          fontSize: '15px', 
+          color: '#1f2937', 
+          marginBottom: '12px', 
+          lineHeight: '1.6',
+          fontWeight: '500'
+        }}>
+          {resultMessage}
+        </p>
+      </PortalModal>
     </div>
   )
 }

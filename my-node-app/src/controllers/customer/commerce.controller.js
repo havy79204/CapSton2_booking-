@@ -81,6 +81,13 @@ const postCancelBooking = asyncHandler(async (req, res) => {
   res.json({ ok: true, data })
 })
 
+const postBookingRating = asyncHandler(async (req, res) => {
+  const userId = getUserIdFromReq(req)
+  const { bookingId, rating, comment } = req.body || {}
+  const data = await commerceService.rateBooking(userId, bookingId, rating, comment)
+  res.status(201).json({ ok: true, data })
+})
+
 const postCancelOrder = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
   const { orderId } = req.params || {}
@@ -136,6 +143,7 @@ module.exports = {
   postSetDefaultAddress,
   getBookings,
   postBooking,
+  postBookingRating,
   getOrders,
   postCancelBooking,
   postCancelOrder,
