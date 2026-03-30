@@ -4,6 +4,7 @@ const {
   getHomepage,
   getServices,
   getProducts,
+  getRecommendations,
   getServiceReviews,
   createServiceReview,
   getProductRating,
@@ -28,6 +29,9 @@ router.get('/services', getServices)
 
 // GET /api/homepage/products - Get products list
 router.get('/products', getProducts)
+
+// GET /api/homepage/recommendations - Get personalized recommendations
+router.get('/recommendations', getRecommendations)
 
 // GET /api/homepage/services/:serviceId/reviews - Get rating + reviews by service
 router.get('/services/:serviceId/reviews', getServiceReviews)

@@ -1980,3 +1980,6 @@ module.exports = {
   renameSession,
   deleteSession,
 }
+
+// Export internal analyzer for local testing and diagnostics
+module.exports.analyzeNailImageWithAI = analyzeNailImageWithAI
