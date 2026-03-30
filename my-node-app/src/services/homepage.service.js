@@ -173,6 +173,7 @@ async function getProducts() {
       FROM [Products] p
       LEFT JOIN [ProductCategories] pc ON p.[CategoryId] = pc.[CategoryId]
       LEFT JOIN [ProductImages] pi ON p.[ProductId] = pi.[ProductId]
+      WHERE p.[Status] IS NULL OR LOWER(LTRIM(RTRIM(p.[Status]))) = 'active'
       ORDER BY p.[CategoryId], p.[Name], ISNULL(pi.[SortOrder], 2147483647), pi.[ImageId]`
     : `SELECT
         p.[ProductId],
@@ -186,9 +187,10 @@ async function getProducts() {
         pc.[Name] AS CategoryName,
         NULL AS ExtraImageId,
         NULL AS ExtraImageUrl
-      FROM [Products] p
-      LEFT JOIN [ProductCategories] pc ON p.[CategoryId] = pc.[CategoryId]
-      ORDER BY p.[CategoryId], p.[Name]`
+        FROM [Products] p
+        LEFT JOIN [ProductCategories] pc ON p.[CategoryId] = pc.[CategoryId]
+        WHERE p.[Status] IS NULL OR LOWER(LTRIM(RTRIM(p.[Status]))) = 'active'
+        ORDER BY p.[CategoryId], p.[Name]`
   )
 
   const rows = res.recordset || []

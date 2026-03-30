@@ -1,4 +1,5 @@
 const { query, newId } = require('../config/query')
+const { getSettingsMap } = require('./settings.service')
 
 let _ordersChannelColumnPromise = null
 const ACTIVE_SERVICE_WHERE = `(Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) = 'active')`
@@ -16,6 +17,170 @@ function requireUserId(userId) {
 function toNumber(value, fallback = 0) {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
+}
+
+function parseBool(value, fallback = false) {
+  if (value === undefined || value === null) return fallback
+  const v = String(value).trim().toLowerCase()
+  return v === 'true' || v === '1' || v === 'yes'
+}
+
+function parseTimeToMinutes(value) {
+  const raw = String(value || '').trim()
+  const m = raw.match(/^(\d{1,2}):(\d{2})$/)
+  if (!m) return null
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null
+  return hh * 60 + mm
+}
+
+function getWeekdayPrefixFromDate(dateValue) {
+  const d = new Date(dateValue)
+  if (Number.isNaN(d.getTime())) return null
+  const map = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  return map[d.getDay()] || null
+}
+
+function readPromotions(settingsMap) {
+  if (Array.isArray(settingsMap?.Promotions)) return settingsMap.Promotions
+  if (typeof settingsMap?.Promotions === 'string') {
+    try {
+      const parsed = JSON.parse(settingsMap.Promotions)
+      return Array.isArray(parsed) ? parsed : []
+    } catch (_) {
+      return []
+    }
+  }
+  return []
+}
+
+function normalizePromoCode(value) {
+  return String(value || '').trim().toUpperCase()
+}
+
+function promotionUsageMarker(code) {
+  return `PROMO_CODE:${normalizePromoCode(code)};`
+}
+
+function parsePositiveInt(value, fallback = 0) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  const x = Math.trunc(n)
+  return x > 0 ? x : fallback
+}
+
+function isPromotionInDateRange(promotion, now = new Date()) {
+  const start = promotion?.startDate ? new Date(promotion.startDate) : null
+  const end = promotion?.endDate ? new Date(promotion.endDate) : null
+
+  if (start && !Number.isNaN(start.getTime()) && now < start) return false
+  if (end && !Number.isNaN(end.getTime())) {
+    const inclusiveEnd = new Date(end)
+    inclusiveEnd.setHours(23, 59, 59, 999)
+    if (now > inclusiveEnd) return false
+  }
+
+  return true
+}
+
+function findActivePromotionByCode(settingsMap, rawCode) {
+  const code = normalizePromoCode(rawCode)
+  if (!code) return null
+
+  const list = readPromotions(settingsMap)
+  const now = new Date()
+
+  for (const promo of list) {
+    if (!promo || promo.isActive === false) continue
+    if (normalizePromoCode(promo.code) !== code) continue
+    if (!isPromotionInDateRange(promo, now)) continue
+    return promo
+  }
+
+  return null
+}
+
+async function countPromotionUsageByUser(userId, promotionCode) {
+  const marker = promotionUsageMarker(promotionCode)
+  const res = await query(
+    `SELECT COUNT(1) AS UsedCount
+     FROM Bookings
+     WHERE CustomerUserId = @userId
+       AND CHARINDEX(@marker, ISNULL(Notes, '')) > 0
+       AND LOWER(LTRIM(RTRIM(ISNULL(Status, 'pending')))) NOT IN ('cancel', 'cancelled')`,
+    { userId, marker }
+  )
+  return Number(res.recordset?.[0]?.UsedCount || 0)
+}
+
+async function countPromotionUsageGlobal(promotionCode) {
+  const marker = promotionUsageMarker(promotionCode)
+  const res = await query(
+    `SELECT COUNT(1) AS UsedCount
+     FROM Bookings
+     WHERE CHARINDEX(@marker, ISNULL(Notes, '')) > 0
+       AND LOWER(LTRIM(RTRIM(ISNULL(Status, 'pending')))) NOT IN ('cancel', 'cancelled')`,
+    { marker }
+  )
+  return Number(res.recordset?.[0]?.UsedCount || 0)
+}
+
+function buildBookingSettings(settingsMap, bookingDate = null) {
+  const dayPrefix = bookingDate ? getWeekdayPrefixFromDate(bookingDate) : null
+  const dayOpenKey = dayPrefix ? `Schedule${dayPrefix}OpenTime` : null
+  const dayCloseKey = dayPrefix ? `Schedule${dayPrefix}CloseTime` : null
+
+  const openTime = (dayOpenKey && settingsMap?.[dayOpenKey])
+    || settingsMap?.ScheduleOpenTime
+    || settingsMap?.SalonOpenTime
+    || '08:00'
+  const closeTime = (dayCloseKey && settingsMap?.[dayCloseKey])
+    || settingsMap?.ScheduleCloseTime
+    || settingsMap?.SalonCloseTime
+    || '20:00'
+
+  return {
+    openTime: String(openTime),
+    closeTime: String(closeTime),
+    breakStart: String(settingsMap?.ScheduleBreakStart || '').trim() || null,
+    breakEnd: String(settingsMap?.ScheduleBreakEnd || '').trim() || null,
+    slotMinutes: Math.max(5, toNumber(settingsMap?.BookingSlotMinutes, 30)),
+    promotionEnabled: parseBool(settingsMap?.PromotionEnabled, false),
+    promotionAllowCustomerApply: parseBool(settingsMap?.PromotionAllowCustomerApply, true),
+    promotionIsStackable: parseBool(settingsMap?.PromotionIsStackable, false),
+    promotions: readPromotions(settingsMap),
+    weekdays: {
+      mon: {
+        openTime: String(settingsMap?.ScheduleMonOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
+        closeTime: String(settingsMap?.ScheduleMonCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+      },
+      tue: {
+        openTime: String(settingsMap?.ScheduleTueOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
+        closeTime: String(settingsMap?.ScheduleTueCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+      },
+      wed: {
+        openTime: String(settingsMap?.ScheduleWedOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
+        closeTime: String(settingsMap?.ScheduleWedCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+      },
+      thu: {
+        openTime: String(settingsMap?.ScheduleThuOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
+        closeTime: String(settingsMap?.ScheduleThuCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+      },
+      fri: {
+        openTime: String(settingsMap?.ScheduleFriOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
+        closeTime: String(settingsMap?.ScheduleFriCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+      },
+      sat: {
+        openTime: String(settingsMap?.ScheduleSatOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
+        closeTime: String(settingsMap?.ScheduleSatCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+      },
+      sun: {
+        openTime: String(settingsMap?.ScheduleSunOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
+        closeTime: String(settingsMap?.ScheduleSunCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+      },
+    },
+  }
 }
 
 function normalizePaymentMethod(raw) {
@@ -37,7 +202,7 @@ function derivePaymentStatus(orderStatus, paymentMethod) {
 
 function isCStatus(status) {
   const value = String(status || '').trim().toLowerCase()
-  return value === 'C' || value === 'awaiting'
+  return value === 'c' || value === 'awaiting' || value === 'pending'
 }
 
 function calcOrderDiscountAmount(row) {
@@ -269,7 +434,7 @@ async function setDefaultAddress(userIdInput, addressIdInput) {
 async function getCustomerContext(userIdInput) {
   const userId = requireUserId(userIdInput)
 
-  const [userRes, defaultAddress] = await Promise.all([
+  const [userRes, defaultAddress, settingsMap] = await Promise.all([
     query(
       `SELECT TOP 1 UserId, Name, Email, Phone, AvatarUrl, RoleKey, Status
        FROM Users
@@ -277,6 +442,7 @@ async function getCustomerContext(userIdInput) {
       { userId }
     ),
     getDefaultAddress(userId),
+    getSettingsMap(),
   ])
 
   const user = userRes.recordset?.[0]
@@ -297,6 +463,7 @@ async function getCustomerContext(userIdInput) {
       Status: user.Status,
     },
     defaultAddress,
+    bookingSettings: buildBookingSettings(settingsMap),
   }
 }
 
@@ -1041,7 +1208,7 @@ async function listBookings(userIdInput, limit = 20) {
       BookingId: row.BookingId,
       CustomerUserId: row.CustomerUserId,
       BookingTime: row.BookingTime,
-      Status: row.Status || 'C',
+      Status: row.Status || 'pending',
       Notes: row.Notes || '',
       CreatedAt: row.CreatedAt,
       Services: services,
@@ -1095,10 +1262,146 @@ async function createBooking(userIdInput, payload = {}) {
     throw err
   }
 
+  const settingsMap = await getSettingsMap()
+  const bookingSettings = buildBookingSettings(settingsMap, bookingDate || when)
+  const openMinutes = parseTimeToMinutes(bookingSettings.openTime)
+  const closeMinutes = parseTimeToMinutes(bookingSettings.closeTime)
+  const bookingMinutes = when.getHours() * 60 + when.getMinutes()
+
+  if (openMinutes === null || closeMinutes === null || openMinutes >= closeMinutes) {
+    const err = new Error('Salon schedule is not configured correctly')
+    err.status = 500
+    throw err
+  }
+
+  if (bookingMinutes < openMinutes || bookingMinutes >= closeMinutes) {
+    const err = new Error(`Booking time must be within working hours (${bookingSettings.openTime} - ${bookingSettings.closeTime})`)
+    err.status = 400
+    throw err
+  }
+
+  const breakStartMinutes = parseTimeToMinutes(bookingSettings.breakStart)
+  const breakEndMinutes = parseTimeToMinutes(bookingSettings.breakEnd)
+  if (breakStartMinutes !== null && breakEndMinutes !== null && breakStartMinutes < breakEndMinutes) {
+    if (bookingMinutes >= breakStartMinutes && bookingMinutes < breakEndMinutes) {
+      const err = new Error('Selected time is within salon break time')
+      err.status = 400
+      throw err
+    }
+  }
+
+  const slotMinutes = Math.max(5, Math.trunc(bookingSettings.slotMinutes || 30))
+  if ((bookingMinutes - openMinutes) % slotMinutes !== 0) {
+    const err = new Error(`Selected time is not aligned with ${slotMinutes}-minute booking slots`)
+    err.status = 400
+    throw err
+  }
+
+  const giftCode = String(payload.giftCode || '').trim()
+  let appliedPromotion = null
+  if (giftCode && !bookingSettings.promotionAllowCustomerApply) {
+    const err = new Error('Promotion codes are disabled for customer booking')
+    err.status = 400
+    throw err
+  }
+
+  if (giftCode) {
+    if (!bookingSettings.promotionEnabled) {
+      const err = new Error('Promotions are currently disabled')
+      err.status = 400
+      throw err
+    }
+
+    appliedPromotion = findActivePromotionByCode(settingsMap, giftCode)
+    if (!appliedPromotion) {
+      const err = new Error('Invalid or expired promotion code')
+      err.status = 400
+      throw err
+    }
+
+    const maxUsesPerUser = parsePositiveInt(appliedPromotion.maxUsesPerUser, 0)
+    if (maxUsesPerUser > 0) {
+      const usedByUser = await countPromotionUsageByUser(userId, giftCode)
+      if (usedByUser >= maxUsesPerUser) {
+        const err = new Error(`This promotion can only be used ${maxUsesPerUser} times per user`)
+        err.status = 400
+        throw err
+      }
+    }
+
+    const maxUsesGlobal = parsePositiveInt(appliedPromotion.maxUses, 0)
+    if (maxUsesGlobal > 0) {
+      const usedGlobal = await countPromotionUsageGlobal(giftCode)
+      if (usedGlobal >= maxUsesGlobal) {
+        const err = new Error('This promotion has reached its usage limit')
+        err.status = 400
+        throw err
+      }
+    }
+  }
+
   const isReturningCustomer = await hasPreviousBookings(userId)
   const autoStaffId = !isReturningCustomer ? await getAutoAssignedStaffId() : null
 
+  // Calculate total duration from services
+  const staffServices = new Map()
+  for (const item of normalizedItems) {
+    const svcRes = await query(
+      `SELECT TOP 1 ServiceId, DurationMinutes
+       FROM Services
+       WHERE ServiceId = @serviceId
+         AND ${ACTIVE_SERVICE_WHERE}`,
+      { serviceId: item.serviceId }
+    )
+    const svc = svcRes.recordset?.[0]
+    if (svc) {
+      const duration = Number(svc.DurationMinutes || 30)
+      const staffId = item.staffId || null
+      if (staffId) {
+        staffServices.set(staffId, (staffServices.get(staffId) || 0) + duration * item.quantity)
+      }
+    }
+  }
+
+  // Check for booking conflicts for each staff member
+  for (const [staffId, totalDuration] of staffServices.entries()) {
+    if (!staffId) continue
+    
+    const bookingStart = when
+    const bookingEnd = new Date(bookingStart.getTime() + totalDuration * 60000)
+    const bookingDateStr = bookingStart.toISOString().split('T')[0]
+
+    // Check for overlapping appointments/bookings for this staff
+    const conflictRes = await query(
+      `SELECT TOP 1 b.BookingId
+       FROM Bookings b
+       INNER JOIN BookingServices bs ON b.BookingId = bs.BookingId
+       INNER JOIN Services s ON bs.ServiceId = s.ServiceId
+       WHERE bs.StaffId = @staffId
+         AND b.Status NOT IN ('cancelled', 'deleted', 'cancel')
+         AND CAST(CONVERT(VARCHAR(10), b.BookingTime, 120) AS DATE) = @date
+         AND b.BookingTime < @endTime
+         AND DATEADD(MINUTE, ISNULL(s.DurationMinutes, 30), b.BookingTime) > @startTime`,
+      {
+        staffId,
+        date: bookingDateStr,
+        startTime: bookingStart,
+        endTime: bookingEnd,
+      }
+    )
+
+    if (conflictRes.recordset && conflictRes.recordset.length > 0) {
+      const err = new Error('The selected specialist is not available at this time. Please choose another time slot or specialist.')
+      err.status = 409
+      throw err
+    }
+  }
+
   const bookingId = `BKG-${newId()}`
+  const rawNotes = String(payload.notes || '').trim()
+  const promoMarker = appliedPromotion ? promotionUsageMarker(giftCode) : ''
+  const notesValue = [rawNotes, promoMarker].filter(Boolean).join('\n')
+
   await query(
     `INSERT INTO Bookings (BookingId, CustomerUserId, BookingTime, Status, Notes, CreatedAt)
      VALUES (@bookingId, @userId, @bookingTime, @status, @notes, SYSUTCDATETIME())`,
@@ -1106,8 +1409,8 @@ async function createBooking(userIdInput, payload = {}) {
       bookingId,
       userId,
       bookingTime: when,
-      status: 'C',
-      notes: String(payload.notes || '').trim() || null,
+      status: 'pending',
+      notes: notesValue || null,
     }
   )
 
@@ -1291,7 +1594,7 @@ async function cancelBooking(userIdInput, bookingIdInput) {
   }
 
   const bookingRes = await query(
-    `SELECT TOP 1 BookingId, CustomerUserId, Status
+    `SELECT TOP 1 BookingId, CustomerUserId, ISNULL(Status, 'C') AS Status
      FROM Bookings
      WHERE BookingId = @bookingId AND CustomerUserId = @userId`,
     { bookingId, userId }
@@ -1305,7 +1608,7 @@ async function cancelBooking(userIdInput, bookingIdInput) {
   }
 
   if (!isCStatus(booking.Status)) {
-    const err = new Error('Only C bookings can be cancelled')
+    const err = new Error(`Only pending bookings can be cancelled. Current status: ${booking.Status}`)
     err.status = 409
     throw err
   }
@@ -1335,7 +1638,7 @@ async function cancelOrder(userIdInput, orderIdInput) {
   }
 
   const orderRes = await query(
-    `SELECT TOP 1 OrderId, Status
+    `SELECT TOP 1 OrderId, ISNULL(Status, 'C') AS Status
      FROM Orders
      WHERE OrderId = @orderId AND UserId = @userId`,
     { orderId, userId }
@@ -1349,7 +1652,7 @@ async function cancelOrder(userIdInput, orderIdInput) {
   }
 
   if (!isCStatus(order.Status)) {
-    const err = new Error('Only C orders can be cancelled')
+    const err = new Error(`Only pending orders can be cancelled. Current status: ${order.Status}`)
     err.status = 409
     throw err
   }
@@ -1388,6 +1691,51 @@ async function cancelOrder(userIdInput, orderIdInput) {
   return { OrderId: orderId, Status: 'Cancelled' }
 }
 
+async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInput) {
+  const userId = requireUserId(userIdInput)
+  const bookingId = String(bookingIdInput || '').trim()
+  const rating = Number(ratingInput) || 5
+  const comment = String(commentInput || '').trim()
+
+  if (!bookingId) {
+    const err = new Error('Missing bookingId')
+    err.status = 400
+    throw err
+  }
+
+  if (rating < 1 || rating > 5) {
+    const err = new Error('Rating must be between 1 and 5')
+    err.status = 400
+    throw err
+  }
+
+  const bookingRes = await query(
+    `SELECT TOP 1 BookingId, CustomerUserId
+     FROM Bookings
+     WHERE BookingId = @bookingId AND CustomerUserId = @userId`,
+    { bookingId, userId }
+  )
+
+  const booking = bookingRes.recordset?.[0]
+  if (!booking) {
+    const err = new Error('Booking not found')
+    err.status = 404
+    throw err
+  }
+
+  await query(
+    `INSERT INTO BookingReviews (BookingId, Rating, Comment, CreatedAt)
+     VALUES (@bookingId, @rating, @comment, GETUTCDATE())`,
+    {
+      bookingId,
+      rating,
+      comment: comment || null,
+    }
+  )
+
+  return { BookingId: bookingId, Rating: rating, Comment: comment || null }
+}
+
 module.exports = {
   getCustomerContext,
   listAvailableStaff,
@@ -1403,6 +1751,7 @@ module.exports = {
   checkoutCart,
   listBookings,
   createBooking,
+  rateBooking,
   listOrders,
   cancelBooking,
   cancelOrder,

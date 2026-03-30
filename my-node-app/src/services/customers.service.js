@@ -10,9 +10,10 @@ function buildCustomerRoleFilter(alias = 'u') {
 }
 
 function buildActiveUserFilter(alias = 'u') {
+  // Return users that are NOT deleted. We want to still surface 'Inactive' (suspended)
   return `(
     ${alias}.Status IS NULL
-    OR UPPER(CONVERT(nvarchar(20), ${alias}.Status)) <> 'INACTIVE'
+    OR UPPER(CONVERT(nvarchar(20), ${alias}.Status)) <> 'DELETED'
   )`
 }
 
@@ -31,6 +32,7 @@ async function listCustomers() {
         u.Name,
         u.Email,
         u.Phone,
+      u.Status,
         u.AvatarUrl,
         COUNT(b.BookingId) AS Visits,
         MAX(b.BookingTime) AS LastBooking
@@ -38,7 +40,7 @@ async function listCustomers() {
       LEFT JOIN Bookings b ON b.CustomerUserId = u.UserId
       WHERE ${roleFilter}
         AND ${buildActiveUserFilter('u')}
-      GROUP BY u.UserId, u.Name, u.Email, u.Phone, u.AvatarUrl
+      GROUP BY u.UserId, u.Name, u.Email, u.Phone, u.Status, u.AvatarUrl
       ORDER BY u.Name`,
     binds
   )
@@ -91,6 +93,7 @@ async function getCustomerById(userId) {
         u.Name,
         u.Email,
         u.Phone,
+        u.Status,
         u.AvatarUrl,
         (
           SELECT COUNT(1)
@@ -115,7 +118,7 @@ async function getCustomerById(userId) {
 }
 
 async function updateCustomer(userId, payload) {
-  const { name, phone, email } = payload || {}
+  const { name, phone, email, status } = payload || {}
   const roleKey = await detectRoleKey(['customer', 'CUSTOMER'])
   const binds = { userId }
   const roleFilter = roleKey
@@ -149,19 +152,30 @@ async function updateCustomer(userId, payload) {
     }
   }
 
-  await query(
-    `UPDATE Users
-     SET Name = @name,
-         Email = @email,
-         Phone = @phone
-     WHERE UserId = @userId`,
-    {
-      userId,
-      name,
-      email: email || null,
-      phone: phone || null,
-    }
-  )
+  // Build update dynamically so we only change fields provided
+  const updates = []
+  const params = { userId }
+  if (Object.prototype.hasOwnProperty.call(payload, 'name')) {
+    updates.push('Name = @name')
+    params.name = name
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'email')) {
+    updates.push('Email = @email')
+    params.email = email || null
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'phone')) {
+    updates.push('Phone = @phone')
+    params.phone = phone || null
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'status')) {
+    updates.push('Status = @status')
+    params.status = status || null
+  }
+
+  if (updates.length) {
+    const sql = `UPDATE Users SET ${updates.join(',\n')} WHERE UserId = @userId`
+    await query(sql, params)
+  }
 
   return { id: userId }
 }
@@ -187,8 +201,8 @@ async function deleteCustomer(userId) {
     err.status = 404
     throw err
   }
-
-  await query('UPDATE Users SET Status = @status WHERE UserId = @userId', { userId, status: 'Inactive' })
+  // Mark as Deleted to indicate the account was removed (soft delete)
+  await query('UPDATE Users SET Status = @status WHERE UserId = @userId', { userId, status: 'Deleted' })
   return { id: userId }
 }
 

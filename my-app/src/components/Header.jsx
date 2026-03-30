@@ -67,6 +67,9 @@ const Header = () => {
           <h1>NIOM&CE</h1>
         </Link>
         <div className="header-actions">
+          <Link to="/ai-chat" className="left-action-btn" onClick={handleNavigation}>
+            CHAT
+          </Link>
           <Link to="/booking" className="booking-btn" onClick={handleNavigation}>
             BOOKING
           </Link>

@@ -13,6 +13,7 @@ import {
   IoCalendar 
 } from 'react-icons/io5';
 import ChatWidget from '../components/ChatWidget';
+import PortalModal from '../components/Layout portal/PortalModal.jsx';
 import { useServices, useProducts, useReviews, useSalonStats } from '../hooks/useHomepage';
 import { useCustomerCart } from '../hooks/useCustomerCommerce';
 
@@ -117,6 +118,8 @@ const ProductsSection = () => {
   const { products: apiProducts, loading, error } = useProducts();
   const { addItem, updateItem, cart, busy: cartBusy } = useCustomerCart();
   const [showAllProducts, setShowAllProducts] = useState(false);
+  const [cartModalOpen, setCartModalOpen] = useState(false);
+  const [cartMessage, setCartMessage] = useState('');
   const products = useMemo(() => (Array.isArray(apiProducts) ? apiProducts : []), [apiProducts]);
 
   const handleAddToCart = async (productId) => {
@@ -130,20 +133,24 @@ const ProductsSection = () => {
         const maxStock = Number(existingItem.Stock || 0);
         
         if (currentQty >= maxStock) {
-          alert(`Cannot add more - maximum quantity (${maxStock}) already in cart`);
+          setCartMessage(`Cannot add more - maximum quantity (${maxStock}) already in cart`);
+          setCartModalOpen(true);
           return;
         }
         
         await updateItem(existingItem.CartItemId, { quantity: currentQty + 1 });
-        alert('Updated quantity in cart!');
+        setCartMessage('Updated quantity in cart successfully!');
+        setCartModalOpen(true);
       } else {
         // Product not in cart - add it with quantity 1
         await addItem({ productId, quantity: 1 });
-        alert('Added to cart successfully!');
+        setCartMessage('Added to cart successfully!');
+        setCartModalOpen(true);
       }
     } catch (err) {
       const errorMsg = err?.message || 'Failed to add to cart';
-      alert(errorMsg);
+      setCartMessage(errorMsg);
+      setCartModalOpen(true);
     }
   };
 
@@ -218,6 +225,22 @@ const ProductsSection = () => {
           </div>
         )}
       </div>
+
+      <PortalModal
+        open={cartModalOpen}
+        title={cartMessage.includes('Failed') || cartMessage.includes('Cannot') ? 'Notice' : 'Added to Cart'}
+        onClose={() => setCartModalOpen(false)}
+      >
+        <p style={{ 
+          fontSize: '15px', 
+          color: '#1f2937', 
+          marginBottom: '12px', 
+          lineHeight: '1.6',
+          fontWeight: '500'
+        }}>
+          {cartMessage}
+        </p>
+      </PortalModal>
     </section>
   );
 };

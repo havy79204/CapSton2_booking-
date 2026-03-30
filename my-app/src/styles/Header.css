@@ -39,6 +39,22 @@
   gap: 14px;
 }
 
+.left-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(58,51,47,0.12);
+  background: #fff;
+  color: #211f1d;
+  text-decoration: none;
+  font-size: 0.9rem;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+
 .booking-btn {
   display: inline-flex;
   align-items: center;

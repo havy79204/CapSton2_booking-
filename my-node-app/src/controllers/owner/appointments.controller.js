@@ -7,12 +7,18 @@ const getAppointments = asyncHandler(async (req, res) => {
 })
 
 const postAppointment = asyncHandler(async (req, res) => {
-  const { customerUserId, serviceId, staffId, date, time } = req.body || {}
-  if (!customerUserId || !serviceId || !staffId || !date || !time) {
-    res.status(400).json({ ok: false, error: 'Missing customerUserId/serviceId/staffId/date/time' })
+  const { customerUserId, serviceId, serviceIds, staffId, date, time } = req.body || {}
+  const hasService = (serviceIds && Array.isArray(serviceIds) && serviceIds.length > 0) || serviceId;
+
+  if (!customerUserId || !hasService || !staffId || !date || !time) {
+    res.status(400).json({ 
+      ok: false, 
+      error: 'Missing customerUserId/services/staffId/date/time' 
+    })
     return
   }
 
+  // Truyền nguyên req.body qua Service, Service sẽ lo việc lặp mảng để chèn DB
   const data = await appointmentsService.createAppointment(req.body)
   res.status(201).json({ ok: true, data })
 })
@@ -40,9 +46,8 @@ const putAppointment = asyncHandler(async (req, res) => {
     return
   }
 
-  const { customerUserId, serviceId, staffId, date, time } = req.body || {}
-  if (!customerUserId || !serviceId || !staffId || !date || !time) {
-    res.status(400).json({ ok: false, error: 'Missing customerUserId/serviceId/staffId/date/time' })
+  if (!req.body || Object.keys(req.body).length === 0) {
+    res.status(400).json({ ok: false, error: 'No data to update' })
     return
   }
 
