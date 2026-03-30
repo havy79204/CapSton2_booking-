@@ -103,23 +103,16 @@ const BookingPage = () => {
   const [selectedStaffId, setSelectedStaffId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [serviceSelections, setServiceSelections] = useState([])
-<<<<<<< HEAD
+  const [promoMessage, setPromoMessage] = useState('')
+  const [appliedPromotion, setAppliedPromotion] = useState(null)
+
+  // State for booking completion and result modals
   const [completionModalOpen, setCompletionModalOpen] = useState(false)
   const [bookingToComplete, setBookingToComplete] = useState(null)
   const [completingBookingId, setCompletingBookingId] = useState(null)
   const [resultModalOpen, setResultModalOpen] = useState(false)
   const [resultMessage, setResultMessage] = useState('')
   const [resultTitle, setResultTitle] = useState('')
-
-  // Test modal rendering - uncomment to debug
-  useEffect(() => {
-    // setCompletionModalOpen(true)
-    // setBookingToComplete({ BookingId: 'TEST-001', BookingTime: new Date().toISOString(), Status: 'Completed' })
-  }, [])
-=======
-  const [promoMessage, setPromoMessage] = useState('')
-  const [appliedPromotion, setAppliedPromotion] = useState(null)
->>>>>>> 671c2b94 (Update dashboard, setting, staff)
 
   const selectedServiceIdsForStaff = useMemo(() => {
     return serviceSelections
@@ -328,32 +321,6 @@ const BookingPage = () => {
     }))
   }
 
-  const checkBookingConflict = () => {
-    if (!isReturningCustomer || !selectedStaffId) return null
-
-    const [selectedHour, selectedMinute] = selectedTime.split(':').map(Number)
-    const selectedStartMinutes = selectedHour * 60 + selectedMinute
-    const selectedEndMinutes = selectedStartMinutes + totalDuration
-
-    const conflictingBookings = (Array.isArray(bookings) ? bookings : []).filter((booking) => {
-      const bookingDate = booking.BookingDate || booking.date
-      const bookingTime = booking.BookingTime || booking.time
-      const bookingStaffId = booking.StaffId || booking.staffId
-
-      if (String(bookingDate).slice(0, 10) !== selectedDate) return false
-      if (String(bookingStaffId) !== String(selectedStaffId)) return false
-
-      const [bookingHour, bookingMinute] = String(bookingTime).split(':').slice(0, 2).map(Number)
-      const bookingStartMinutes = bookingHour * 60 + bookingMinute
-      const bookingDuration = Number(booking.TotalDurationMinutes || booking.totalDuration || 30)
-      const bookingEndMinutes = bookingStartMinutes + bookingDuration
-
-      return selectedStartMinutes < bookingEndMinutes && selectedEndMinutes > bookingStartMinutes
-    })
-
-    return conflictingBookings.length > 0 ? conflictingBookings : null
-  }
-
   const handleBookNow = async () => {
     if (selectedServiceItems.length === 0) {
       alert('Please select at least one service.')
@@ -365,16 +332,8 @@ const BookingPage = () => {
       return
     }
 
-<<<<<<< HEAD
-    const conflicts = checkBookingConflict()
-    if (conflicts) {
-      setResultTitle('Time Conflict')
-      setResultMessage(`The selected specialist is not available at this time. Please choose another time or specialist.`)
-      setResultModalOpen(true)
-=======
     if (!selectedTime) {
       alert('Please choose an available booking time.')
->>>>>>> 671c2b94 (Update dashboard, setting, staff)
       return
     }
 
