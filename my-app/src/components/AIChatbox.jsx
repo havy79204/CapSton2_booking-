@@ -403,6 +403,14 @@ export default function AIChatbox() {
                           </div>
                         </div>
                       )}
+                      {payload?._debug && (
+                        <div className="analysis-debug">
+                          <details>
+                            <summary>Debug info</summary>
+                            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{payload._debug}</pre>
+                          </details>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <>
