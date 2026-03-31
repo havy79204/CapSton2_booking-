@@ -1,22 +1,523 @@
-/* scope toàn bộ dashboard */
-.dashboard-page .portal-cardInner {
-  
-  background: rgba(255,255,255,0.08);
-  backdrop-filter: blur(30px);
-
-  border: 1px solid rgba(255,255,255,0.15);
-  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
-
-
+/* ==== Dashboard Overall Layout ==== */
+.dashboard-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-.dashboard-page .portal-grid4 {
+/* ==== Header and Filters ==== */
+.dashboard-actionsRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.dashboard-headLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.dashboard-actionsTitle {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.dashboard-summary {
+  color: var(--text-subtle);
+  font-weight: 500;
+}
+
+.dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dashboard-actionBtn {
+  padding: 12px 24px;
+  background: #fff8f0;
+  border: 2px solid #ff8c00;
+  color: #ff8c00;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  min-width: 140px;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  box-shadow: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dashboard-actionBtn:hover {
+  background: #ff8c00;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(255, 140, 0, 0.4);
+}
+
+/* ==== Filter Row ==== */
+.dashboard-filterRow {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.dashboard-filtersCombined {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.dashboard-filtersCombined .dashboard-actions {
+  flex: 1;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+}
+
+.dashboard-filtersCombined .portal-seg {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  min-width: 280px;
+}
+
+.dashboard-filtersCombined .portal-segBtn {
+  background: #fff8f0;
+  border: 2px solid #ff8c00;
+  color: #ff8c00;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dashboard-filtersCombined .portal-segBtn:hover {
+  background: #ff8c00;
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(255, 140, 0, 0.4);
+}
+
+.dashboard-filtersCombined .portal-segBtn.active,
+.portal-segBtn.active {
+  background: #ff8c00 !important;
+  color: white !important;
+  border-color: #ff8c00 !important;
+}
+
+.dashboard-filtersCombined .dashboard-referenceControls {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.dashboard-referenceControls {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.dashboard-refField {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  color: #334155;
+}
+
+.dashboard-refField input {
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+
+/* ==== KPI Cards Grid ==== */
+.dashboard-kpiGrid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
 }
 
-.dashboard-page .portal-kpiValue {
-  font-size: 28px;
-  font-weight: 900;
+.portal-kpi {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 1rem;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  transition: box-shadow 0.2s;
+}
+
+.portal-kpi:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.portal-kpiValue {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.portal-kpiIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+}
+
+/* KPI tone colors */
+.is-good { color: #16a34a; }
+.is-warning { color: #f59e0b; }
+.is-critical { color: #ef4444; }
+.is-neutral { color: #64748b; }
+
+.portal-kpi.is-prominent {
+  border: 2px solid var(--info-soft, #bae6fd);
+}
+
+/* ==== KPI Progress ==== */
+.dashboard-kpiTarget {
+  margin-top: 6px;
+}
+
+.dashboard-kpiTargetText {
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+.dashboard-kpiProgressTrack {
+  background: #e2e8f0;
+  border-radius: 6px;
+  height: 6px;
+  margin-top: 3px;
+  overflow: hidden;
+}
+
+.dashboard-kpiProgressTrack span {
+  display: block;
+  height: 6px;
+  background: var(--primary, #fb923c);
+}
+
+/* ==== Insights ==== */
+.dashboard-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dashboard-insight {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.dashboard-insight.is-warning { background: #fef3c7; }
+.dashboard-insight.is-good { background: #dcfce7; }
+
+.dashboard-insightAction {
+  font-weight: 600;
+  color: var(--primary, #fb923c);
+  text-decoration: none;
+}
+
+.dashboard-insightAction:hover {
+  text-decoration: underline;
+}
+
+/* ==== Charts ==== */
+.dashboard-chartWrap {
+  position: relative;
+  width: 100%;
+  margin: 0.75rem 0;
+}
+
+.dashboard-axis,
+.dashboard-axisLabels,
+.dashboard-xLabels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.dashboard-axisLabels {
+  margin-top: 0.25rem;
+  font-weight: 600;
+}
+
+.dashboard-tooltip {
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 6px 10px;
+  border-radius: 6px;
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+/* ==== Bar charts ==== */
+.dashboard-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dashboard-barRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+
+.dashboard-barLabel {
+  flex: 0.4;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.dashboard-barTrack {
+  flex: 1;
+  background: #e2e8f0;
+  height: 8px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.dashboard-barTrack span {
+  display: block;
+  height: 100%;
+  background: var(--primary, #fb923c);
+}
+
+.dashboard-barRow.is-top .dashboard-barTrack span {
+  background: var(--warning, #f97316);
+}
+
+.dashboard-barValue {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+/* ==== Heatmap ==== */
+.dashboard-heatmap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.dashboard-heatCell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.dashboard-heatTrack {
+  flex: 1;
+  background: #e2e8f0;
+  border-radius: 4px;
+  height: 6px;
+  overflow: hidden;
+}
+
+.dashboard-heatTrack span {
+  display: block;
+  height: 100%;
+  background: var(--primary, #fb923c);
+}
+
+.dashboard-heatCell.is-peak .dashboard-heatTrack span {
+  background: var(--warning, #f97316);
+}
+
+.dashboard-peakBadge {
+  margin-left: 4px;
+  background: #db2777;
+  color: white;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 0.7rem;
+}
+
+/* ==== List Types ==== */
+.dashboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dashboard-listItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.dashboard-listTitle {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.dashboard-listSub {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+/* ==== Badges ==== */
+.dashboard-badgeTop {
+  background: var(--primary, #fb923c);
+  color: white;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: 4px;
+  font-size: 0.7rem;
+}
+
+.dashboard-badgeVip {
+  background: #f59e0b;
+  color: #fff7ed;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: 4px;
+  font-size: 0.7rem;
+}
+
+.dashboard-badgeRisk {
+  background: #ef4444;
+  color: #fff;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: 4px;
+  font-size: 0.7rem;
+}
+
+/* ==== Staff Performance ==== */
+.dashboard-progress {
+  background: #e2e8f0;
+  border-radius: 4px;
+  height: 6px;
+  width: 100%;
+  margin-top: 4px;
+  overflow: hidden;
+}
+
+.dashboard-progress span {
+  display: block;
+  height: 100%;
+  background: var(--primary, #fb923c);
+}
+
+/* ==== Inventory Alerts ==== */
+.portal-warningCard {
+  border: 1px solid #fbbf24;
+  background: #fffbeb;
+}
+
+.portal-warningPill {
+  background: #f59e0b;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+
+.dashboard-stockTag {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+
+.dashboard-stockTag.is-critical {
+  background: #ef4444;
+  color: white;
+}
+
+.dashboard-stockTag.is-warning {
+  background: #facc15;
+  color: #0f172a;
+}
+
+/* ==== Pie Chart Status List ==== */
+.dashboard-statusInline {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.dashboard-statusChip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  color: #334155;
+}
+
+.dashboard-statusDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  display: inline-block;
+}
+
+.dashboard-statusLeft {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ==== Utility Layout ==== */
+.portal-grid2 {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+.portal-grid4 {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+/* ==== Responsive ==== */
+@media (max-width: 768px) {
+  .dashboard-actionsRow, .dashboard-filterRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .portal-grid2, .portal-grid4 {
+    grid-template-columns: 1fr;
+  }
 }

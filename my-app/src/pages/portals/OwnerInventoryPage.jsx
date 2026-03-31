@@ -1836,8 +1836,9 @@ export default function OwnerInventoryPage() {
           className="portal-ghostBtn"
           disabled={page <= 1}
           onClick={() => setPage((p) => Math.max(1, p - 1))}
+          aria-label="Previous page"
         >
-          Previous
+          ‹
         </button>
         <span className="inventory-paginationText">Page {page} / {totalPages}</span>
         <button
@@ -1845,8 +1846,9 @@ export default function OwnerInventoryPage() {
           className="portal-ghostBtn"
           disabled={page >= totalPages}
           onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          aria-label="Next page"
         >
-          Next
+          ›
         </button>
       </div>
     </div>

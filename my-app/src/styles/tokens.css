@@ -1,14 +1,15 @@
 :root {
   /* Typography */
-  --font-sans: Inter, Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial,
+  --font-sans:
+    Inter, Poppins, system-ui, -apple-system, Segoe UI, Roboto, Arial,
     "Apple Color Emoji", "Segoe UI Emoji";
 
   /* Base colors */
-  --bg: #F7F8FA;
-  --surface: #FFFFFF;
+  --bg: #f7f8fa;
+  --surface: #ffffff;
   --text: #111827;
-  --muted: #6B7280;
-  --border: #E5E7EB;
+  --muted: #6b7280;
+  --border: #e5e7eb;
 
   /* Text & UI semantics */
   --icon: rgba(17, 24, 39, 0.72);
@@ -22,17 +23,17 @@
 
   --chart-gridline: rgba(107, 114, 128, 0.12);
 
-  --focus-outline: rgba(236, 72, 153, 0.9);
-  --focus-border: rgba(236, 72, 153, 0.45);
-  --focus-shadow: rgba(236, 72, 153, 0.10);
+  --focus-outline: rgba(251, 146, 60, 0.9);
+  --focus-border: rgba(251, 146, 60, 0.45);
+  --focus-shadow: rgba(251, 146, 60, 0.1);
 
   --overlay: rgba(15, 23, 42, 0.55);
 
   /* Brand */
-  --primary: #EC4899;
-  --primary-2: #EC4899;
-  --primary-soft: rgba(236, 72, 153, 0.12);
-  --primary-border: rgba(236, 72, 153, 0.22);
+  --primary: #fb923c;
+  --primary-2: #fb923c;
+  --primary-soft: rgba(251, 146, 60, 0.12);
+  --primary-border: rgba(251, 146, 60, 0.22);
 
   /* Status */
   --success: #16a34a;
@@ -41,19 +42,23 @@
   --warning: #f97316;
   --warning-soft: rgba(249, 115, 22, 0.12);
   --warning-border: rgba(249, 115, 22, 0.25);
-  --info: #2563eb;
-  --info-soft: rgba(37, 99, 235, 0.12);
-  --info-border: rgba(37, 99, 235, 0.20);
+  --info: #fb923c;
+  --info-soft: rgba(251, 146, 60, 0.12);
+  --info-border: rgba(251, 146, 60, 0.2);
   --purple: #7c3aed;
   --purple-soft: rgba(124, 58, 237, 0.12);
   --purple-border: rgba(124, 58, 237, 0.18);
+
+  --golden: #f59e0b;
+  --golden-soft: rgba(245, 158, 11, 0.12);
+  --golden-border: rgba(245, 158, 11, 0.22);
 
   --danger: #ef4444;
   --danger-soft: rgba(239, 68, 68, 0.12);
 
   /* Sidebar */
-  --sidebar-bg: #0F172A;
-  --sidebar-bg-2: #0F172A;
+  --sidebar-bg: #0f172a;
+  --sidebar-bg-2: #0f172a;
   --sidebar-border: rgba(255, 255, 255, 0.08);
   --sidebar-text: rgba(255, 255, 255, 0.78);
   --sidebar-text-strong: rgba(255, 255, 255, 0.95);
@@ -66,8 +71,10 @@
   --radius-md: 14px;
   --radius-sm: 12px;
 
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 10px 24px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 2px 6px rgba(15, 23, 42, 0.10), 0 18px 44px rgba(15, 23, 42, 0.10);
+  --shadow-sm:
+    0 1px 2px rgba(15, 23, 42, 0.06), 0 10px 24px rgba(15, 23, 42, 0.06);
+  --shadow-md:
+    0 2px 6px rgba(15, 23, 42, 0.1), 0 18px 44px rgba(15, 23, 42, 0.1);
 
   /* Layout */
   --sidebar-w: 270px;

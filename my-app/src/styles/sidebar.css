@@ -44,5 +44,5 @@
   bottom: 10px;
   width: 3px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #4e3106b8, var(--color-secondary));
+  background: linear-gradient(135deg, rgba(251, 146, 60, 0.35) 0%, var(--primary, #fb923c) 100%);
 }

@@ -1,20 +1,57 @@
 /* ===== HEADER ===== */
 .schedule-page .portal-pageHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
+  display: none;
 }
 
 /* ===== BUTTON ===== */
 .schedule-page .portal-primaryBtn {
-  background: linear-gradient(135deg, #7f5539, #b08968);
+  background: linear-gradient(135deg, #ff8c00, #ffa500) !important;
   border: none;
   padding: 10px 16px;
   border-radius: 10px;
   color: white;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  transition: all 0.2s ease;
+}
+
+.schedule-page .portal-primaryBtn:hover {
+  background: linear-gradient(135deg, #ff7700, #ff9500) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
+}
+
+.schedule-page .portal-btnPlus {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  position: relative;
+  flex-shrink: 0;
+}
+
+.schedule-page .portal-btnPlus::before,
+.schedule-page .portal-btnPlus::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+}
+
+.schedule-page .portal-btnPlus::before {
+  width: 10px;
+  height: 2px;
+}
+
+.schedule-page .portal-btnPlus::after {
+  width: 2px;
+  height: 10px;
 }
 
 /* ===== KPI GRID ===== */
@@ -22,6 +59,11 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
+}
+
+.schedule-page .portal-grid3 .portal-card,
+.schedule-page .portal-grid3 .portal-cardInner {
+  border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
 /* ===== MINI KPI ===== */
@@ -43,8 +85,9 @@
 }
 
 .schedule-page .portal-miniKpiLabel {
-  font-size: 13px;
-  opacity: 0.7;
+  font-size: 16px;
+  opacity: 0.8;
+  color: black;
 }
 
 .schedule-page .portal-miniKpiValue {
@@ -53,32 +96,148 @@
 }
 
 /* ===== WEEK NAV ===== */
-.schedule-page .portal-weekNav {
+.schedule-page .portal-weekNavControls {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-.schedule-page .portal-weekNavCenter {
+.schedule-page .portal-weekNavLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.schedule-page .portal-weekNavCenterCard {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
+  gap: 6px;
+}
+
+.schedule-page .portal-viewSwitchGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.schedule-page .portal-viewSwitchGroup .portal-outlineBtn {
+  border-radius: 999px;
+  padding: 4px 16px;
+  border: none;
+  background: transparent;
+  color: #5d4a3a;
+  font-weight: 600;
+}
+
+.schedule-page .portal-viewSwitchGroup .portal-outlineBtn:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.schedule-page .portal-viewSwitchGroup .portal-outlineBtn.is-active {
+  background: rgba(255, 248, 236, 0.95);
+  color: #3f3125;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+}
+
+.schedule-page .portal-weekRangeRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.schedule-page .portal-weekNavRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.schedule-page .portal-weekNavDateInput {
+  width: 176px;
+  text-align: center;
+  padding: 6px;
+  border-radius: 16px;
+  font-size: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.15);
+  color: black;
+}
+
+.schedule-page .portal-weekPickerUnderLabel {
+  margin-top: 8px;
 }
 
 .schedule-page .portal-weekRange {
-  font-weight: 700;
+  font-weight: 800;
+  font-size: 26px;
+  line-height: 1.1;
 }
 
 .schedule-page .portal-weekLabel {
-  font-size: 13px;
-  opacity: 0.7;
+  font-size: 15px;
+  opacity: 0.75;
 }
 
 /* ===== BUTTON OUTLINE ===== */
 .schedule-page .portal-outlineBtn {
-  border: 1px solid rgba(255,255,255,0.1);
+  border: none;
   background: transparent;
   padding: 8px 14px;
   border-radius: 10px;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.schedule-page .portal-outlineBtn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.schedule-page .portal-outlineBtnIcon-only {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  color: var(--icon-fg);
+}
+
+/* ===== WEEK NAV CARD ===== */
+.schedule-page .portal-weekNavCard {
+  margin-bottom: 16px;
+}
+
+@media (max-width: 900px) {
+  .schedule-page .portal-weekNavControls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .schedule-page .portal-weekNavLeft {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .schedule-page .portal-weekNavRight {
+    justify-content: center;
+  }
+
+  .schedule-page .portal-weekRange {
+    font-size: 22px;
+  }
 }
 
 /* ===== TABLE ===== */
@@ -89,12 +248,22 @@
 .schedule-page .portal-scheduleTable {
   width: 100%;
   border-collapse: collapse;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.schedule-page .portal-scheduleCard .portal-cardInner {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.schedule-page .portal-dayTimelineCard .portal-cardInner {
+  border: 1px solid rgba(255, 255, 255, 0.28);
 }
 
 .schedule-page .portal-scheduleTh,
 .schedule-page .portal-scheduleTd {
   padding: 12px;
   text-align: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.22);
 }
 
 .schedule-page .portal-scheduleTh {
@@ -109,7 +278,6 @@
 
 .schedule-page .portal-scheduleTdStaff {
   text-align: left;
-  
 }
 
 /* ===== STAFF CELL ===== */
@@ -123,12 +291,21 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #b08968;
+  background: linear-gradient(135deg, #ff8c00, #ffa500);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
   color: white;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.schedule-page .portal-staffAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .schedule-page .portal-staffName {
@@ -152,14 +329,47 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(0,0,0,0.3);
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   padding: 6px 8px;
   border-radius: 8px;
   font-size: 12px;
+  color: #4a2f1e;
 }
 
 .schedule-page .portal-shiftPillIcon {
   display: flex;
+  color: #5a3a26;
+}
+
+.schedule-page .portal-shiftPill--morning {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 140, 0, 0.8),
+    rgba(255, 165, 0, 0.7)
+  );
+  border-color: rgba(255, 165, 0, 0.8);
+  color: #4a2f1e;
+}
+
+.schedule-page .portal-shiftPill--afternoon {
+  background: linear-gradient(
+    135deg,
+    rgba(92, 184, 146, 0.56),
+    rgba(64, 154, 117, 0.44)
+  );
+  border-color: rgba(192, 242, 218, 0.6);
+}
+
+.schedule-page .portal-shiftPill--evening {
+  background: linear-gradient(
+    135deg,
+    rgba(212, 146, 82, 0.58),
+    rgba(178, 109, 44, 0.46)
+  );
+  border-color: rgba(255, 223, 186, 0.62);
 }
 
 /* ===== OFF ===== */
@@ -181,7 +391,7 @@
   font-weight: 600;
 }
 
-.schedule-page .portal-input,
+.schedule-page .portal-input:not(.portal-weekNavDateInput),
 .schedule-page .portal-select {
   width: 100%;
   padding: 10px;
@@ -194,4 +404,345 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+/* ===== SCHEDULE MODAL POLISH ===== */
+.schedule-shiftModal {
+  width: min(560px, 92vw);
+  padding: 10px 16px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 239, 210, 0.28);
+  background: linear-gradient(
+    155deg,
+    rgba(118, 102, 74, 0.46),
+    rgba(126, 117, 101, 0.35)
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.26),
+    0 14px 30px rgba(0, 0, 0, 0.22);
+  cursor: default;
+}
+
+.schedule-shiftModalBody {
+  padding: 0 10px 8px;
+}
+
+.schedule-shiftModal .portal-modalHeader {
+  padding: 6px 10px 4px;
+}
+
+.schedule-shiftModal .portal-modalTitle {
+  font-size: 18px;
+  line-height: 1.15;
+  font-weight: 800;
+}
+
+.schedule-shiftModal .portal-modalClose {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(60, 60, 60, 0.85);
+}
+
+.schedule-shiftForm .portal-label {
+  font-size: 13px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  opacity: 0.9;
+  color: #f5f1e9;
+}
+
+.schedule-shiftModal .schedule-shiftForm .portal-input,
+.schedule-shiftModal .schedule-shiftForm .portal-select {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 38px;
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 235, 195, 0.38);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.schedule-shiftModal .schedule-shiftForm .portal-field {
+  width: 100%;
+}
+
+.schedule-shiftModal .schedule-shiftForm .portal-inputWithIcon {
+  width: 100%;
+}
+
+.schedule-shiftModal .schedule-shiftForm .portal-modalGrid2 {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.schedule-shiftModal .schedule-shiftForm .portal-input::placeholder {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.schedule-shiftSuggestions {
+  border: 1px solid rgba(255, 235, 195, 0.32);
+  border-radius: 14px;
+  padding: 12px 14px 14px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.schedule-shiftModalFooter {
+  padding: 8px 10px 10px;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.schedule-shiftFormError {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 180, 180, 0.6);
+  background: rgba(170, 43, 43, 0.22);
+  color: #ffe9e9;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.schedule-shiftForm .portal-quickSelectBtn {
+  min-width: 108px;
+  border-radius: 10px;
+  border: none;
+  background: rgba(255, 255, 255, 0.2);
+  color: #f5f1e9;
+  font-weight: 700;
+}
+
+.schedule-shiftForm .portal-quickSelectBtn.is-active {
+  background: linear-gradient(
+    135deg,
+    rgba(132, 108, 74, 0.95),
+    rgba(166, 133, 93, 0.92)
+  );
+  border-color: rgba(255, 235, 195, 0.65);
+  color: #fff;
+}
+
+/* ===== QUICK SELECT BUTTON ===== */
+.portal-quickSelectBtn {
+  background: rgba(255, 255, 255, 0.05);
+  border: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+.portal-quickSelectBtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.portal-quickSelectBtn.is-active {
+  background: linear-gradient(135deg, #7f5539, #b08968);
+  border-color: #b08968;
+  color: white;
+  font-weight: 600;
+}
+
+/* ===== INPUT WITH ICON ===== */
+.portal-inputWithIcon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.portal-inputWithIcon .portal-input {
+  padding-right: 32px;
+}
+
+.portal-inputIcon {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ===== MODAL BUTTONS ===== */
+.schedule-shiftModal .portal-modalBtn {
+  background: transparent;
+  border: none;
+  min-width: 104px;
+  min-height: 50px;
+  padding: 8px 18px;
+  border-radius: 13px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(
+    165deg,
+    rgba(95, 86, 67, 0.72),
+    rgba(115, 102, 81, 0.55)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  transition: all 0.2s ease;
+}
+
+.schedule-shiftModal .portal-modalBtn:hover {
+  filter: brightness(1.05);
+}
+
+.schedule-shiftModal .portal-modalBtnPrimary {
+  background: linear-gradient(
+    165deg,
+    rgba(126, 105, 74, 0.95),
+    rgba(151, 126, 90, 0.9)
+  );
+  border-color: rgba(255, 235, 195, 0.62);
+  color: white;
+  font-weight: 600;
+}
+
+.schedule-shiftModal .portal-modalBtnPrimary:hover {
+  filter: brightness(1.08);
+}
+
+/* ===== DAY TIMELINE ===== */
+.portal-dayTimeline {
+  overflow-x: auto;
+  padding: 28px 0;
+}
+
+.portal-dayTimelineHeader {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.portal-dayTimelineLabel {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.portal-dayTimelineScale {
+  flex: 1;
+  height: 24px;
+  position: relative;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  overflow: visible;
+}
+
+.portal-dayTimelineTick {
+  position: absolute;
+  top: -20px;
+  font-size: 11px;
+  opacity: 0.6;
+  transform: translateX(-50%);
+}
+
+.portal-dayTimelineTick.is-first {
+  transform: translateX(0%);
+}
+
+.portal-dayTimelineTick.is-last {
+  transform: translateX(-100%);
+}
+
+.portal-dayTimelineRow {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  align-items: stretch;
+}
+
+.portal-dayTimelineBlocks {
+  flex: 1;
+  position: relative;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.portal-dayTimelineBlock {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #4a2f1e;
+}
+
+.portal-dayTimelineBlock:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Shift block colors */
+.portal-shiftBlock-morning {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 140, 0, 0.85),
+    rgba(255, 165, 0, 0.75)
+  );
+  border: 1px solid rgba(255, 165, 0, 0.7);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  color: #4a2f1e;
+}
+
+.portal-shiftBlock-afternoon {
+  background: linear-gradient(
+    135deg,
+    rgba(92, 184, 146, 0.72),
+    rgba(64, 154, 117, 0.6)
+  );
+  border: 1px solid rgba(196, 244, 222, 0.58);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  color: #4a2f1e;
+}
+
+.portal-shiftBlock-evening {
+  background: linear-gradient(
+    135deg,
+    rgba(212, 146, 82, 0.74),
+    rgba(178, 109, 44, 0.62)
+  );
+  border: 1px solid rgba(255, 224, 192, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  color: #4a2f1e;
+}
+
+/* ===== VIEW TOGGLE ===== */
+.portal-outlineBtn.is-active {
+  background: linear-gradient(135deg, #7f5539, #b08968);
+  border-color: #b08968;
+  color: white;
+  font-weight: 600;
+}
+
+/* ===== STAFF META ===== */
+.schedule-page .portal-staffMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
