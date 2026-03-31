@@ -1,0 +1,240 @@
+/* ===== GLOBAL BUTTON STYLES - FAST PERFORMANCE ===== */
+
+/* ===== UNIVERSAL BORDER REMOVAL - ONLY FOR BUTTONS ===== */
+button,.btn,[class*="Btn"],[class*="btn"]{border:none!important;border-style:none!important;border-width:0!important;border-color:transparent!important}
+
+/* ===== MAIN BUTTON THEME - NO BORDER - EXCLUDE ENHANCED BUTTONS ===== */
+.portal-primaryBtn,.portal-modalBtn,.portal-ghostBtn,.portal-secondaryBtn,.portal-dangerBtn,.portal-successBtn,.portal-iconBtn,.portal-staffDetailBtn,.portal-quickSelectBtn,.products-pagination button,.service-page .portal-ghostBtn,.customers-page .portal-primaryBtn,.customers-page .portal-modalBtn,.customers-page .portal-ghostBtn,.customers-page .portal-customerActions .portal-ghostBtn,.inventory-page .portal-ghostBtn,.schedule-page .portal-outlineBtn,.schedule-shiftForm .portal-quickSelectBtn,.schedule-shiftModal .portal-modalBtn,.portal-rowActions .portal-rowActions button,.products-page .products-pagination button{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:8px!important;font-weight:600!important;cursor:pointer!important;padding:8px 16px!important}
+
+/* ===== HOVER EFFECTS - INSTANT - EXCLUDE ENHANCED BUTTONS - LIGHT RADIUS ON HOVER ===== */
+.portal-primaryBtn:hover,.portal-modalBtn:hover,.portal-ghostBtn:hover,.portal-secondaryBtn:hover,.portal-dangerBtn:hover,.portal-successBtn:hover,.portal-iconBtn:hover,.portal-staffDetailBtn:hover,.portal-quickSelectBtn:hover,.products-pagination button:hover,.service-page .portal-ghostBtn:hover,.customers-page .portal-primaryBtn:hover,.customers-page .portal-modalBtn:hover,.customers-page .portal-ghostBtn:hover,.customers-page .portal-customerActions .portal-ghostBtn:hover,.inventory-page .portal-ghostBtn:hover,.schedule-page .portal-outlineBtn:hover,.schedule-shiftForm .portal-quickSelectBtn:hover,.schedule-shiftModal .portal-modalBtn:hover,.portal-rowActions .portal-rowActions button:hover,.products-page .products-pagination button:hover{background:#ff8c00!important;color:#fff!important;border-radius:4px!important}
+
+/* ===== PAGINATION BUTTONS - FAST - EXCLUDE SPECIAL BUTTONS ===== */
+.products-pagination button,.service-pagination button,.inventory-pagination button,.customers-pagination button,.orders-pagination button,.staff-pagination button,.customers-paginationBtn,.products-paginationBtn,.service-paginationBtn,.inventory-paginationBtn,.orders-paginationBtn,.staff-paginationBtn{background:#fffbf7!important;border:none!important;color:#ff8c00!important;border-radius:12px!important;padding:0!important;width:44px!important;height:44px!important;font-weight:600!important;font-size:18px!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important}
+
+.products-pagination button:hover,.service-pagination button:hover,.inventory-pagination button:hover,.customers-pagination button:hover,.orders-pagination button:hover,.staff-pagination button:hover,.customers-paginationBtn:hover,.products-paginationBtn:hover,.service-paginationBtn:hover,.inventory-paginationBtn:hover,.orders-paginationBtn:hover,.staff-paginationBtn:hover{background:#ff8c00!important;color:#fff!important}
+
+/* ===== DISABLED PAGINATION BUTTONS - NO BORDER ===== */
+.service-paginationBtn:disabled,
+.products-paginationBtn:disabled,
+.inventory-paginationBtn:disabled,
+.customers-paginationBtn:disabled,
+.orders-paginationBtn:disabled,
+.staff-paginationBtn:disabled,
+.pagination button:disabled{background:transparent!important;border:none!important;color:#d1d5db!important;cursor:not-allowed!important;opacity:0.5!important}
+
+.inventory-pagination{margin-top:16px;display:flex!important;align-items:center!important;justify-content:center!important;gap:16px!important}
+.inventory-paginationText{font-weight:700!important;font-size:15px!important;min-width:100px!important;text-align:center!important;color:#374151!important}
+
+/* ===== STOCK OUT BUTTON - CAM THEME ===== */
+button.portal-outlineBtn{background:#fff8f0!important;border:2px solid #ff8c00!important;color:#ff8c00!important;border-radius:10px!important;padding:10px 18px!important;font-weight:700!important;font-size:15px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:8px!important;width:auto!important;height:auto!important;box-shadow:0 2px 8px rgba(255,140,0,0.2)!important}
+
+button.portal-outlineBtn:hover{background:#ff8c00!important;color:#fff!important;border-color:#ff8c00!important;box-shadow:0 4px 12px rgba(255,140,0,0.3)!important}
+
+/* ===== DASHBOARD ACTION BUTTON - CAM THEME - HIGH SPECIFICITY ===== */
+html body .dashboard-actionBtn{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:25px!important;padding:10px 18px!important;font-weight:700!important;font-size:15px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;width:auto!important;height:auto!important;box-shadow:0 1px 2px rgba(0,0,0,0.04)!important}
+html body .dashboard-actionBtn:hover{background:#ff8c00!important;color:#fff!important;border:none!important;border-radius:25px!important;box-shadow:0 1px 4px rgba(255,140,0,0.3)!important}
+
+/* ===== INVENTORY PAGE BUTTONS - CAM THEME - HIGH SPECIFICITY ===== */
+html body .inventory-page button{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:25px!important;padding:10px 18px!important;font-weight:700!important;font-size:15px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;width:auto!important;height:auto!important;box-shadow:0 1px 2px rgba(0,0,0,0.04)!important}
+html body .inventory-page button:hover{background:#ff8c00!important;color:#fff!important;border:none!important;border-radius:25px!important;box-shadow:0 1px 4px rgba(255,140,0,0.3)!important}
+
+/* ===== CUSTOMERS PAGE BUTTONS - CAM THEME - HIGH SPECIFICITY ===== */
+html body .customers-page button{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:25px!important;padding:10px 18px!important;font-weight:700!important;font-size:15px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;width:auto!important;height:auto!important;box-shadow:0 1px 2px rgba(0,0,0,0.04)!important}
+html body .customers-page button:hover{background:#ff8c00!important;color:#fff!important;border:none!important;border-radius:25px!important;box-shadow:0 1px 4px rgba(255,140,0,0.3)!important}
+
+/* ===== SERVICE PAGE BUTTONS - CAM THEME - HIGH SPECIFICITY ===== */
+html body .service-page button{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:25px!important;padding:10px 18px!important;font-weight:700!important;font-size:15px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;width:auto!important;height:auto!important;box-shadow:0 1px 2px rgba(0,0,0,0.04)!important}
+html body .service-page button:hover{background:#ff8c00!important;color:#fff!important;border:none!important;border-radius:25px!important;box-shadow:0 1px 4px rgba(255,140,0,0.3)!important}
+
+/* ===== PORTAL CUSTOMER ACTIONS BUTTONS - CAM THEME - HIGH SPECIFICITY ===== */
+html body .portal-customerActions button{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:25px!important;padding:10px 18px!important;font-weight:700!important;font-size:15px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;width:auto!important;height:auto!important;box-shadow:0 1px 2px rgba(0,0,0,0.04)!important}
+html body .portal-customerActions button:hover{background:#ff8c00!important;color:#fff!important;border:none!important;border-radius:25px!important;box-shadow:0 1px 4px rgba(255,140,0,0.3)!important}
+
+/* ===== PORTAL ROW ACTIONS BUTTONS - CAM THEME - HIGH SPECIFICITY ===== */
+html body .portal-rowActions button{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:25px!important;padding:10px 18px!important;font-weight:700!important;font-size:15px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;width:auto!important;height:auto!important;box-shadow:0 1px 2px rgba(0,0,0,0.04)!important}
+html body .portal-rowActions button:hover{background:#ff8c00!important;color:#fff!important;border:none!important;border-radius:25px!important;box-shadow:0 1px 4px rgba(255,140,0,0.3)!important}
+
+/* ===== PRODUCTS PAGINATION BUTTONS - CAM THEME - HIGH SPECIFICITY ===== */
+html body .products-pagination button{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:25px!important;padding:10px 18px!important;font-weight:700!important;font-size:15px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;width:auto!important;height:auto!important;box-shadow:0 1px 2px rgba(0,0,0,0.04)!important}
+html body .products-pagination button:hover{background:#ff8c00!important;color:#fff!important;border:none!important;border-radius:25px!important;box-shadow:0 1px 4px rgba(255,140,0,0.3)!important}
+
+/* ===== PRODUCTS TABLE GHOST BUTTON - CAM THEME ===== */
+.products-page .portal-table td:nth-child(8) .portal-ghostBtn{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:8px!important;padding:10px 18px!important;font-weight:700!important;font-size:15px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;width:auto!important;height:auto!important;box-shadow:0 1px 2px rgba(0,0,0,0.04)!important}
+.products-page .portal-table td:nth-child(8) .portal-ghostBtn:hover{background:#ff8c00!important;color:#fff!important;border:none!important;border-radius:8px!important;box-shadow:0 1px 4px rgba(255,140,0,0.3)!important}
+
+/* ===== SERVICE PAGE PRIMARY BUTTON - CAM THEME - HIGH SPECIFICITY ===== */
+html body .service-page .portal-primaryBtn,
+.service-page .portal-primaryBtn,
+.portal-primaryBtn.service-page {
+  background: #fff8f0 !important;
+  border: none !important;
+  border-style: none !important;
+  border-width: 0 !important;
+  color: #ff8c00 !important;
+  border-radius: 8px !important;
+  padding: 10px 18px !important;
+  font-weight: 700 !important;
+  font-size: 15px !important;
+  cursor: pointer !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: auto !important;
+  height: auto !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
+  outline: none !important;
+  text-decoration: none !important;
+  transition: none !important;
+}
+
+html body .service-page .portal-primaryBtn:hover,
+.service-page .portal-primaryBtn:hover,
+.portal-primaryBtn.service-page:hover {
+  background: #ff8c00 !important;
+  color: #fff !important;
+  border: none !important;
+  border-style: none !important;
+  border-width: 0 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 4px rgba(255,140,0,0.3) !important;
+  outline: none !important;
+  text-decoration: none !important;
+}
+
+/* ===== SERVICE PAGE GHOST BUTTON - CAM THEME ===== */
+.service-page .portal-ghostBtn{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:8px!important;padding:10px 18px!important;font-weight:700!important;font-size:15px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;width:auto!important;height:auto!important;box-shadow:0 1px 2px rgba(0,0,0,0.04)!important}
+.service-page .portal-ghostBtn:hover{background:#ff8c00!important;color:#fff!important;border:none!important;border-radius:8px!important;box-shadow:0 1px 4px rgba(255,140,0,0.3)!important}
+
+/* ===== SORT TOGGLES - UNIQUE STYLE ===== */
+.staff-page .staff-sortToggle,.schedule-page .portal-outlineBtnIcon-only,.products-sortToggle{background:#f8fafc!important;border:2px solid #64748b!important;color:#64748b!important;border-radius:12px!important;padding:12px 20px!important;font-weight:600!important;font-size:14px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;gap:10px!important;box-shadow:0 1px 3px rgba(0,0,0,0.1)!important}
+
+.staff-page .staff-sortToggle:hover,.schedule-page .portal-outlineBtnIcon-only:hover,.products-sortToggle:hover{background:#475569!important;color:#fff!important;border-color:#475569!important;box-shadow:0 2px 8px rgba(0,0,0,0.15)!important}
+
+/* ===== SEGMENT BUTTONS - CAM THEME ===== */
+.portal-segBtn{background:#fff8f0!important;border:2px solid #ff8c00!important;color:#ff8c00!important;border-radius:25px!important;padding:12px 24px!important;font-weight:600!important;font-size:14px!important;cursor:pointer!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;box-shadow:0 1px 3px rgba(255,140,0,0.2)!important}
+
+.portal-segBtn:hover,.portal-segBtn.active{background:#ff8c00!important;color:#fff!important;border-color:#ff8c00!important;box-shadow:0 2px 8px rgba(255,140,0,0.3)!important}
+
+/* ===== INVENTORY PAGE BUTTONS - REMOVED (MOVED TO GREEN THEME) ===== */
+
+/* ===== SEPARATED SPECIAL BUTTONS - CAM THEME - NO BORDER ===== */
+.inventory-page .portal-ghostBtn,.portal-successBtn,.portal-outlineBtn,.portal-primaryBtn,.dashboard-actionBtn,.customers-page .portal-customerActions .portal-ghostBtn,.customers-page .portal-customerActions button{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:8px!important;padding:10px 18px!important;font-weight:700!important;font-size:15px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;width:auto!important;height:auto!important;box-shadow:0 1px 2px rgba(0,0,0,0.04)!important}
+
+.inventory-page .portal-ghostBtn:hover,.portal-successBtn:hover,.portal-outlineBtn:hover,.portal-primaryBtn:hover,.dashboard-actionBtn:hover,.customers-page .portal-customerActions .portal-ghostBtn:hover,.customers-page .portal-customerActions button:hover{background:#ff8c00!important;color:#fff!important;border:none!important;border-radius:8px!important;box-shadow:0 1px 4px rgba(255,140,0,0.3)!important}
+
+/* ===== PORTAL INV ITEM CARD - CAM THEME ===== */
+.portal-invItemCard .portal-cardInner {
+  background: #fff8f0 !important;
+  border: none !important;
+  border-style: none !important;
+  border-width: 0 !important;
+  border-radius: 12px !important;
+  padding: 16px !important;
+  box-shadow: 0 2px 8px rgba(255, 140, 0, 0.1) !important;
+  outline: none !important;
+  transition: none !important;
+}
+
+.portal-invItemCard .portal-cardInner:hover {
+  background: #fff0e5 !important;
+  box-shadow: 0 4px 12px rgba(255, 140, 0, 0.15) !important;
+  transform: translateY(-1px) !important;
+  transition: all 0.2s ease !important;
+}
+
+.portal-invItemCard .portal-cardInner:active {
+  transform: translateY(0) !important;
+  box-shadow: 0 2px 8px rgba(255, 140, 0, 0.1) !important;
+}
+
+/* ===== PORTAL INV ITEM CARD ELEMENTS - CAM ACCENTS ===== */
+.portal-invItemCard .portal-cardInner .portal-cardTitle {
+  color: #ff8c00 !important;
+  font-weight: 600 !important;
+  font-size: 16px !important;
+  margin-bottom: 8px !important;
+}
+
+.portal-invItemCard .portal-cardInner .portal-cardText {
+  color: #374151 !important;
+  font-weight: 400 !important;
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+}
+
+.portal-invItemCard .portal-cardInner .portal-cardIcon {
+  color: #ff8c00 !important;
+  width: 24px !important;
+  height: 24px !important;
+  margin-bottom: 12px !important;
+}
+
+/* ===== PORTAL INV PILL - FAST ===== */
+.portal-invPill,.service-page .portal-invPill{background:#fff8f0!important;border:none!important;color:#ff8c00!important;border-radius:20px!important;padding:6px 12px!important;font-weight:600!important;font-size:12px!important;display:inline-block!important;text-align:center!important;cursor:default!important}
+
+.portal-invPill:hover,.service-page .portal-invPill:hover{background:#ff8c00!important;color:#fff!important}
+
+/* ===== UNIVERSAL SEARCH INPUT OVERRIDE - ALL PAGES ===== */
+.portal-searchInput,
+input.portal-searchInput,
+*[class*="searchInput"],
+.portal-search input,
+.searchInput,
+input[class*="search"],
+.service-page .portal-searchInput,
+.inventory-page .portal-searchInput,
+.customers-page .portal-searchInput,
+.products-page .portal-searchInput,
+.orders-page .portal-searchInput,
+.staff-page .portal-searchInput {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  color: #374151 !important;
+  font-weight: 500 !important;
+  font-size: 14px !important;
+  box-shadow: none !important;
+}
+
+.portal-searchInput::placeholder,
+input.portal-searchInput::placeholder,
+*[class*="searchInput"]::placeholder,
+.portal-search input::placeholder,
+.searchInput::placeholder,
+input[class*="search"]::placeholder,
+.service-page .portal-searchInput::placeholder,
+.inventory-page .portal-searchInput::placeholder,
+.customers-page .portal-searchInput::placeholder,
+.products-page .portal-searchInput::placeholder,
+.orders-page .portal-searchInput::placeholder,
+.staff-page .portal-searchInput::placeholder {
+  color: #9ca3af !important;
+  opacity: 0.8 !important;
+}
+
+/* ===== UNIVERSAL SEARCH CONTAINER OVERRIDE - ALL PAGES ===== */
+.portal-search,
+*[class*="search"],
+.service-page .portal-search,
+.inventory-page .portal-search,
+.customers-page .portal-search,
+.products-page .portal-search,
+.orders-page .portal-search,
+.staff-page .portal-search {
+  background: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 12px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* ===== NO HOVER EFFECT FOR SEARCH ===== */
+
+/* ===== SETTINGS INPUTS - KEEP BORDERS ===== */
+.settings-page .portal-input,.settings-page .portal-select,.settings-page .portal-textarea{border:2px solid var(--border,#e5e7eb)!important;border-style:solid!important;border-width:2px!important}
+
+/* ===== FORM ELEMENTS - KEEP BORDERS ===== */
+input,select,textarea{border:revert!important}
+
+/* ===== PROTECTED ELEMENTS ===== */
+div,span,a,label{border:revert!important}

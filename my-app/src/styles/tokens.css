@@ -23,17 +23,17 @@
 
   --chart-gridline: rgba(107, 114, 128, 0.12);
 
-  --focus-outline: rgba(236, 72, 153, 0.9);
-  --focus-border: rgba(236, 72, 153, 0.45);
-  --focus-shadow: rgba(236, 72, 153, 0.1);
+  --focus-outline: rgba(251, 146, 60, 0.9);
+  --focus-border: rgba(251, 146, 60, 0.45);
+  --focus-shadow: rgba(251, 146, 60, 0.1);
 
   --overlay: rgba(15, 23, 42, 0.55);
 
   /* Brand */
-  --primary: #ec4899;
-  --primary-2: #ec4899;
-  --primary-soft: rgba(236, 72, 153, 0.12);
-  --primary-border: rgba(236, 72, 153, 0.22);
+  --primary: #fb923c;
+  --primary-2: #fb923c;
+  --primary-soft: rgba(251, 146, 60, 0.12);
+  --primary-border: rgba(251, 146, 60, 0.22);
 
   /* Status */
   --success: #16a34a;
@@ -42,9 +42,9 @@
   --warning: #f97316;
   --warning-soft: rgba(249, 115, 22, 0.12);
   --warning-border: rgba(249, 115, 22, 0.25);
-  --info: #2563eb;
-  --info-soft: rgba(37, 99, 235, 0.12);
-  --info-border: rgba(37, 99, 235, 0.2);
+  --info: #fb923c;
+  --info-soft: rgba(251, 146, 60, 0.12);
+  --info-border: rgba(251, 146, 60, 0.2);
   --purple: #7c3aed;
   --purple-soft: rgba(124, 58, 237, 0.12);
   --purple-border: rgba(124, 58, 237, 0.18);

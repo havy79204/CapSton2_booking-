@@ -23,15 +23,14 @@ html {
 
 /* Typography */
 body {
-  
-  background: url('/bg.gif') center/cover no-repeat fixed;
-
+  background: #ffffff; /* nền trắng */
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu",
     "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
 
 /* Remove default button styles */
 button {
