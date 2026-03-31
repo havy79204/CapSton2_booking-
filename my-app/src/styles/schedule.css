@@ -5,7 +5,7 @@
 
 /* ===== BUTTON ===== */
 .schedule-page .portal-primaryBtn {
-  background: linear-gradient(135deg, #7f5539, #b08968);
+  background: linear-gradient(135deg, #ff8c00, #ffa500) !important;
   border: none;
   padding: 10px 16px;
   border-radius: 10px;
@@ -15,6 +15,13 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  transition: all 0.2s ease;
+}
+
+.schedule-page .portal-primaryBtn:hover {
+  background: linear-gradient(135deg, #ff7700, #ff9500) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
 }
 
 .schedule-page .portal-btnPlus {
@@ -186,7 +193,7 @@
 
 /* ===== BUTTON OUTLINE ===== */
 .schedule-page .portal-outlineBtn {
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: none;
   background: transparent;
   padding: 8px 14px;
   border-radius: 10px;
@@ -284,7 +291,7 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #b08968;
+  background: linear-gradient(135deg, #ff8c00, #ffa500);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -340,10 +347,11 @@
 .schedule-page .portal-shiftPill--morning {
   background: linear-gradient(
     135deg,
-    rgba(74, 144, 226, 0.58),
-    rgba(53, 122, 189, 0.46)
+    rgba(255, 140, 0, 0.8),
+    rgba(255, 165, 0, 0.7)
   );
-  border-color: rgba(184, 223, 255, 0.62);
+  border-color: rgba(255, 165, 0, 0.8);
+  color: #4a2f1e;
 }
 
 .schedule-page .portal-shiftPill--afternoon {
@@ -502,7 +510,7 @@
 .schedule-shiftForm .portal-quickSelectBtn {
   min-width: 108px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 235, 195, 0.45);
+  border: none;
   background: rgba(255, 255, 255, 0.2);
   color: #f5f1e9;
   font-weight: 700;
@@ -521,7 +529,7 @@
 /* ===== QUICK SELECT BUTTON ===== */
 .portal-quickSelectBtn {
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: none;
   padding: 8px 12px;
   border-radius: 8px;
   cursor: pointer;
@@ -564,7 +572,7 @@
 /* ===== MODAL BUTTONS ===== */
 .schedule-shiftModal .portal-modalBtn {
   background: transparent;
-  border: 1px solid rgba(255, 232, 198, 0.42);
+  border: none;
   min-width: 104px;
   min-height: 50px;
   padding: 8px 18px;
@@ -691,10 +699,10 @@
 .portal-shiftBlock-morning {
   background: linear-gradient(
     135deg,
-    rgba(74, 144, 226, 0.74),
-    rgba(53, 122, 189, 0.62)
+    rgba(255, 140, 0, 0.85),
+    rgba(255, 165, 0, 0.75)
   );
-  border: 1px solid rgba(186, 224, 255, 0.62);
+  border: 1px solid rgba(255, 165, 0, 0.7);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   color: #4a2f1e;

@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
-import { IconSearch } from '../../components/Layout portal/PortalIcons.jsx'
+import { IconAlertTriangle, IconBarCart, IconCheckCircle, IconSearch, IconStore } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
 import { useNavigate } from 'react-router-dom'
 import '../../styles/products.css'
+import '../../styles/global-buttons.css'
 function formatVnd(value) {
   const n = Number(value || 0)
   return n.toLocaleString('en-US')
@@ -40,13 +41,40 @@ function resolveAssetUrl(url) {
   return `${base}${raw.startsWith('/') ? '' : '/'}${raw}`
 }
 
+function compareText(a, b) {
+  return String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base' })
+}
+
+const OWNER_PRODUCTS_UI_STATE_KEY = 'ownerProductsPage.ui.v1'
+
+function readProductsUiState() {
+  try {
+    const raw = sessionStorage.getItem(OWNER_PRODUCTS_UI_STATE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function writeProductsUiState(value) {
+  try {
+    sessionStorage.setItem(OWNER_PRODUCTS_UI_STATE_KEY, JSON.stringify(value))
+  } catch {
+    // ignore storage write failures
+  }
+}
+
 export default function OwnerProductsPage() {
   const navigate = useNavigate()
+  const [loadError, setLoadError] = useState('')
   const [items, setItems] = useState([])
   const [meta, setMeta] = useState({ kinds: [], statuses: [], categories: [] })
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('name')
+  const [sortOrder, setSortOrder] = useState('asc')
   const [page, setPage] = useState(1)
   const pageSize = 10
 
@@ -77,8 +105,32 @@ export default function OwnerProductsPage() {
     description: '',
   })
   const [selectedImageIdx, setSelectedImageIdx] = useState(-1)
+  const hasRestoredUiRef = useRef(false)
 
   const imageInputRef = useRef(null)
+
+  function onToggleSort(field) {
+    if (sortBy === field) {
+      setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortBy(field)
+    setSortOrder('asc')
+  }
+
+  function renderSortToggle(field, label) {
+    return (
+      <button
+        type="button"
+        className="products-sortToggle"
+        aria-label={`Sort by ${label}`}
+        onClick={() => onToggleSort(field)}
+      >
+        <span className={`products-sortTriangle up ${sortBy === field && sortOrder === 'asc' ? 'is-active' : ''}`.trim()} aria-hidden="true" />
+        <span className={`products-sortTriangle down ${sortBy === field && sortOrder === 'desc' ? 'is-active' : ''}`.trim()} aria-hidden="true" />
+      </button>
+    )
+  }
 
   function readFileAsDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -111,6 +163,7 @@ export default function OwnerProductsPage() {
 
   async function load() {
     try {
+      setLoadError('')
       const [list, m] = await Promise.all([api.get('/api/owner/retail/products'), api.get('/api/owner/retail/meta')])
       setItems(Array.isArray(list) ? list : [])
       if (m && typeof m === 'object') {
@@ -122,6 +175,7 @@ export default function OwnerProductsPage() {
       }
     } catch (err) {
       console.error(err)
+      setLoadError(err?.message || 'Unable to load products data')
     }
   }
 
@@ -135,6 +189,7 @@ export default function OwnerProductsPage() {
       }))
     } catch (err) {
       console.error(err)
+      setLoadError((prev) => prev || err?.message || 'Unable to load categories')
       setMeta((prev) => ({ ...prev, categories: [] }))
     }
   }
@@ -142,6 +197,67 @@ export default function OwnerProductsPage() {
   useEffect(() => {
     Promise.resolve().then(load)
   }, [])
+
+  useEffect(() => {
+    if (hasRestoredUiRef.current) return
+    const saved = readProductsUiState()
+    if (!saved || typeof saved !== 'object') {
+      hasRestoredUiRef.current = true
+      return
+    }
+
+    if (typeof saved.query === 'string') setQuery(saved.query)
+    if (saved.statusFilter === 'all' || saved.statusFilter === 'active' || saved.statusFilter === 'inactive') {
+      setStatusFilter(saved.statusFilter)
+    }
+    if (typeof saved.categoryFilter === 'string') setCategoryFilter(saved.categoryFilter)
+    if (typeof saved.sortBy === 'string') setSortBy(saved.sortBy)
+    if (saved.sortOrder === 'asc' || saved.sortOrder === 'desc') setSortOrder(saved.sortOrder)
+    if (saved.openCat === true || saved.openCat === false) setOpenCat(saved.openCat)
+    if (saved.catForm && typeof saved.catForm === 'object') {
+      setCatForm({
+        name: String(saved.catForm.name || ''),
+        description: String(saved.catForm.description || ''),
+      })
+    }
+    if (saved.open === true || saved.open === false) setOpen(saved.open)
+    if (saved.form && typeof saved.form === 'object') {
+      setForm({
+        name: String(saved.form.name || ''),
+        categoryId: String(saved.form.categoryId || ''),
+        kind: String(saved.form.kind || ''),
+        status: String(saved.form.status || ''),
+        sellPriceVnd: String(saved.form.sellPriceVnd || '0'),
+        images: Array.isArray(saved.form.images) ? saved.form.images.filter(Boolean).slice(0, 8) : [],
+        description: String(saved.form.description || ''),
+      })
+    }
+    if (Number.isInteger(saved.selectedImageIdx)) setSelectedImageIdx(saved.selectedImageIdx)
+    if (saved.newVariant && typeof saved.newVariant === 'object') {
+      setNewVariant({
+        name: String(saved.newVariant.name || ''),
+        stock: String(saved.newVariant.stock || '0'),
+      })
+    }
+    hasRestoredUiRef.current = true
+  }, [])
+
+  useEffect(() => {
+    if (!hasRestoredUiRef.current) return
+    writeProductsUiState({
+      query,
+      statusFilter,
+      categoryFilter,
+      sortBy,
+      sortOrder,
+      openCat,
+      catForm,
+      open,
+      form,
+      selectedImageIdx,
+      newVariant,
+    })
+  }, [query, statusFilter, categoryFilter, sortBy, sortOrder, openCat, catForm, open, form, selectedImageIdx, newVariant])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -158,12 +274,58 @@ export default function OwnerProductsPage() {
     return searched
   }, [items, query, statusFilter, categoryFilter])
 
+  const sortedFiltered = useMemo(() => {
+    const sorted = [...filtered]
+    sorted.sort((a, b) => {
+      if (sortBy === 'price') {
+        const cmp = Number(a?.price || 0) - Number(b?.price || 0)
+        return sortOrder === 'asc' ? cmp : -cmp
+      }
+      if (sortBy === 'stock') {
+        const cmp = Number(a?.stock || 0) - Number(b?.stock || 0)
+        return sortOrder === 'asc' ? cmp : -cmp
+      }
+      if (sortBy === 'sold') {
+        const cmp = Number(a?.soldCount || 0) - Number(b?.soldCount || 0)
+        return sortOrder === 'asc' ? cmp : -cmp
+      }
+      if (sortBy === 'rating') {
+        const cmp = Number(a?.averageRating || 0) - Number(b?.averageRating || 0)
+        return sortOrder === 'asc' ? cmp : -cmp
+      }
+      if (sortBy === 'category') {
+        const cmp = compareText(a?.categoryName || a?.kind || '', b?.categoryName || b?.kind || '')
+        return sortOrder === 'asc' ? cmp : -cmp
+      }
+      const cmp = compareText(a?.name || '', b?.name || '')
+      return sortOrder === 'asc' ? cmp : -cmp
+    })
+    return sorted
+  }, [filtered, sortBy, sortOrder])
+
   const pagedItems = useMemo(() => {
     const start = (page - 1) * pageSize
-    return filtered.slice(start, start + pageSize)
-  }, [filtered, page])
+    return sortedFiltered.slice(start, start + pageSize)
+  }, [sortedFiltered, page])
 
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(filtered.length / pageSize)), [filtered.length])
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(sortedFiltered.length / pageSize)), [sortedFiltered.length])
+
+  const totalProductsCount = useMemo(() => items.length, [items])
+
+  const activeProductsCount = useMemo(
+    () => items.filter((p) => String(p?.status || '').toLowerCase() === 'active').length,
+    [items]
+  )
+
+  const outOfStockProductsCount = useMemo(
+    () => items.filter((p) => Number(p?.stock || 0) <= 0).length,
+    [items]
+  )
+
+  const lowStockProductsCount = useMemo(
+    () => items.filter((p) => Number(p?.stock || 0) > 0 && Number(p?.stock || 0) <= 10).length,
+    [items]
+  )
 
   const categoriesById = useMemo(() => {
     const map = new Map()
@@ -183,7 +345,7 @@ export default function OwnerProductsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [query, statusFilter, categoryFilter])
+  }, [query, statusFilter, categoryFilter, sortBy, sortOrder])
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
@@ -472,29 +634,99 @@ export default function OwnerProductsPage() {
 
   return (
     <div className="products-page">
-      <div className="portal-pageHeader">
-        <div className="portal-pageHeaderLeft">
-          <div className="portal-headerActions">
-            <button type="button" className="portal-primaryBtn" onClick={openCreate}>
-              <span className="portal-primaryBtnIcon" aria-hidden="true">
-                +
-              </span>
-              Add Product
-            </button>
-          </div>
+      {loadError ? (
+        <div className="portal-formError" role="alert" style={{ marginBottom: 12 }}>
+          {loadError}
         </div>
+      ) : null}
+
+      <div className="products-kpiGrid">
+        <PortalCard
+          className="portal-kpi"
+          title="Total Products"
+          style={{
+            '--kpi-accent': 'var(--primary)',
+            '--kpi-icon-bg': 'var(--primary-soft)',
+          }}
+          right={
+            <div className="portal-kpiIcon" aria-hidden="true">
+              <IconStore />
+            </div>
+          }
+        >
+          <div className="portal-kpiValue">{formatVnd(totalProductsCount)}</div>
+        </PortalCard>
+
+        <PortalCard
+          className="portal-kpi"
+          title="Active Products"
+          style={{
+            '--kpi-accent': 'var(--success)',
+            '--kpi-icon-bg': 'var(--success-soft)',
+          }}
+          right={
+            <div className="portal-kpiIcon" aria-hidden="true">
+              <IconCheckCircle />
+            </div>
+          }
+        >
+          <div className="portal-kpiValue">{formatVnd(activeProductsCount)}</div>
+        </PortalCard>
+
+        <PortalCard
+          className="portal-kpi"
+          title="Low Stock"
+          style={{
+            '--kpi-accent': 'var(--warning)',
+            '--kpi-icon-bg': 'var(--warning-soft)',
+          }}
+          right={
+            <div className="portal-kpiIcon" aria-hidden="true">
+              <IconAlertTriangle />
+            </div>
+          }
+        >
+          <div className="portal-kpiValue">{formatVnd(lowStockProductsCount)}</div>
+        </PortalCard>
+
+        <PortalCard
+          className="portal-kpi"
+          title="Out of Stock"
+          style={{
+            '--kpi-accent': 'var(--info)',
+            '--kpi-icon-bg': 'var(--info-soft)',
+          }}
+          right={
+            <div className="portal-kpiIcon" aria-hidden="true">
+              <IconBarCart />
+            </div>
+          }
+        >
+          <div className="portal-kpiValue">{formatVnd(outOfStockProductsCount)}</div>
+        </PortalCard>
       </div>
 
-      <div className="portal-search portal-searchFull" role="search">
-        <span className="portal-searchIcon" aria-hidden="true">
-          <IconSearch />
-        </span>
-        <input
-          className="portal-searchInput"
-          placeholder="Search by name / category..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+      <div className="products-topRow">
+        <div className="portal-search portal-searchFull" role="search">
+          <span className="portal-searchIcon" aria-hidden="true">
+            <IconSearch />
+          </span>
+          <input
+            className="portal-searchInput"
+            placeholder="Search by name / category..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+
+        <div className="portal-headerActions">
+          <button type="button" className="portal-primaryBtn" onClick={openCreate}>
+            <span className="portal-primaryBtnIcon" aria-hidden="true">
+              +
+            </span>
+            Add Product
+          </button>
+        </div>
       </div>
 
       <div className="products-filterRow">
@@ -518,21 +750,46 @@ export default function OwnerProductsPage() {
             ))}
           </select>
         </label>
-      </div>
 
+      </div>
       <PortalCard className="portal-invTableCard" title="Retail Product List">
         <div className="portal-tableWrap">
           <table className="portal-table">
             <thead>
               <tr>
-                <th>Name</th>
+                <th>
+                  <div className="products-sortHeader">
+                    <span>Name</span>
+                    {renderSortToggle('name', 'name')}
+                  </div>
+                </th>
                 <th>Category</th>
-                <th>Price</th>
-                <th>Stock</th>
-                <th>Sold</th>
-                <th>Rating</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th>
+                  <div className="products-sortHeader">
+                    <span>Price</span>
+                    {renderSortToggle('price', 'price')}
+                  </div>
+                </th>
+                <th>
+                  <div className="products-sortHeader">
+                    <span>Stock</span>
+                    {renderSortToggle('stock', 'stock')}
+                  </div>
+                </th>
+                <th>
+                  <div className="products-sortHeader">
+                    <span>Sold</span>
+                    {renderSortToggle('sold', 'sold')}
+                  </div>
+                </th>
+                <th>
+                  <div className="products-sortHeader">
+                    <span>Rating</span>
+                    {renderSortToggle('rating', 'rating')}
+                  </div>
+                </th>
+                <th className="products-statusCol">Status</th>
+                <th className="products-actionsCol">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -549,7 +806,7 @@ export default function OwnerProductsPage() {
                   <td>
                     <span className="portal-invPill">{p.status || '-'}</span>
                   </td>
-                  <td style={{ width: 320 }}>
+                  <td className="products-actionsCell">
                     <div className="portal-rowActions">
                       <button type="button" className="portal-ghostBtn" onClick={() => openEdit(p)}>
                         Edit
@@ -573,20 +830,22 @@ export default function OwnerProductsPage() {
         <div className="products-pagination">
           <button
             type="button"
-            className="portal-ghostBtn"
+            className="products-paginationBtn"
             disabled={page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
+            aria-label="Previous page"
           >
-            Previous
+            ‹
           </button>
           <span className="products-paginationText">Page {page} / {totalPages}</span>
           <button
             type="button"
-            className="portal-ghostBtn"
+            className="products-paginationBtn"
             disabled={page >= totalPages}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            aria-label="Next page"
           >
-            Next
+            ›
           </button>
         </div>
       </PortalCard>
