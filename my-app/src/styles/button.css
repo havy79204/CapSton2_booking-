@@ -1,0 +1,257 @@
+/* Base button styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.btn:focus {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Primary button - Orange background */
+.btn-primary {
+  background: var(--primary, #fb923c);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #f97316;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(251, 146, 60, 0.3);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(251, 146, 60, 0.3);
+}
+
+/* Secondary button - White background, no border */
+.btn-secondary {
+  background: white;
+  color: var(--primary, #fb923c);
+  border: none;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--primary-soft, rgba(251, 146, 60, 0.12));
+  transform: translateY(-1px);
+}
+
+.btn-secondary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Ghost button - Transparent with orange text, no border */
+.btn-ghost {
+  background: transparent;
+  color: var(--primary, #fb923c);
+  border: none;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--primary-soft, rgba(251, 146, 60, 0.12));
+  transform: translateY(-1px);
+}
+
+.btn-ghost:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* White button - White background with orange text, no border */
+.btn-white {
+  background: white;
+  color: var(--primary, #fb923c);
+  border: none;
+}
+
+.btn-white:hover:not(:disabled) {
+  background: var(--primary-soft, rgba(251, 146, 60, 0.12));
+  transform: translateY(-1px);
+}
+
+.btn-white:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Outline button - Transparent background, no border */
+.btn-outline {
+  background: transparent;
+  color: var(--primary, #fb923c);
+  border: none;
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: var(--primary, #fb923c);
+  color: white;
+  transform: translateY(-1px);
+}
+
+.btn-outline:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Button sizes */
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+  min-height: 32px;
+}
+
+.btn-lg {
+  padding: 14px 28px;
+  font-size: 16px;
+  min-height: 52px;
+}
+
+.btn-xl {
+  padding: 18px 36px;
+  font-size: 18px;
+  min-height: 60px;
+}
+
+/* Full width button */
+.btn-full {
+  width: 100%;
+}
+
+/* Icon button */
+.btn-icon {
+  padding: 10px;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.btn-icon.btn-sm {
+  padding: 6px;
+  min-height: 32px;
+  min-width: 32px;
+}
+
+.btn-icon.btn-lg {
+  padding: 14px;
+  min-height: 52px;
+  min-width: 52px;
+}
+
+/* Button with icon on the left */
+.btn-icon-left .icon {
+  order: -1;
+}
+
+/* Button with icon on the right */
+.btn-icon-right .icon {
+  order: 1;
+}
+
+/* Loading state */
+.btn-loading {
+  position: relative;
+  color: transparent !important;
+}
+
+.btn-loading::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  top: 50%;
+  left: 50%;
+  margin-left: -8px;
+  margin-top: -8px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Button groups */
+.btn-group {
+  display: inline-flex;
+  gap: 0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.btn-group .btn {
+  border-radius: 0;
+  border-right-width: 0;
+}
+
+.btn-group .btn:first-child {
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+
+.btn-group .btn:last-child {
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+  border-right-width: 1px;
+}
+
+.btn-group .btn.btn-outline {
+  border-right-width: 1px;
+}
+
+.btn-group .btn.btn-outline:not(:last-child) {
+  border-right-color: rgba(251, 146, 60, 0.3);
+}
+
+/* Success button */
+.btn-success {
+  background: var(--success, #16a34a);
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #15803d;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.3);
+}
+
+/* Danger button */
+.btn-danger {
+  background: var(--danger, #ef4444);
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+/* Warning button */
+.btn-warning {
+  background: var(--warning, #f97316);
+  color: white;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #ea580c;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+}

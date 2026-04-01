@@ -773,12 +773,7 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
     insights.push({ level: 'neutral', text: `Returning customer rate is low (${returningPct}%).`, actionLabel: 'Launch a retention campaign', actionHref: '/portals/owner/customers' })
   }
 
-  let summary = `Performance is stable in ${meta.label}.`
-  if (revenueDeltaPct < 0 || utilizationPct < 60 || apptsDeltaPct < 0) {
-    summary = `Performance is below expectation in ${meta.label} due to ${utilizationPct < 60 ? 'low schedule utilization' : 'declining appointments'}.`
-  } else if (revenueDeltaPct > 8 && apptsDeltaPct > 5) {
-    summary = `Performance is strong in ${meta.label}, with both revenue and appointments increasing.`
-  }
+  let summary = ''
 
   const kpis = {
     revenue: {

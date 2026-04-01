@@ -781,7 +781,7 @@ async function listStaff(options = {}) {
   const { period, startAt, endAt } = buildStaffTimeRange(options)
   const keyword = normalizeStaffKeyword(options.keyword || options.q || '')
   const page = Math.max(1, Math.trunc(Number(options.page || 1) || 1))
-  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(options.pageSize || 8) || 8)))
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(options.pageSize || 10) || 10)))
   const sortBy = normalizeStaffSort(options.sortBy, options.sortDir)
 
   const bind = period === 'all'

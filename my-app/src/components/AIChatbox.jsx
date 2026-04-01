@@ -13,12 +13,11 @@ export default function AIChatbox() {
 
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
-  const [collapsed, setCollapsed] = useState(true)
+  const [collapsed, setCollapsed] = useState(false)
   const [pendingImages, setPendingImages] = useState([])
   const [menuOpenId, setMenuOpenId] = useState(null)
   const [imageAnalyzing, setImageAnalyzing] = useState(false)
 
-  const bottomRef = useRef(null)
   const bodyRef = useRef(null)
   const inputRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -31,54 +30,43 @@ export default function AIChatbox() {
     bodyEl.scrollTo({ top: bodyEl.scrollHeight, behavior: 'smooth' })
   }, [messages])
 
-    useEffect(() => {
-      if (inputRef.current) inputRef.current.focus()
-    }, [])
+  useEffect(() => {
+    if (inputRef.current) inputRef.current.focus()
+  }, [])
 
-    useEffect(() => {
-      if (sessionId) {
-        setTimeout(() => inputRef.current?.focus?.(), 80)
-        setCollapsed(false)
-      }
-    }, [sessionId])
+  useEffect(() => {
+    if (sessionId) {
+      setTimeout(() => inputRef.current?.focus?.(), 80)
+      setCollapsed(false)
+    }
+  }, [sessionId])
 
-    // cleanup object URLs on unmount or when pendingImages changes
-    useEffect(() => {
-      return () => {
-        try { (pendingImages || []).forEach((p) => { if (p?.previewUrl) URL.revokeObjectURL(p.previewUrl) }) } catch (e) { void e }
-      }
-    }, [pendingImages])
+  // cleanup object URLs on unmount or when pendingImages changes
+  useEffect(() => {
+    return () => {
+      try { (pendingImages || []).forEach((p) => { if (p?.previewUrl) URL.revokeObjectURL(p.previewUrl) }) } catch (e) { void e }
+    }
+  }, [pendingImages])
 
   async function sendText(content) {
     if (!content || !content.trim()) return
     try {
       setSending(true)
-      if (!sessionId) {
-        if (!me) {
-            if (authLoading) {
-                try { window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'info', message: 'Đang kiểm tra đăng nhập...', timeoutMs: 2000 } })) } catch (e) { void e; }
-            return
-          }
-              try { window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'error', message: 'Vui lòng đăng nhập để sử dụng chat', timeoutMs: 4000 } })) } catch (e) { void e; }
-          window.location.href = '/login'
-          return
-        }
-        await new Promise((r) => setTimeout(r, 80))
-      }
+      // Let useAIChat handle session creation automatically
       await sendMessage(content.trim())
       setTimeout(() => inputRef.current?.focus?.(), 60)
-      } catch (err) {
+    } catch (err) {
       console.error('sendText error', err)
       try {
         const msg = (err && err.message) || String(err)
         window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'error', message: msg, timeoutMs: 5000 } }))
-        } catch (e) {
-          void e;
-        }
-        if (err && err.status === 401) {
-          try { window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'info', message: 'Vui lòng đăng nhập lại', timeoutMs: 2500 } })) } catch (e) { void e }
-          window.location.href = '/login'
-        }
+      } catch (e) {
+        void e;
+      }
+      if (err && err.status === 401) {
+        try { window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'info', message: 'Vui lòng đăng nhập lại', timeoutMs: 2500 } })) } catch (e) { void e }
+        window.location.href = '/login'
+      }
     } finally {
       setSending(false)
       setImageAnalyzing(false)
@@ -95,19 +83,6 @@ export default function AIChatbox() {
       setSending(true)
       if (pendingImages.length > 0) {
         setImageAnalyzing(true)
-        if (!sessionId) {
-          if (!me) {
-            if (authLoading) {
-                try { window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'info', message: 'Đang kiểm tra đăng nhập...', timeoutMs: 2000 } })) } catch (e) { void e; }
-              return
-            }
-              try { window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'error', message: 'Vui lòng đăng nhập để sử dụng chat', timeoutMs: 4000 } })) } catch (e) { void e; }
-            window.location.href = '/login'
-            return
-          }
-          // create session without requiring a name
-          await new Promise((r) => setTimeout(r, 80))
-        }
         const firstName = pendingImages[0]?.name || 'Ảnh móng'
         const caption = t || (pendingImages.length > 1 ? `Ảnh móng (${pendingImages.length} ảnh), ảnh đầu: ${firstName}` : `Ảnh móng: ${firstName}`)
 
@@ -118,6 +93,7 @@ export default function AIChatbox() {
           return ''
         }))
 
+        // Let useAIChat handle session creation automatically
         await sendImage(dataUrls, caption)
 
         try { pendingImages.forEach((p) => { if (p?.previewUrl) URL.revokeObjectURL(p.previewUrl) }) } catch (e) { void e }
@@ -205,7 +181,6 @@ export default function AIChatbox() {
   }
 
   // Chatbox no longer performs orders; only suggests products/services.
-
   function parseAnalysisPayload(rawContent) {
     try {
       const obj = JSON.parse(String(rawContent || ''))
@@ -252,7 +227,7 @@ export default function AIChatbox() {
 
   async function handleDeleteSession(sid) {
     try {
-      const ok = window.confirm('Do you want to delete this chat session? The action will delete the related messages.')
+      const ok = window.confirm('Do you want to delete this chat session? The action will delete related messages.')
       if (!ok) return
       if (typeof deleteSession === 'function') {
         await deleteSession(sid)
@@ -273,11 +248,11 @@ export default function AIChatbox() {
     try {
       // Require login before creating a session
       if (!me) {
-    if (authLoading) {
-      try { window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'info', message: 'Đang kiểm tra đăng nhập...', timeoutMs: 2000 } })) } catch (e) { void e; }
-      return
-    }
-    try { window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'error', message: 'Vui lòng đăng nhập để tạo chat mới', timeoutMs: 4000 } })) } catch (e) { void e; }
+        if (authLoading) {
+          try { window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'info', message: 'Đang kiểm tra đăng nhập...', timeoutMs: 2000 } })) } catch (e) { void e; }
+          return
+        }
+        try { window.dispatchEvent(new CustomEvent('portal:toast', { detail: { type: 'error', message: 'Vui lòng đăng nhập để tạo chat mới', timeoutMs: 4000 } })) } catch (e) { void e; }
         window.location.href = '/login'
         return
       }
@@ -311,178 +286,229 @@ export default function AIChatbox() {
   }
 
   return (
-    <div className={`gemini-container ${collapsed ? 'side-collapsed' : 'side-open'}`}>
-      <aside className={`gemini-side ${collapsed ? 'collapsed' : ''}`}>
-        <div className="side-inner">
-          <div className="panel-header">
-            <button className="menu-icon" onClick={() => setCollapsed((s) => !s)} aria-label="Menu">☰</button>
-          </div>
+    <div className={`chat-container ${collapsed ? 'sidebar-collapsed' : ''}`}>
+      {/* SIDEBAR */}
+      <aside className={`chat-sidebar ${collapsed ? 'collapsed' : ''}`}>
+        <div className="sidebar-header">
+          <button className="new-chat-btn" onClick={handleNewChat}>
+            <span className="new-chat-icon">+</span>
+            <span className="new-chat-text">New chat</span>
+          </button>
+        </div>
 
-          <div className={`new-chat ${collapsed ? 'icon-only' : ''}`}>
-            <button className="new-chat-btn" onClick={handleNewChat} aria-label="New chat">
-              <span className="icon">✎</span>
-              <span className="label">New Chat Session</span>
-            </button>
-          </div>
+        <div className="sessions-list">
+          {Array.isArray(sessions) && sessions.length > 0 ? (
+            sessions.map((s, i) => {
+              const id = s?.SessionId || s?.sessionId || s?.id || `${i}`;
+              const label = s?.title || s?.name || `Chat ${i + 1}`;
+              const isActive = String(id) === String(sessionId);
 
-          <div className="sessions-list">
-            {Array.isArray(sessions) && sessions.length > 0 ? (
-              sessions.map((s, i) => {
-                const id = s?.SessionId || s?.sessionId || s?.id || `${i}`
-                const label = s?.title || s?.name || `Session ${i + 1}`
-                const active = String(id) === String(sessionId)
-                return (
-                  <div key={id} className={`session-item ${active ? 'active' : ''}`}>
-                    <button className="session-main" onClick={() => handleSelect(id)}>
-                      <div className="session-avatar">{(label || '').slice(0,1)}</div>
-                      <div className="session-label">{label}</div>
-                    </button>
-                    <div className="session-actions">
-                      <button className="session-menu-btn" onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === id ? null : id) }} aria-label="Session actions">⋯</button>
-                      {menuOpenId === id && (
-                        <div className="session-menu">
-                          <button type="button" onClick={() => handleRenameSession(id)}>Đổi tên</button>
-                          <button type="button" onClick={() => handleDeleteSession(id)}>Xóa</button>
-                        </div>
-                      )}
+              return (
+                <div key={id} className={`session-item ${isActive ? 'active' : ''}`}>
+                  <button className="session-btn" onClick={() => handleSelect(id)}>
+                    <span className="session-icon">💬</span>
+                    <span className="session-title">{label}</span>
+                  </button>
+                  <button
+                    className="session-menu-btn"
+                    onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === id ? null : id); }}
+                  >
+                    ⋯
+                  </button>
+
+                  {menuOpenId === id && (
+                    <div className="session-dropdown">
+                      <button onClick={() => handleRenameSession(id)}>Rename</button>
+                      <button onClick={() => handleDeleteSession(id)}>Delete</button>
                     </div>
-                  </div>
-                )
-              })
-            ) : (
-              <div className="no-sessions">No chat sessions available</div>
-            )}
-          </div>
+                  )}
+                </div>
+              );
+            })
+          ) : (
+            <div className="no-sessions">No previous chats</div>
+          )}
         </div>
       </aside>
 
-      <div className="gemini-card">
-        <main ref={bodyRef} className={`gemini-body ${mode === 'welcome' ? 'center' : ''}`}>
-          <div className="chat-list">
+      {/* MAIN AREA */}
+      <div className="chat-main">
+        <button className="menu-toggle" onClick={() => setCollapsed(!collapsed)}>
+          {collapsed ? '☰' : '×'}
+        </button>
+        
+        <div className={`chat-content ${mode === 'welcome' ? 'welcome-mode' : ''}`}>
+          {mode === 'welcome' && (
+            <div className="welcome-screen">
+              <h1 className="welcome-title">Chào bạn!</h1>
+              <p className="welcome-subtitle">Hôm nay tôi có thể giúp gì cho bạn?</p>
+            </div>
+          )}
+
+          <div className="messages-container">
             {Array.isArray(messages) && messages.map((m, i) => {
-              const isAI = (m.sender === 'ai' || m.Sender === 'ai')
-              const rawContent = m.content ?? m.Content ?? ''
-              const imageUrl = resolveApiImageUrl(m.ImageUrl || m.imageUrl || '')
-              const payload = isAI ? parseAnalysisPayload(rawContent) : null
-              const extracted = extractImageFromText(rawContent)
-              const messageImageUrl = imageUrl || extracted.url || ''
+              const isAI = (m.sender === 'ai' || m.Sender === 'ai');
+              const rawContent = m.content ?? m.Content ?? '';
+              const imageUrl = resolveApiImageUrl(m.ImageUrl || m.imageUrl || '');
+              const payload = isAI ? parseAnalysisPayload(rawContent) : null;
+              const extracted = extractImageFromText(rawContent);
+              const messageImageUrl = imageUrl || extracted.url || '';
+
               return (
-                <div key={m.MessageId || m.id || i} className={`msg ${isAI ? 'ai' : 'user'}`}>
-                  {payload ? (
-                    <div className="analysis-block">
-                      <div className="analysis-text">{payload.text || 'Phân tích ảnh hoàn tất.'}</div>
-                      {Array.isArray(payload?.analysis?.advice) && payload.analysis.advice.length > 0 && (
-                        <ul className="analysis-advice">
-                          {payload.analysis.advice.map((a, idx) => <li key={idx}>{a}</li>)}
-                        </ul>
-                      )}
-                      {Array.isArray(payload?.suggestedServices) && payload.suggestedServices.length > 0 && (
-                        <div className="analysis-suggest-group">
-                          <div className="analysis-title">Dịch vụ gợi ý</div>
-                          <div className="analysis-chips">
-                            {payload.suggestedServices.map((s) => (
-                              <span key={s.ServiceId || s.Name} className="analysis-chip suggestion">
-                                {s.Name}
-                              </span>
-                            ))}
+                <div key={m.MessageId || m.id || i} className={`message ${isAI ? 'ai' : 'user'}`}>
+                  <div className="message-avatar">
+                    {isAI ? <div className="ai-avatar">🤖</div> : <div className="user-avatar">👤</div>}
+                  </div>
+                  <div className="message-bubble">
+                    {payload ? (
+                      <div className="analysis-content">
+                        <div className="analysis-text">{payload.text || 'Phân tích ảnh hoàn tất.'}</div>
+                        {Array.isArray(payload?.analysis?.advice) && payload.analysis.advice.length > 0 && (
+                          <div className="analysis-section">
+                            <div className="analysis-label">Lời khuyên:</div>
+                            <div className="analysis-list">
+                              {payload.analysis.advice.map((a, idx) => <div key={idx} className="analysis-item">{a}</div>)}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      {Array.isArray(payload?.suggestedProducts) && payload.suggestedProducts.length > 0 && (
-                        <div className="analysis-suggest-group">
-                          <div className="analysis-title">Sản phẩm gợi ý</div>
-                          <div className="analysis-products">
-                            {payload.suggestedProducts.map((p) => (
-                              <div className="analysis-product" key={p.ProductId || p.Name}>
-                                <div className="analysis-product-name">{p.Name}</div>
-                                <div className="analysis-product-actions">
-                                  <a href={`/product/${p.ProductId || ''}`}>Xem chi tiết</a>
+                        )}
+                        {Array.isArray(payload?.suggestedServices) && payload.suggestedServices.length > 0 && (
+                          <div className="analysis-section">
+                            <div className="analysis-label">Dịch vụ gợi ý:</div>
+                            <div className="service-tags">
+                              {payload.suggestedServices.map((s) => (
+                                <span key={s.ServiceId || s.Name} className="service-tag">
+                                  {s.Name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {Array.isArray(payload?.suggestedProducts) && payload.suggestedProducts.length > 0 && (
+                          <div className="analysis-section">
+                            <div className="analysis-label">Sản phẩm gợi ý:</div>
+                            <div className="product-grid">
+                              {payload.suggestedProducts.map((p) => (
+                                <div key={p.ProductId || p.Name} className="product-card">
+                                  <div className="product-name">{p.Name}</div>
+                                  <div className="product-action">
+                                    <a href={`/product/${p.ProductId || ''}`}>Xem chi tiết</a>
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      {payload?._debug && (
-                        <div className="analysis-debug">
-                          <details>
-                            <summary>Debug info</summary>
-                            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{payload._debug}</pre>
-                          </details>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      {messageImageUrl ? <img src={messageImageUrl} alt="Nail upload" className="msg-image" /> : null}
-                      {(!messageImageUrl && rawContent) || (messageImageUrl && extracted.text) ? <div>{messageImageUrl ? extracted.text : rawContent}</div> : null}
-                    </>
-                  )}
-                </div>
-              )
-            })}
-
-            {imageAnalyzing && <div className="msg ai">Đang phân tích ảnh...</div>}
-            {!imageAnalyzing && loading && <div className="msg ai">Đang xử lý...</div>}
-
-            <div ref={bottomRef} />
-          </div>
-        </main>
-
-        <form className={`gemini-input ${mode === 'welcome' ? 'center' : ''}`} onSubmit={handleSend} aria-busy={sending || loading}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/jpg,image/webp"
-            multiple
-            onChange={handleImageChange}
-            style={{ display: 'none' }}
-          />
-          <div className="input-shell">
-            <button type="button" className="upload-inside-btn" onClick={handlePickImage} disabled={sending || loading || cartBusy || pendingImages.length >= 3} aria-label="Add image" title={pendingImages.length >= 3 ? 'Đã chọn tối đa 3 ảnh' : 'Thêm ảnh'}>
-              +
-            </button>
-            <input
-              ref={inputRef}
-              className="chat-text-input"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Ask NIOM&CE..."
-              aria-label="Chat input"
-              disabled={sending || loading || cartBusy}
-            />
-          </div>
-          <button type="submit" disabled={sending || loading || cartBusy || (!text.trim() && pendingImages.length === 0)} aria-label="Send message">
-            {(sending || loading) ? (
-              <span className="btn-spinner" aria-hidden="true" />
-            ) : (
-              '➤'
-            )}
-          </button>
-        </form>
-        {pendingImages.length > 0 && (
-          <div className="pending-image-row">
-            <div className="pending-image-summary">Đã chọn {pendingImages.length}/3 ảnh</div>
-            <div className="pending-image-list">
-              {pendingImages.map((img, idx) => (
-                <div className="pending-image-card" title={img.name || 'Ảnh đã chọn'} key={`${img.name || 'image'}-${idx}`}>
-                  <img src={img.previewUrl || img.dataUrl} alt={img.name || `Selected image ${idx + 1}`} className="pending-image-large" />
-                  <div className="pending-image-actions">
-                    <button type="button" onClick={() => removePendingImage(idx)} aria-label="Remove selected image" title="Xóa ảnh">x</button>
+                        )}
+                        {payload?._debug && (
+                          <div className="debug-section">
+                            <details>
+                              <summary>Debug info</summary>
+                              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{payload._debug}</pre>
+                            </details>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        {messageImageUrl && <img src={messageImageUrl} alt="Uploaded" className="message-image" />}
+                        <div className="message-text">{messageImageUrl ? extracted.text : rawContent}</div>
+                      </>
+                    )}
                   </div>
                 </div>
-              ))}
-              {pendingImages.length < 3 && (
-                <button type="button" className="pending-add-card" onClick={handlePickImage} aria-label="Add more images" title="Thêm ảnh">
-                  +
-                </button>
-              )}
-            </div>
-            <div className="pending-image-footer">
-              <button type="button" onClick={clearPendingImages}>Xóa tất cả</button>
-            </div>
+              );
+            })}
+
+            {imageAnalyzing && (
+              <div className="message ai">
+                <div className="message-avatar">
+                  <div className="ai-avatar">🤖</div>
+                </div>
+                <div className="message-bubble">
+                  <div className="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                </div>
               </div>
-        )}
+            )}
+            
+            {loading && (
+              <div className="message ai">
+                <div className="message-avatar">
+                  <div className="ai-avatar">🤖</div>
+                </div>
+                <div className="message-bubble">
+                  <div className="typing-text">Đang suy nghĩ...</div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* INPUT AREA */}
+        <div className="input-area">
+          {pendingImages.length > 0 && (
+            <div className="pending-images-container">
+              <div className="pending-images-header">
+                <span className="pending-count">Đã chọn {pendingImages.length}/3 ảnh</span>
+                <button className="clear-all-btn" onClick={clearPendingImages}>Xóa tất cả</button>
+              </div>
+              <div className="pending-images-grid">
+                {pendingImages.map((img, idx) => (
+                  <div key={idx} className="pending-image-item">
+                    <img src={img.previewUrl || img.dataUrl} alt={img.name || `Selected image ${idx + 1}`} className="pending-image" />
+                    <button className="remove-image-btn" onClick={() => removePendingImage(idx)}>×</button>
+                  </div>
+                ))}
+                {pendingImages.length < 3 && (
+                  <button className="add-image-btn" onClick={handlePickImage}>
+                    <span className="add-icon">+</span>
+                    <span>Thêm ảnh</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <form className="input-form" onSubmit={handleSend}>
+            <div className="input-container">
+              <button type="button" className="attach-btn" onClick={handlePickImage} disabled={sending || loading || cartBusy}>
+                <span className="attach-icon">📎</span>
+              </button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleImageChange}
+                style={{ display: 'none' }}
+              />
+
+              <input
+                ref={inputRef}
+                className="message-input"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Nhập tin nhắn của bạn..."
+                disabled={sending || loading || cartBusy}
+              />
+
+              <button type="submit" className="send-btn" disabled={sending || loading || cartBusy || (!text.trim() && pendingImages.length === 0)}>
+                {sending || loading ? (
+                  <div className="loading-spinner"></div>
+                ) : (
+                  <span className="send-icon">➤</span>
+                )}
+              </button>
+            </div>
+          </form>
+
+          <div className="input-footer">
+            AI có thể mắc lỗi. Hãy kiểm tra thông tin quan trọng.
+          </div>
+        </div>
       </div>
     </div>
   )

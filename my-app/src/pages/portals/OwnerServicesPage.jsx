@@ -5,6 +5,7 @@ import PortalModal from '../../components/Layout portal/PortalModal.jsx'
 import { IconSearch } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
 import '../../styles/service.css'
+import '../../styles/global-buttons.css'
 
 function formatVnd(value) {
   const n = Number(value || 0)
@@ -701,20 +702,22 @@ export default function OwnerServicesPage() {
         <div className="service-pagination">
           <button
             type="button"
-            className="portal-ghostBtn"
+            className="service-paginationBtn"
             disabled={page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
+            aria-label="Previous page"
           >
-            Previous
+            ‹
           </button>
           <span className="service-paginationText">Page {page} / {totalPages}</span>
           <button
             type="button"
-            className="portal-ghostBtn"
+            className="service-paginationBtn"
             disabled={page >= totalPages}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            aria-label="Next page"
           >
-            Next
+            ›
           </button>
         </div>
       </PortalCard>
