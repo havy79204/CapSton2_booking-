@@ -248,6 +248,10 @@ export default function OwnerOrdersPage() {
         items: itemsPayload,
       })
 
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Order updated successfully', title: 'Completed' } 
+      }))
+
       setOrderReport((prev) => ({
         ...prev,
         items: (prev.items || []).map((item) => {
@@ -263,7 +267,6 @@ export default function OwnerOrdersPage() {
           }
         }),
       }))
-
       setOpenOrderModal(false)
       refreshOrdersInBackground(orderFilters)
     } catch (err) {
@@ -306,6 +309,10 @@ export default function OwnerOrdersPage() {
         items: lines,
       })
 
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Order created successfully', title: 'Completed' } 
+      }));
+
       setOpenCreateOrderModal(false)
       resetCreateOrder()
       refreshOrdersInBackground(orderFilters)
@@ -327,10 +334,22 @@ export default function OwnerOrdersPage() {
       setDeletingOrderId(orderId)
       setOrdersError('')
       await api.del(`/api/owner/retail/orders/${orderId}`)
+<<<<<<< HEAD
+=======
+<<<<<<< Updated upstream
+=======
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Order deleted successfully', title: 'Completed' } 
+      }));
+>>>>>>> origin/ThucAnh_fix_clean
       setOrderReport((prev) => ({
         ...prev,
         items: (prev.items || []).filter((item) => String(item?.OrderId || item?.Id || item?.id || '') !== orderId),
       }))
+<<<<<<< HEAD
+=======
+>>>>>>> Stashed changes
+>>>>>>> origin/ThucAnh_fix_clean
       if (orderEditing?.OrderId === orderId) {
         setOpenOrderModal(false)
         setOrderEditing(null)

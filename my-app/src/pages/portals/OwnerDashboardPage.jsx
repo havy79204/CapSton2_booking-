@@ -724,32 +724,7 @@ export default function OwnerDashboardPage() {
 
   return (
     <div className="dashboard-page">
-      <div className="dashboard-actionsRow">
-        <div className="dashboard-headLeft">
-          <div className="dashboard-summary">{dashboard?.summary || ''}</div>
-        </div>
-      </div>
-
-      <div className="dashboard-filterRow">
-        <div className="dashboard-filtersCombined">
-          <div className="dashboard-actions">
-            {actions.map((a) => (
-              <a key={a.label} href={a.href} className="dashboard-actionBtn">{a.label}</a>
-            ))}
-          </div>
-          <GlobalPeriodFilter value={period} onChange={setPeriod} />
-          <TimeReferencePicker
-            period={period}
-            refDate={refDate}
-            refMonth={refMonth}
-            refYear={refYear}
-            onRefDate={setRefDate}
-            onRefMonth={setRefMonth}
-            onRefYear={setRefYear}
-          />
-        </div>
-      </div>
-
+    
       <div className="portal-grid4 dashboard-kpiGrid">
         {cards.map((card) => (
           <PortalCard
@@ -768,6 +743,26 @@ export default function OwnerDashboardPage() {
             </div>
           </PortalCard>
         ))}
+      </div>
+
+ <div className="dashboard-filterRow">
+        <div className="dashboard-filtersCombined">
+          <div className="dashboard-actions">
+            {actions.map((a) => (
+              <a key={a.label} href={a.href} className="dashboard-actionBtn">{a.label}</a>
+            ))}
+          </div>
+          <GlobalPeriodFilter value={period} onChange={setPeriod} />
+          <TimeReferencePicker
+            period={period}
+            refDate={refDate}
+            refMonth={refMonth}
+            refYear={refYear}
+            onRefDate={setRefDate}
+            onRefMonth={setRefMonth}
+            onRefYear={setRefYear}
+          />
+        </div>
       </div>
 
       <div className="portal-grid2 dashboard-sectionGrid">

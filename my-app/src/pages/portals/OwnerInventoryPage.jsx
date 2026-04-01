@@ -565,6 +565,10 @@ export default function OwnerInventoryPage() {
         supplier: productForm.supplier,
       })
 
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Product added successfully', title: 'Completed' } 
+      }));
+
       await refreshInventory()
       setProductForm((p) => ({
         ...p,
@@ -615,6 +619,10 @@ export default function OwnerInventoryPage() {
         note: stockForm.note,
       })
 
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Stock in successful', title: 'Completed' } 
+      }));
+
       await refreshInventory()
       setStockForm({ inventoryItemId: '', qty: '0', importPrice: '0', supplier: '', date: getTodayDateInput(), note: '' })
       closeStock()
@@ -648,6 +656,10 @@ export default function OwnerInventoryPage() {
         date: selectedDate,
         note: stockOutForm.note,
       })
+
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Stock out successful', title: 'Completed' } 
+      }));
 
       await refreshInventory()
       setStockOutForm({ inventoryItemId: '', qty: '0', date: getTodayDateInput(), note: '' })
@@ -690,6 +702,9 @@ export default function OwnerInventoryPage() {
           imageUrl: (Array.isArray(editForm.images) ? editForm.images[0] : '') || editForm.imageUrl,
           images: Array.isArray(editForm.images) ? editForm.images.slice(0, 4) : [],
         })
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Product updated successfully', title: 'Completed' } 
+        }));
       } else {
         await api.put(`/api/owner/inventory/items/${editFor.id}`, {
           name: normalizedName,
@@ -702,6 +717,9 @@ export default function OwnerInventoryPage() {
           description: editForm.description,
           imageUrl: (Array.isArray(editForm.images) ? editForm.images[0] : '') || editForm.imageUrl,
         })
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Product updated successfully', title: 'Completed' } 
+        }));
       }
 
       await refreshInventory()
@@ -720,6 +738,9 @@ export default function OwnerInventoryPage() {
     try {
       setEditError('')
       await api.del(`/api/owner/inventory/items/${targetId}`)
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Product deleted successfully', title: 'Completed' } 
+      }));
       await refreshInventory()
       closeEdit()
     } catch (err) {
