@@ -103,7 +103,6 @@ const BookingPage = () => {
   const [selectedStaffId, setSelectedStaffId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [serviceSelections, setServiceSelections] = useState([])
-<<<<<<< HEAD
   const [completionModalOpen, setCompletionModalOpen] = useState(false)
   const [bookingToComplete, setBookingToComplete] = useState(null)
   const [completingBookingId, setCompletingBookingId] = useState(null)
@@ -116,11 +115,8 @@ const BookingPage = () => {
     // setCompletionModalOpen(true)
     // setBookingToComplete({ BookingId: 'TEST-001', BookingTime: new Date().toISOString(), Status: 'Completed' })
   }, [])
-=======
   const [promoMessage, setPromoMessage] = useState('')
   const [appliedPromotion, setAppliedPromotion] = useState(null)
->>>>>>> 671c2b94 (Update dashboard, setting, staff)
-
   const selectedServiceIdsForStaff = useMemo(() => {
     return serviceSelections
       .filter((service) => Number(service.quantity || 0) > 0)
@@ -365,16 +361,16 @@ const BookingPage = () => {
       return
     }
 
-<<<<<<< HEAD
     const conflicts = checkBookingConflict()
     if (conflicts) {
       setResultTitle('Time Conflict')
       setResultMessage(`The selected specialist is not available at this time. Please choose another time or specialist.`)
       setResultModalOpen(true)
-=======
+      return
+    }
+
     if (!selectedTime) {
       alert('Please choose an available booking time.')
->>>>>>> 671c2b94 (Update dashboard, setting, staff)
       return
     }
 
@@ -838,5 +834,4 @@ const BookingPage = () => {
     </section>
   )
 }
-
 export default BookingPage
