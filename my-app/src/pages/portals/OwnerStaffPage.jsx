@@ -4,6 +4,7 @@ import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
 import '../../styles/staff.css'
 import '../../styles/staff-specialty.css'
+import '../../styles/global-buttons.css'
 import {
   IconCalendar,
   IconDollar,
@@ -1234,3 +1235,4 @@ export default function OwnerStaffPage() {
     </div>
   )
 }
+

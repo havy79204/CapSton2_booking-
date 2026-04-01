@@ -211,6 +211,9 @@ export default function OwnerAppointmentsPage() {
         return {
           ...a,
           id: a.BookingId || a.id || a.AppointmentId,
+          // Normalize ids so the edit form can reliably pre-select values
+          customerUserId: a.customerUserId || a.customerId,
+          staffId: a.staffId || a.StaffId || a.staffID,
           customer: customer?.Name || customer?.name || 'Unknown Customer',
           service: serviceNames || 'No Service',
           duration: totalDuration || 30,
@@ -375,14 +378,11 @@ export default function OwnerAppointmentsPage() {
 
   const listAppointments = useMemo(() => {
     if (viewMode === 'list') {
-      return appointments.filter(a => {
-        const s = String(a.status || '').toLowerCase();
-        if (s === 'delete' || s === 'deleted') return false;
-        return selectedStaff === 'all' || String(a.staffId) === String(selectedStaff);
-      });
+      // Keep list view consistent with the calendar view (same date + hide deleted markers)
+      return filteredAppointments.filter(a => selectedStaff === 'all' || String(a.staffId) === String(selectedStaff));
     }
     return filteredAppointments;
-  }, [viewMode, appointments, filteredAppointments, selectedStaff]);
+  }, [viewMode, filteredAppointments, selectedStaff]);
 
   const visibleStaff = useMemo(() => {
     if (selectedStaff === 'all') return staffMembers;
@@ -547,7 +547,7 @@ export default function OwnerAppointmentsPage() {
             <tbody>
               {listAppointments.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ padding: '12px', color: '#6b7280' }}>No appointments found.</td>
+                  <td colSpan={8} style={{ padding: '12px', color: '#6b7280' }}>No appointments found.</td>
                 </tr>
               )}
               {listAppointments.map(appt => {
@@ -578,14 +578,18 @@ export default function OwnerAppointmentsPage() {
           <div style={{ display: 'flex', gap: '10px' }}>
             <div className="form-group" style={{ flex: 1 }}>
               <label>Customer</label>
-              <select name="customerUserId" required defaultValue={editingAppt?.customerUserId || ""}>
+              <select
+                name="customerUserId"
+                required
+                defaultValue={editingAppt?.customerUserId || editingAppt?.customerId || ""}
+              >
                 <option value="">Select customer</option>
                 {customers.map(c => <option key={c.UserId || c.id} value={c.UserId || c.id}>{c.Name || c.name}</option>)}
               </select>
             </div>
             <div className="form-group" style={{ flex: 1 }}>
               <label>Staff</label>
-              <select name="staffId" required defaultValue={editingAppt?.staffId || ""}>
+              <select name="staffId" required defaultValue={editingAppt?.staffId || editingAppt?.StaffId || ""}>
                 {staffMembers.map(s => <option key={s.id || s.UserId} value={s.id || s.UserId}>{s.name || s.Name}</option>)}
               </select>
             </div>

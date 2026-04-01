@@ -1274,7 +1274,7 @@ async function restoreStockForOrder(orderId) {
 async function listRetailOrders(filters = {}) {
   const schema = await getSchemaInfo()
   const page = Math.max(1, Math.trunc(Number(filters.page || 1) || 1))
-  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(filters.pageSize || 20) || 20)))
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(filters.pageSize || 10) || 10)))
   const offset = (page - 1) * pageSize
 
   const built = buildOrderFilters(filters, 'o')

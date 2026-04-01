@@ -3,6 +3,7 @@ import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
 import { api } from '../../lib/api.js'
 import '../../styles/orders.css'
+import '../../styles/global-buttons.css'
 
 function formatVnd(value) {
   const n = Number(value || 0)
@@ -14,7 +15,7 @@ function defaultFilters() {
     status: '',
     keyword: '',
     page: 1,
-    pageSize: 20,
+    pageSize: 10,
     sortBy: 'createdAt',
     sortDir: 'desc',
   }
@@ -64,7 +65,7 @@ export default function OwnerOrdersPage() {
   const [orderReport, setOrderReport] = useState({
     summary: { totalOrders: 0, totalRevenue: 0, totalDiscount: 0, totalQuantity: 0, fromDate: null, toDate: null },
     items: [],
-    pagination: { page: 1, pageSize: 20, totalRows: 0 },
+    pagination: { page: 1, pageSize: 10, totalRows: 0 },
   })
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState('')
@@ -99,7 +100,7 @@ export default function OwnerOrdersPage() {
       setOrderReport({
         summary: data?.summary || { totalOrders: 0, totalRevenue: 0, totalDiscount: 0, totalQuantity: 0, fromDate: null, toDate: null },
         items: Array.isArray(data?.items) ? data.items : [],
-        pagination: data?.pagination || { page: 1, pageSize: 20, totalRows: 0 },
+        pagination: data?.pagination || { page: 1, pageSize: 10, totalRows: 0 },
       })
     } catch (err) {
       console.error(err)
@@ -107,7 +108,7 @@ export default function OwnerOrdersPage() {
       setOrderReport({
         summary: { totalOrders: 0, totalRevenue: 0, totalDiscount: 0, totalQuantity: 0, fromDate: null, toDate: null },
         items: [],
-        pagination: { page: 1, pageSize: 20, totalRows: 0 },
+        pagination: { page: 1, pageSize: 10, totalRows: 0 },
       })
     } finally {
       setOrdersLoading(false)
@@ -450,47 +451,31 @@ export default function OwnerOrdersPage() {
             </tbody>
           </table>
         </div>
-        <div className="portal-pagination" style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button
-              type="button"
-              className="portal-ghostBtn"
-              disabled={orderReport.pagination.page <= 1 || ordersLoading}
-              onClick={() => setOrderFilters((p) => ({ ...p, page: 1 }))}
-            >
-              First
-            </button>
-            <button
-              type="button"
-              className="portal-ghostBtn"
-              disabled={orderReport.pagination.page <= 1 || ordersLoading}
-              onClick={() => setOrderFilters((p) => ({ ...p, page: Math.max(1, (p.page || 1) - 1) }))}
-            >
-              Previous
-            </button>
-            <span style={{ minWidth: 120, textAlign: 'center' }}>
-              Page {orderReport.pagination.page || 1} / {Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20)))}
-            </span>
-            <button
-              type="button"
-              className="portal-ghostBtn"
-              disabled={
-                ordersLoading ||
-                (orderReport.pagination.page || 1) >= Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20)))
-              }
-              onClick={() => setOrderFilters((p) => ({ ...p, page: (p.page || 1) + 1 }))}
-            >
-              Next
-            </button>
-            <button
-              type="button"
-              className="portal-ghostBtn"
-              disabled={ordersLoading || (orderReport.pagination.page || 1) >= Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20)))}
-              onClick={() => setOrderFilters((p) => ({ ...p, page: Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20))) }))}
-            >
-              Last
-            </button>
-          </div>
+        <div className="orders-pagination">
+          <button
+            type="button"
+            className="orders-paginationBtn"
+            disabled={orderReport.pagination.page <= 1 || ordersLoading}
+            onClick={() => setOrderFilters((p) => ({ ...p, page: Math.max(1, (p.page || 1) - 1) }))}
+            aria-label="Previous page"
+          >
+            ‹
+          </button>
+          <span className="orders-paginationText">
+            Page {orderReport.pagination.page || 1} / {Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 10)))}
+          </span>
+          <button
+            type="button"
+            className="orders-paginationBtn"
+            disabled={
+              ordersLoading ||
+              (orderReport.pagination.page || 1) >= Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 10)))
+            }
+            onClick={() => setOrderFilters((p) => ({ ...p, page: (p.page || 1) + 1 }))}
+            aria-label="Next page"
+          >
+            ›
+          </button>
         </div>
       </PortalCard>
       <PortalModal
