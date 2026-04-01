@@ -130,21 +130,27 @@ async function listAppointments() {
     cu.Name AS CustomerName,
 
     -- SERVICE NAMES
-    ISNULL(STUFF((
-        SELECT ', ' + sv.Name
-        FROM BookingServices bs2
-        JOIN Services sv ON sv.ServiceId = bs2.ServiceId
-        WHERE bs2.BookingId = b.BookingId
-        FOR XML PATH('')
-    ), 1, 2, ''), 'No Service') AS AllServices,
+    ISNULL((
+        SELECT TOP 1 STUFF((
+            SELECT ', ' + sv.Name
+            FROM BookingServices bs2
+            JOIN Services sv ON sv.ServiceId = bs2.ServiceId
+            WHERE bs2.BookingId = b.BookingId
+            ORDER BY sv.Name
+            FOR XML PATH(''), TYPE
+        ).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
+    ), 'No Service') AS AllServices,
 
-    -- SERVICE IDS (FIX CHINH)
-    ISNULL(STUFF((
-        SELECT ',' + CAST(bs2.ServiceId AS VARCHAR)
-        FROM BookingServices bs2
-        WHERE bs2.BookingId = b.BookingId
-        FOR XML PATH('')
-    ), 1, 1, ''), '') AS ServiceIds,
+    -- SERVICE IDS
+    ISNULL((
+        SELECT STUFF((
+            SELECT ',' + CAST(bs2.ServiceId AS NVARCHAR(50))
+            FROM BookingServices bs2
+            WHERE bs2.BookingId = b.BookingId
+            ORDER BY bs2.ServiceId
+            FOR XML PATH(''), TYPE
+        ).value('.', 'NVARCHAR(MAX)'), 1, 1, '')
+    ), '') AS ServiceIds,
 
     -- TOTAL DURATION
     ISNULL((
@@ -174,7 +180,7 @@ ORDER BY b.BookingTime DESC`
     return {
       ...mapped,
       serviceIds: row.ServiceIds
-        ? row.ServiceIds.split(',').map(id => String(id))
+        ? row.ServiceIds.split(',').map(id => String(id).trim()).filter(Boolean)
         : []
     };
   });

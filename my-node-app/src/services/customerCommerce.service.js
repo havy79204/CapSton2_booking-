@@ -468,12 +468,54 @@ async function getCustomerContext(userIdInput) {
   }
 }
 
-async function listAvailableStaff(serviceIdsInput = []) {
+async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
   const serviceIds = Array.isArray(serviceIdsInput)
     ? [...new Set(serviceIdsInput.map((id) => String(id || '').trim()).filter(Boolean))]
     : []
 
   const params = {}
+  
+  // Handle date filtering if provided
+  let availabilityFilterClause = ''
+  let dateForAnalysis = null
+  
+  if (dateInput) {
+    try {
+      // Import here to avoid circular dependency
+      const { toIsoDate } = require('../utils/date')
+      const dateObj = new Date(dateInput)
+      if (!Number.isNaN(dateObj.getTime())) {
+        dateForAnalysis = dateObj
+        const dateIso = toIsoDate(dateObj)
+        params.bookingDate = dateIso
+        
+        // Get current date to check if it's today
+        const today = new Date()
+        const todayIso = toIsoDate(today)
+        const isToday = dateIso === todayIso
+        
+        const currentHour = isToday ? today.getHours() : -1
+        params.currentHour = currentHour
+        params.todayCheck = isToday ? 1 : 0
+        
+        // Filter staff by availability for the selected date
+        // If today, also exclude staff whose shift has already ended
+        availabilityFilterClause = `
+          AND EXISTS (
+            SELECT 1
+            FROM StaffAvailability sa
+            WHERE sa.StaffId = s.StaffId
+              AND sa.WeekStartDate = @bookingDate
+              ${isToday ? `AND sa.EndHour > @currentHour` : ''}
+          )`
+        
+        console.log('[DEBUG] listAvailableStaff:', { dateInput, bookingDate: dateIso, isToday, currentHour })
+      }
+    } catch (e) {
+      // If date parsing fails, continue without date filter
+      console.log('[DEBUG] listAvailableStaff date parse error:', e.message)
+    }
+  }
   let staffFilterClause = ''
   let specialtySelectSql = `CAST('' AS NVARCHAR(255)) AS Specialty`
   let specialtyJoinSql = ''
@@ -591,20 +633,92 @@ async function listAvailableStaff(serviceIdsInput = []) {
       ${specialtyJoinSql}
      WHERE (s.Status IS NULL OR LOWER(LTRIM(RTRIM(s.Status))) NOT IN (N'nghỉ', 'inactive', 'off'))
      ${staffFilterClause}
+     ${availabilityFilterClause}
      ORDER BY u.Name, s.StaffId`,
     params
   )
 
-  return (res.recordset || []).map((row) => ({
-    StaffId: row.StaffId,
-    UserId: row.UserId || '',
-    Name: row.Name || row.StaffId || 'Specialist',
-    Specialty: row.Specialty || '',
-    Phone: row.Phone || '',
-    Email: row.Email || '',
-    AvatarUrl: row.AvatarUrl || null,
-    Status: row.StaffStatus || '',
-  }))
+  const staffList = (res.recordset || [])
+
+  // Fetch booked slots for each staff member if date is provided
+  const result = []
+  for (const row of staffList) {
+    const staff = {
+      StaffId: row.StaffId,
+      UserId: row.UserId || '',
+      Name: row.Name || row.StaffId || 'Specialist',
+      Specialty: row.Specialty || '',
+      Phone: row.Phone || '',
+      Email: row.Email || '',
+      AvatarUrl: row.AvatarUrl || null,
+      Status: row.StaffStatus || '',
+      BookedSlots: [],
+    }
+
+    // Get booked slots if date is provided
+    if (dateInput) {
+      try {
+        staff.BookedSlots = await getStaffBookedSlots(row.StaffId, dateInput)
+      } catch (e) {
+        // If error occurs fetching booked slots, continue without them
+        console.log(`[DEBUG] Error fetching booked slots for staff ${row.StaffId}:`, e.message)
+      }
+    }
+
+    result.push(staff)
+  }
+
+  return result
+}
+
+async function getStaffBookedSlots(staffIdInput, dateInput) {
+  const staffId = String(staffIdInput || '').trim()
+  const dateStr = String(dateInput || '').trim()
+
+  if (!staffId || !dateStr) return []
+
+  // Parse the date to ensure it's in the correct format
+  const dateObj = new Date(dateStr)
+  if (Number.isNaN(dateObj.getTime())) return []
+
+  const res = await query(
+    `SELECT
+        b.BookingId,
+        b.BookingTime,
+        ISNULL(SUM(s.DurationMinutes), 30) AS TotalDuration
+     FROM Bookings b
+     INNER JOIN BookingServices bs ON b.BookingId = bs.BookingId
+     INNER JOIN Services s ON bs.ServiceId = s.ServiceId
+     WHERE bs.StaffId = @staffId
+       AND CAST(CONVERT(VARCHAR(10), b.BookingTime, 120) AS DATE) = @bookingDate
+       AND b.Status NOT IN ('cancelled', 'deleted', 'cancel')
+     GROUP BY b.BookingId, b.BookingTime
+     ORDER BY b.BookingTime`,
+    {
+      staffId,
+      bookingDate: dateObj,
+    }
+  )
+
+  const bookedSlots = (res.recordset || []).map((row) => {
+    const bookingTime = new Date(row.BookingTime)
+    const startHour = String(bookingTime.getHours()).padStart(2, '0')
+    const startMinute = String(bookingTime.getMinutes()).padStart(2, '0')
+    const startTime = `${startHour}:${startMinute}`
+
+    const endTime = new Date(bookingTime.getTime() + Number(row.TotalDuration || 30) * 60000)
+    const endHour = String(endTime.getHours()).padStart(2, '0')
+    const endMinute = String(endTime.getMinutes()).padStart(2, '0')
+    const endTimeStr = `${endHour}:${endMinute}`
+
+    return {
+      startTime,
+      endTime: endTimeStr,
+      bookingId: row.BookingId,
+    }
+  })
+
+  return bookedSlots
 }
 
 async function hasPreviousBookings(userId) {
@@ -1461,6 +1575,27 @@ async function createBooking(userIdInput, payload = {}) {
         console.warn('[customerCommerce] Booking rejected notify/email failed:', notifyErr?.message || notifyErr)
       }
       const err = new Error('The selected specialist is not available at this time. Please choose another time slot or specialist.')
+      err.status = 409
+      throw err
+    }
+
+    // Verify staff member is actually scheduled for this date
+    const staffAvailRes = await query(
+      `SELECT TOP 1 sa.StaffId
+       FROM StaffAvailability sa
+       WHERE sa.StaffId = @staffId
+         AND sa.WeekStartDate = @bookingDate
+         AND sa.StartHour <= @bookingHour
+         AND sa.EndHour > @bookingHour`,
+      {
+        staffId,
+        bookingDate: bookingDateStr,
+        bookingHour: bookingStart.getHours(),
+      }
+    )
+
+    if (!staffAvailRes.recordset || staffAvailRes.recordset.length === 0) {
+      const err = new Error('The selected specialist is not scheduled to work on this date.')
       err.status = 409
       throw err
     }

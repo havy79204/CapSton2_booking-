@@ -71,6 +71,38 @@ function buildTimeSlots({ openTime, closeTime, slotMinutes, breakStart, breakEnd
   return slots
 }
 
+function isTimeSlotPassed(slotTime, selectedDate) {
+  const today = new Date().toISOString().slice(0, 10)
+  const isToday = selectedDate === today
+  
+  if (!isToday) return false
+  
+  const now = new Date()
+  const currentHour = String(now.getHours()).padStart(2, '0')
+  const currentMinute = String(now.getMinutes()).padStart(2, '0')
+  const currentTime = `${currentHour}:${currentMinute}`
+  
+  const slotMin = parseTimeToMinutes(slotTime)
+  const currMin = parseTimeToMinutes(currentTime)
+  
+  return currMin >= slotMin
+}
+
+function isTimeSlotBooked(slotTime, totalDuration, bookedSlots = []) {
+  if (!Array.isArray(bookedSlots) || bookedSlots.length === 0) return false
+
+  const slotMin = parseTimeToMinutes(slotTime)
+  const slotEndMin = slotMin + totalDuration
+
+  return bookedSlots.some((booking) => {
+    const bookingStartMin = parseTimeToMinutes(booking.startTime)
+    const bookingEndMin = parseTimeToMinutes(booking.endTime)
+
+    // Check if there's any overlap between the selected time slot and the booked time
+    return bookingStartMin < slotEndMin && bookingEndMin > slotMin
+  })
+}
+
 const BookingPage = () => {
 
   const mapBookingStatus = (s) => {
@@ -124,7 +156,7 @@ const BookingPage = () => {
       .filter(Boolean)
   }, [serviceSelections])
 
-  const { staffs, loading: staffLoading, error: staffError } = useCustomerStaff(selectedServiceIdsForStaff)
+  const { staffs, loading: staffLoading, error: staffError } = useCustomerStaff(selectedServiceIdsForStaff, selectedDate)
   const {
     bookings,
     loading: bookingsLoading,
@@ -556,15 +588,31 @@ const BookingPage = () => {
                   </p>
                 ) : null}
                 <div className="time-grid">
-                  {availableTimeSlots.map((slot) => (
-                    <button
-                      key={slot}
-                      className={`time-btn ${selectedTime === slot ? 'active' : ''}`}
-                      onClick={() => setSelectedTime(slot)}
-                    >
-                      {slot}
-                    </button>
-                  ))}
+                  {availableTimeSlots.map((slot) => {
+                    const isPassed = isTimeSlotPassed(slot, selectedDate)
+                    const isBooked = isReturningCustomer && selectedStaff 
+                      ? isTimeSlotBooked(slot, totalDuration, selectedStaff?.BookedSlots || [])
+                      : false
+                    const isDisabled = isPassed || isBooked
+                    
+                    return (
+                      <button
+                        key={slot}
+                        className={`time-btn ${selectedTime === slot ? 'active' : ''} ${isDisabled ? 'disabled' : ''} ${isBooked ? 'booked' : ''}`}
+                        onClick={() => !isDisabled && setSelectedTime(slot)}
+                        disabled={isDisabled}
+                        title={
+                          isPassed 
+                            ? 'This time has already passed' 
+                            : isBooked 
+                            ? 'This specialist is not available at this time'
+                            : ''
+                        }
+                      >
+                        {slot}
+                      </button>
+                    )
+                  })}
                 </div>
 
                 <textarea
