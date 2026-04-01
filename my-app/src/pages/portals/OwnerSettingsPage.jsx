@@ -260,7 +260,9 @@ export default function OwnerSettingsPage() {
     setNotify((p) => ({ ...p, [stateKey]: value }))
     try {
       await updateSettings({ [settingKey]: value })
-      showPortalToast({ type: 'success', message: 'Notification setting updated.' })
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Notification setting updated.', title: 'Completed' } 
+      }))
     } catch (err) {
       console.error(err)
       setNotify((p) => ({ ...p, [stateKey]: prevValue }))
@@ -1165,7 +1167,9 @@ export default function OwnerSettingsPage() {
               className="portal-outlineBtn"
               onClick={() => {
                 setSecurity({ currentPassword: '', newPassword: '', confirmPassword: '' })
-                showPortalToast({ type: 'success', message: 'Password form has been cleared.' })
+                window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+                  detail: { message: 'Password form has been cleared.', title: 'Completed' } 
+                }))
               }}
             >
               Cancel

@@ -125,8 +125,14 @@ export default function OwnerCustomersPage() {
         const putPayload = { ...payload }
         if (!putPayload.name) delete putPayload.name
         await api.put(`/api/owner/customers/${editing.id}`, putPayload)
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Customer updated successfully', title: 'Completed' } 
+        }));
       } else {
         await api.post('/api/owner/customers', payload)
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Customer created successfully', title: 'Completed' } 
+        }));
       }
 
       setForm({ name: '', phone: '', email: '', status: 'Active' })

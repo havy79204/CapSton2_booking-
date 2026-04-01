@@ -491,8 +491,14 @@ export default function OwnerProductsPage() {
 
       if (editing?.id) {
         await api.put(`/api/owner/retail/products/${editing.id}`, payload)
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Product updated successfully', title: 'Completed' } 
+        }));
       } else {
         await api.post('/api/owner/retail/products', payload)
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Product created successfully', title: 'Completed' } 
+        }));
       }
 
       await load()
