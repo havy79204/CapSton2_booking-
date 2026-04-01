@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import { IconAlertTriangle, IconBarCart, IconCheckCircle, IconSearch, IconStore } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
 import { useNavigate } from 'react-router-dom'
@@ -86,6 +87,7 @@ export default function OwnerProductsPage() {
   const [variantsFor, setVariantsFor] = useState(null)
   const [variantsError, setVariantsError] = useState('')
   const [variants, setVariants] = useState([])
+  const [variantToDelete, setVariantToDelete] = useState(null)
   const [newVariant, setNewVariant] = useState({ name: '', stock: '0' })
 
   const variantsTotalStock = useMemo(() => {
@@ -619,6 +621,11 @@ export default function OwnerProductsPage() {
     }
   }
 
+  function requestDeleteVariant(variant) {
+    if (!variant?.id) return
+    setVariantToDelete(variant)
+  }
+
   function openDetail(product) {
     if (!product?.id) return
     navigate(`/portals/owner/products/${product.id}`, {
@@ -1133,7 +1140,7 @@ export default function OwnerProductsPage() {
                         <button type="button" className="portal-ghostBtn" onClick={() => onUpdateVariant(v)}>
                           Save
                         </button>
-                        <button type="button" className="portal-ghostBtn danger" onClick={() => onDeleteVariant(v)}>
+                        <button type="button" className="portal-ghostBtn danger" onClick={() => requestDeleteVariant(v)}>
                           Delete
                         </button>
                       </div>
@@ -1177,6 +1184,19 @@ export default function OwnerProductsPage() {
           </form>
         </PortalCard>
       </PortalModal>
+
+      <ConfirmDeleteModal
+        open={Boolean(variantToDelete)}
+        title="Confirm delete"
+        message={`Are you sure you want to delete variant "${variantToDelete?.name || variantToDelete?.id || 'this variant'}"?`}
+        detail="This action cannot be undone."
+        onClose={() => setVariantToDelete(null)}
+        onConfirm={async () => {
+          const target = variantToDelete
+          setVariantToDelete(null)
+          await onDeleteVariant(target)
+        }}
+      />
     </div>
   )
 }

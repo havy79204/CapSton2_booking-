@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import '../../styles/staff.css'
 import '../../styles/staff-specialty.css'
 import '../../styles/global-buttons.css'
@@ -1045,32 +1046,15 @@ export default function OwnerStaffPage() {
         )}
       </PortalModal>
 
-      <PortalModal
+      <ConfirmDeleteModal
         open={deleteConfirm.open}
         title="Confirm delete"
-        variant="confirm"
         onClose={closeDeleteConfirm}
-        modalClassName="staff-deleteConfirmModal"
-        footer={
-          <>
-            <button type="button" className="portal-modalBtn" onClick={closeDeleteConfirm}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="portal-modalBtn danger"
-              onClick={() => onDeleteStaff(deleteConfirm.member, { closeAfterDelete: deleteConfirm.closeAfterDelete })}
-              disabled={!deleteConfirm.member?.id}
-            >
-              Delete
-            </button>
-          </>
-        }
-      >
-        <p style={{ margin: 0 }}>
-          Are you sure you want to delete employee "{deleteConfirm.member?.name || deleteConfirm.member?.id || 'this staff member'}"?
-        </p>
-      </PortalModal>
+        message={`Are you sure you want to delete employee "${deleteConfirm.member?.name || deleteConfirm.member?.id || 'this staff member'}"?`}
+        detail="This action cannot be undone."
+        onConfirm={() => onDeleteStaff(deleteConfirm.member, { closeAfterDelete: deleteConfirm.closeAfterDelete })}
+        disabled={!deleteConfirm.member?.id}
+      />
 
       <div className="staff-filterRow">
         <label className="portal-field staff-filterField staff-filterSearchField">

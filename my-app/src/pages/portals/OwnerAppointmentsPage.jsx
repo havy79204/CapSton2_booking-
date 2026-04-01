@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import '../../styles/appointments.css'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import { api } from '../../lib/api.js'
 
 export default function OwnerAppointmentsPage() {
@@ -20,6 +21,7 @@ export default function OwnerAppointmentsPage() {
   const [viewMode, setViewMode] = useState('calendar')
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [appointmentToDelete, setAppointmentToDelete] = useState(null)
+  const [deletingAppointmentId, setDeletingAppointmentId] = useState('')
 
   const TIME_SLOT_MINUTES = 30
   const TIME_CELL_HEIGHT = 64
@@ -281,6 +283,7 @@ export default function OwnerAppointmentsPage() {
     if (!appointmentToDelete) return
     try {
       const id = appointmentToDelete.id || appointmentToDelete.BookingId
+      setDeletingAppointmentId(String(id || ''))
       await api.put(`/api/owner/appointments/${id}`, { status: 'delete' });
       window.dispatchEvent(new CustomEvent('portal:success-modal', { 
         detail: { message: 'Appointment deleted successfully', title: 'Completed' } 
@@ -290,7 +293,11 @@ export default function OwnerAppointmentsPage() {
       setAppointmentToDelete(null)
     } catch (err) {
       console.error('Failed to delete appointment:', err)
-      alert('Failed to delete appointment!')
+      window.dispatchEvent(new CustomEvent('portal:toast', {
+        detail: { type: 'error', message: err?.message || 'Failed to delete appointment!' },
+      }))
+    } finally {
+      setDeletingAppointmentId('')
     }
   }
 
@@ -709,36 +716,15 @@ export default function OwnerAppointmentsPage() {
         </form>
       </PortalModal>
 
-      <PortalModal
+      <ConfirmDeleteModal
         open={deleteConfirmOpen}
-        title="Delete Appointment"
+        title="Confirm delete"
+        message="Are you sure you want to delete this appointment?"
+        detail={`Date: ${String(appointmentToDelete?.date || 'N/A')} | Time: ${String(appointmentToDelete?.time || 'N/A')} | Staff: ${String(appointmentToDelete?.staffName || appointmentToDelete?.staff || 'N/A')}`}
         onClose={cancelDelete}
-        footer={
-          <>
-            <button type="button" className="portal-modalBtn" onClick={cancelDelete}>
-              Cancel
-            </button>
-            <button 
-              type="button" 
-              className="portal-modalBtn portal-modalBtnPrimary"
-              onClick={confirmDelete}
-              style={{ backgroundColor: '#e74c3c' }}
-            >
-              Delete
-            </button>
-          </>
-        }
-      >
-        <p style={{ fontSize: '15px', color: '#1f2937', marginBottom: '12px', lineHeight: '1.5', fontWeight: '500' }}>
-          Are you sure you want to delete this appointment?
-        </p>
-        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '0' }}>
-          <strong>Date:</strong> {String(appointmentToDelete?.date || 'N/A')} | <strong>Time:</strong> {String(appointmentToDelete?.time || 'N/A')} | <strong>Staff:</strong> {String(appointmentToDelete?.staffName || appointmentToDelete?.staff || 'N/A')}
-        </p>
-        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '0', marginTop: '8px' }}>
-          This action cannot be undone.
-        </p>
-      </PortalModal>
+        onConfirm={confirmDelete}
+        confirming={Boolean(deletingAppointmentId)}
+      />
     </div>
   );
 }

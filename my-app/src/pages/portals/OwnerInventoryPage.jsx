@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from 'react'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import '../../styles/inventory.css'
 
 import {
@@ -83,6 +84,7 @@ export default function OwnerInventoryPage() {
   const [openStock, setOpenStock] = useState(false)
   const [openStockOut, setOpenStockOut] = useState(false)
   const [openEdit, setOpenEdit] = useState(false)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [addError, setAddError] = useState('')
   const [stockError, setStockError] = useState('')
   const [stockOutError, setStockOutError] = useState('')
@@ -196,6 +198,7 @@ export default function OwnerInventoryPage() {
   const [variantsError, setVariantsError] = useState('')
   const [variants, setVariants] = useState([])
   const [variantsFor, setVariantsFor] = useState(null)
+  const [variantToDelete, setVariantToDelete] = useState(null)
   const [newVariant, setNewVariant] = useState({ name: '', stock: '0' })
   const [variantsProductStock, setVariantsProductStock] = useState(null)
 
@@ -730,12 +733,18 @@ export default function OwnerInventoryPage() {
     }
   }
 
+  function askDeleteItem() {
+    const targetId = String(editFor?.id || '').trim()
+    if (!targetId) return
+    setDeleteConfirmOpen(true)
+  }
+
   async function onDeleteItem() {
     const targetId = String(editFor?.id || '').trim()
     if (!targetId) return
-    if (!window.confirm(`Delete ${editFor?.name || 'this item'}?`)) return
 
     try {
+      setDeleteConfirmOpen(false)
       setEditError('')
       await api.del(`/api/owner/inventory/items/${targetId}`)
       window.dispatchEvent(new CustomEvent('portal:success-modal', { 
@@ -842,6 +851,11 @@ export default function OwnerInventoryPage() {
       console.error(err)
       setVariantsError(err?.message || 'Unable to delete variant')
     }
+  }
+
+  function requestDeleteVariant(variant) {
+    if (!variant?.id) return
+    setVariantToDelete(variant)
   }
 
   return (
@@ -1198,7 +1212,7 @@ export default function OwnerInventoryPage() {
         footer={
           <>
             {editFor?.id ? (
-              <button type="button" className="portal-modalBtn" onClick={onDeleteItem}>
+              <button type="button" className="portal-modalBtn" onClick={askDeleteItem}>
                 Delete
               </button>
             ) : null}
@@ -1489,6 +1503,15 @@ export default function OwnerInventoryPage() {
         </form>
       </PortalModal>
 
+      <ConfirmDeleteModal
+        open={deleteConfirmOpen}
+        title="Confirm delete"
+        message={`Are you sure you want to delete ${editFor?.name || 'this item'}?`}
+        detail="This action cannot be undone."
+        onClose={() => setDeleteConfirmOpen(false)}
+        onConfirm={onDeleteItem}
+      />
+
       <PortalModal
         open={openCat}
         title="Add Category"
@@ -1600,7 +1623,7 @@ export default function OwnerInventoryPage() {
                         <button type="button" className="portal-ghostBtn" onClick={() => onUpdateVariant(v)}>
                           Save
                         </button>
-                        <button type="button" className="portal-ghostBtn danger" onClick={() => onDeleteVariant(v)}>
+                        <button type="button" className="portal-ghostBtn danger" onClick={() => requestDeleteVariant(v)}>
                           Delete
                         </button>
                       </div>
@@ -1644,6 +1667,19 @@ export default function OwnerInventoryPage() {
           </form>
         </PortalCard>
       </PortalModal>
+
+      <ConfirmDeleteModal
+        open={Boolean(variantToDelete)}
+        title="Confirm delete"
+        message={`Are you sure you want to delete variant "${variantToDelete?.name || variantToDelete?.id || 'this variant'}"?`}
+        detail="This action cannot be undone."
+        onClose={() => setVariantToDelete(null)}
+        onConfirm={async () => {
+          const target = variantToDelete
+          setVariantToDelete(null)
+          await onDeleteVariant(target)
+        }}
+      />
 
       <div className="portal-invKpiGrid">
         <PortalCard
@@ -1732,7 +1768,7 @@ export default function OwnerInventoryPage() {
             aria-selected={tab === 'history'}
             onClick={() => setTab('history')}
           >
-            Stock In/Out History
+            History
           </button>
         </div>
       </div>

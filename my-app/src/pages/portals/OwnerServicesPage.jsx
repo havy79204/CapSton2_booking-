@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import { IconSearch } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
 import '../../styles/service.css'
@@ -540,31 +541,14 @@ export default function OwnerServicesPage() {
         </form>
       </PortalModal>
 
-      <PortalModal
+      <ConfirmDeleteModal
         open={deleteConfirmOpen}
         title="Confirm delete"
-        variant="confirm"
+        message={`Are you sure you want to delete service "${editing?.name || editing?.id || 'this service'}"?`}
+        detail="This action cannot be undone."
         onClose={closeDeleteConfirm}
-        footer={
-          <>
-            <button type="button" className="portal-modalBtn" onClick={closeDeleteConfirm}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="portal-modalBtn"
-              onClick={onDeleteService}
-              style={{ backgroundColor: '#e74c3c' }}
-            >
-              Delete
-            </button>
-          </>
-        }
-      >
-        <p style={{ margin: 0 }}>
-          Are you sure you want to delete service &quot;{editing?.name || editing?.id || 'this service'}&quot;?
-        </p>
-      </PortalModal>
+        onConfirm={onDeleteService}
+      />
 
       <PortalModal
         open={openCategory}

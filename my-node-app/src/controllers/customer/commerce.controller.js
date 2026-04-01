@@ -5,6 +5,14 @@ function getUserIdFromReq(req) {
   return String(req.user?.sub || '').trim()
 }
 
+function getClientIp(req) {
+  const xff = req.headers?.['x-forwarded-for']
+  if (typeof xff === 'string' && xff.trim()) {
+    return xff.split(',')[0].trim()
+  }
+  return String(req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || '').trim()
+}
+
 const getCustomerContext = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
   const data = await commerceService.getCustomerContext(userId)
@@ -66,7 +74,9 @@ const getBookings = asyncHandler(async (req, res) => {
 
 const postBooking = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
-  const data = await commerceService.createBooking(userId, req.body || {})
+  const data = await commerceService.createBooking(userId, req.body || {}, {
+    ipAddress: getClientIp(req),
+  })
   res.status(201).json({ ok: true, data })
 })
 
@@ -132,7 +142,9 @@ const deleteCartItems = asyncHandler(async (req, res) => {
 
 const postCeckout = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
-  const data = await commerceService.checkoutCart(userId, req.body || {})
+  const data = await commerceService.checkoutCart(userId, req.body || {}, {
+    ipAddress: getClientIp(req),
+  })
   res.status(201).json({ ok: true, data })
 })
 
