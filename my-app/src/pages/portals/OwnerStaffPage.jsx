@@ -662,7 +662,9 @@ export default function OwnerStaffPage() {
       })
       setFormErrors({})
       setFormSubmitError('')
-      emitPortalToast({ type: 'success', message: 'Staff added successfully' })
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Staff added successfully', title: 'Completed' } 
+      }))
       close()
     } catch (err) {
       console.error(err)
@@ -692,7 +694,9 @@ export default function OwnerStaffPage() {
     try {
       await api.delete(`/api/owner/staff/${member.id}`)
       await loadStaffMembers()
-      emitPortalToast({ type: 'success', message: 'Employee removal successful.' })
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Employee removal successful.', title: 'Completed' } 
+      }))
       if (options.closeAfterDelete) {
         closeDetail()
       }
@@ -745,7 +749,9 @@ export default function OwnerStaffPage() {
       await api.put(`/api/owner/staff/${selectedStaff.id}`, updatePayload)
 
       await loadStaffMembers()
-  emitPortalToast({ type: 'success', message: 'Staff updated successfully' })
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Staff updated successfully', title: 'Completed' } 
+      }))
       await openDetail({ id: selectedStaff.id }, 'view')
     } catch (err) {
       console.error(err)
