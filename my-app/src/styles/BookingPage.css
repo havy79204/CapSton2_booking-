@@ -292,6 +292,32 @@
   font-weight: 600;
 }
 
+.time-btn.disabled {
+  background: #f0f0f0;
+  border-color: #e0e0e0;
+  color: #bbb;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.time-btn.disabled:hover {
+  background: #f0f0f0;
+  border-color: #e0e0e0;
+}
+
+.time-btn.booked {
+  background: #f5e6e6;
+  border-color: #d4a5a5;
+  color: #a8686b;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.time-btn.booked:hover {
+  background: #f5e6e6;
+  border-color: #d4a5a5;
+}
+
 .mini-summary {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
