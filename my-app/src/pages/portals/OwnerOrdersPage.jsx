@@ -243,8 +243,6 @@ export default function OwnerOrdersPage() {
         items: itemsPayload,
       })
 
-<<<<<<< Updated upstream
-=======
       window.dispatchEvent(new CustomEvent('portal:success-modal', { 
         detail: { message: 'Order updated successfully', title: 'Completed' } 
       }));
@@ -265,7 +263,6 @@ export default function OwnerOrdersPage() {
         }),
       }))
 
->>>>>>> Stashed changes
       setOpenOrderModal(false)
       await loadOrders(orderFilters)
     } catch (err) {
@@ -333,8 +330,6 @@ export default function OwnerOrdersPage() {
       setDeletingOrderId(orderId)
       setOrdersError('')
       await api.del(`/api/owner/retail/orders/${orderId}`)
-<<<<<<< Updated upstream
-=======
       window.dispatchEvent(new CustomEvent('portal:success-modal', { 
         detail: { message: 'Order deleted successfully', title: 'Completed' } 
       }));
@@ -342,7 +337,6 @@ export default function OwnerOrdersPage() {
         ...prev,
         items: (prev.items || []).filter((item) => String(item?.OrderId || item?.Id || item?.id || '') !== orderId),
       }))
->>>>>>> Stashed changes
       if (orderEditing?.OrderId === orderId) {
         setOpenOrderModal(false)
         setOrderEditing(null)

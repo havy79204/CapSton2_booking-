@@ -600,14 +600,14 @@ export default function OwnerAppointmentsPage() {
                 const staff = staffMembers.find(s => String(s.id || s.UserId) === String(appt.staffId));
                 return (
                   <tr key={appt.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.date ? new Date(appt.date).toLocaleDateString() : (appt.BookingTime ? new Date(appt.BookingTime).toLocaleDateString() : '')}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.time}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{staff?.name || staff?.Name || '—'}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.service}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.customer}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.duration}m</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top', textTransform: 'capitalize' }}>{appt.status}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.date ? new Date(appt.date).toLocaleDateString() : (appt.BookingTime ? new Date(appt.BookingTime).toLocaleDateString() : '')}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.time}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{staff?.name || staff?.Name || '—'}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.service}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.customer}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.duration}m</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle', textTransform: 'capitalize' }}>{appt.status}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>
                       <button type="button" className="btn secondary" style={{ marginRight: '6px' }} onClick={(e) => handleEditClick(e, appt)}>Edit</button>
                       <button type="button" className="btn danger" onClick={(e) => handleDeleteClick(e, appt)}>Delete</button>
                     </td>
