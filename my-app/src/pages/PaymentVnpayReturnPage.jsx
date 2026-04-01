@@ -1,4 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
+import { IoCheckmarkCircle, IoCloseCircle } from 'react-icons/io5'
+import '../styles/PaymentVnpayReturnPage.css'
 
 function PaymentVnpayReturnPage() {
   const { search } = useLocation()
@@ -15,28 +17,38 @@ function PaymentVnpayReturnPage() {
   const message = isSuccess
     ? 'Giao dich da duoc xac nhan boi VNPAY.'
     : 'Khong the xac nhan thanh toan. Vui long thu lai hoac lien he ho tro.'
+  const isBooking = /^BKG-/i.test(orderId)
 
   const amount = Number(amountRaw)
-  const normalizedAmount = Number.isFinite(amount) && amount > 0
-    ? (amount / 100).toLocaleString('vi-VN')
-    : ''
+  const normalizedAmount = Number.isFinite(amount) && amount > 0 ? amount.toLocaleString('vi-VN') : ''
 
   return (
-    <div style={{ maxWidth: 680, margin: '40px auto', padding: 16 }}>
-      <h1>{title}</h1>
-      <p>{message}</p>
-      <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, marginTop: 16 }}>
-        <p><strong>Trang thai:</strong> {status || 'unknown'}</p>
-        <p><strong>Ma:</strong> {code || 'N/A'}</p>
-        <p><strong>Ma giao dich:</strong> {transactionId || 'N/A'}</p>
-        <p><strong>Thong tin don:</strong> {orderId || 'N/A'}</p>
-        <p><strong>So tien:</strong> {normalizedAmount ? `${normalizedAmount} VND` : 'N/A'}</p>
+    <section className="payment-return-page">
+      <div className="payment-return-background" />
+      <div className="payment-return-card">
+        <div className={`payment-return-icon ${isSuccess ? 'success' : 'failed'}`}>
+          {isSuccess ? <IoCheckmarkCircle /> : <IoCloseCircle />}
+        </div>
+
+        <h1>{title}</h1>
+        <p className="payment-return-message">{message}</p>
+
+        <div className="payment-return-meta">
+          <div className="payment-return-row"><span>Trang thai</span><strong>{status || 'unknown'}</strong></div>
+          <div className="payment-return-row"><span>Ma</span><strong>{code || 'N/A'}</strong></div>
+          <div className="payment-return-row"><span>Ma giao dich</span><strong>{transactionId || 'N/A'}</strong></div>
+          <div className="payment-return-row"><span>Thong tin don</span><strong>{orderId || 'N/A'}</strong></div>
+          <div className="payment-return-row"><span>So tien</span><strong>{normalizedAmount ? `${normalizedAmount} VND` : 'N/A'}</strong></div>
+        </div>
+
+        <div className="payment-return-actions">
+          {isBooking ? <Link to="/booking">Xem lich hen</Link> : <Link to="/orders">Xem don hang</Link>}
+          {!isSuccess && isBooking ? <Link to="/booking">Thu lai thanh toan</Link> : null}
+          {!isSuccess && !isBooking ? <Link to="/cart">Thu lai thanh toan</Link> : null}
+          <Link to="/">Ve trang chu</Link>
+        </div>
       </div>
-      <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
-        <Link to="/orders">Xem don hang</Link>
-        <Link to="/">Ve trang chu</Link>
-      </div>
-    </div>
+    </section>
   )
 }
 

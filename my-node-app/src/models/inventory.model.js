@@ -27,6 +27,9 @@ function toInventoryHistoryItem(row) {
   const absQty = Math.abs(qty)
   const totalVnd = Number.isFinite(unitCost) ? absQty * unitCost : null
 
+  const ref = String(row.ReferenceId || '').trim()
+  const noteFromRef = ref.startsWith('CustomerOrder:') ? `Khach mua hang - ${ref.slice('CustomerOrder:'.length)}` : (ref ? `Ref: ${ref}` : '')
+
   return {
     id: row.TransactionId,
     date: row.CreatedAt ? formatDmy(row.CreatedAt) : '',
@@ -36,7 +39,7 @@ function toInventoryHistoryItem(row) {
     unitCost,
     totalVnd,
     by: row.ByName || 'System',
-    note: row.Note || (row.ReferenceId ? `Ref: ${row.ReferenceId}` : ''),
+    note: row.Note || noteFromRef,
   }
 }
 
