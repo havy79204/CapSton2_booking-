@@ -260,8 +260,14 @@ export default function OwnerServicesPage() {
 
       if (editing?.id) {
         await api.put(`/api/owner/services/${editing.id}`, payload)
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Service updated successfully', title: 'Completed' } 
+        }));
       } else {
         await api.post('/api/owner/services', payload)
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Service created successfully', title: 'Completed' } 
+        }));
       }
 
       await refresh()

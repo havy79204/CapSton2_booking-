@@ -203,6 +203,9 @@ export default function OwnerCustomerDetailPage() {
 
       if (customer?.id) {
         await api.put(`/api/owner/customers/${customer.id}`, payload)
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Customer updated successfully', title: 'Completed' } 
+        }));
         const updated = await api.get(`/api/owner/customers/${customer.id}`)
         setCustomer(updated)
       }

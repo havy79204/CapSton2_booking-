@@ -243,6 +243,29 @@ export default function OwnerOrdersPage() {
         items: itemsPayload,
       })
 
+<<<<<<< Updated upstream
+=======
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Order updated successfully', title: 'Completed' } 
+      }));
+
+      setOrderReport((prev) => ({
+        ...prev,
+        items: (prev.items || []).map((item) => {
+          const id = item?.Id || item?.id || item?.OrderId || item?.OrderCode
+          if (String(id || '') !== String(orderEditing.OrderId)) return item
+          return {
+            ...item,
+            CustomerName: orderForm.customerName,
+            CustomerPhone: orderForm.customerPhone,
+            CustomerAddress: orderForm.customerAddress,
+            PaymentMethod: orderForm.paymentMethod,
+            Status: orderForm.status,
+          }
+        }),
+      }))
+
+>>>>>>> Stashed changes
       setOpenOrderModal(false)
       await loadOrders(orderFilters)
     } catch (err) {
@@ -285,6 +308,10 @@ export default function OwnerOrdersPage() {
         items: lines,
       })
 
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Order created successfully', title: 'Completed' } 
+      }));
+
       setOpenCreateOrderModal(false)
       resetCreateOrder()
       await loadOrders(orderFilters)
@@ -306,6 +333,16 @@ export default function OwnerOrdersPage() {
       setDeletingOrderId(orderId)
       setOrdersError('')
       await api.del(`/api/owner/retail/orders/${orderId}`)
+<<<<<<< Updated upstream
+=======
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Order deleted successfully', title: 'Completed' } 
+      }));
+      setOrderReport((prev) => ({
+        ...prev,
+        items: (prev.items || []).filter((item) => String(item?.OrderId || item?.Id || item?.id || '') !== orderId),
+      }))
+>>>>>>> Stashed changes
       if (orderEditing?.OrderId === orderId) {
         setOpenOrderModal(false)
         setOrderEditing(null)

@@ -415,7 +415,9 @@ export default function OwnerSchedulePage() {
         label: form.oldLabel,
       })
       await refreshSchedule(weekStart)
-      emitPortalToast({ type: 'success', message: 'Shift deleted successfully.' })
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Shift deleted successfully.', title: 'Completed' } 
+      }))
       close()
     } catch (err) {
       setFormError(`Delete failed: ${err.message || 'System error'}`)
@@ -448,7 +450,9 @@ export default function OwnerSchedulePage() {
         oldLabel: form.oldLabel,
       })
       await refreshSchedule(weekStart)
-      emitPortalToast({ type: 'success', message: form.isEditing ? 'Shift updated successfully.' : 'Shift created successfully.' })
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: form.isEditing ? 'Shift updated successfully.' : 'Shift created successfully.', title: 'Completed' } 
+      }))
       close()
     } catch (err) {
       setFormError(`Operation failed: ${err.message || 'System error'}`)

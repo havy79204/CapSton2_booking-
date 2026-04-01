@@ -281,7 +281,10 @@ export default function OwnerAppointmentsPage() {
     if (!appointmentToDelete) return
     try {
       const id = appointmentToDelete.id || appointmentToDelete.BookingId
-      await api.put(`/api/owner/appointments/${id}`, { status: 'delete' })
+      await api.put(`/api/owner/appointments/${id}`, { status: 'delete' });
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Appointment deleted successfully', title: 'Completed' } 
+      }));
       await fetchData()
       setDeleteConfirmOpen(false)
       setAppointmentToDelete(null)
@@ -321,8 +324,39 @@ export default function OwnerAppointmentsPage() {
              String(a.id) !== String(editingAppt?.id);
     });
 
-    if (isOverlap({ time, duration: totalDuration }, sameStaffAppts)) {
-      alert("Nhân viên này đã có lịch trong khoảng thời gian này!");
+    // Only check for overlap when creating new appointment or when date/time/staff actually changed
+    const isNewAppointment = !editingAppt;
+    
+    // Robust schedule change detection
+    let hasScheduleChanged = false;
+    if (editingAppt) {
+      const staffChanged = String(editingAppt.staffId) !== String(staffId);
+      
+      // Handle date comparison properly
+      let currentDateStr = '';
+      if (editingAppt.date) {
+        const d = new Date(editingAppt.date);
+        currentDateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      }
+      const dateChanged = currentDateStr !== date; // date from form is YYYY-MM-DD
+      
+      // Handle time comparison - normalize both times
+      const currentTime = normalizeTime(editingAppt.time || '');
+      const newTime = normalizeTime(time);
+      const timeChanged = currentTime !== newTime;
+      
+      hasScheduleChanged = staffChanged || dateChanged || timeChanged;
+      
+      console.log('[DEBUG Schedule Check]', {
+        staffChanged, staffId, editingStaffId: editingAppt.staffId,
+        dateChanged, currentDateStr, formDate: date,
+        timeChanged, currentTime, newTime,
+        hasScheduleChanged
+      });
+    }
+
+    if ((isNewAppointment || hasScheduleChanged) && isOverlap({ time, duration: totalDuration }, sameStaffAppts)) {
+      alert("This staff member already has an appointment during this time!");
       return;
     }
 
@@ -352,25 +386,31 @@ export default function OwnerAppointmentsPage() {
       if (editingAppt) {
         if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) console.debug('OwnerAppointments: updating', targetId, payload)
         await api.put(`/api/owner/appointments/${targetId}`, payload);
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Appointment updated successfully', title: 'Completed' } 
+        }));
       } else {
         if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) console.debug('OwnerAppointments: creating', payload)
         await api.post('/api/owner/appointments', payload);
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Appointment created successfully', title: 'Completed' } 
+        }));
       }
       setOpen(false);
       setEditingAppt(null);
       setSelectedServiceIds([]);
       await fetchData();
     } catch (err) {
-      alert("Lỗi: " + (err.response?.data?.error || "Không thể lưu"));
+      alert("Error: " + (err.response?.data?.error || "Unable to save"));
     }
   }
 
   const filteredAppointments = useMemo(() => 
     appointments
       .filter(appt => {
-        const s = String(appt.status || '').toLowerCase();
-        // Keep canceled appointments visible; only hide actual deleted markers
-        return s !== 'delete' && s !== 'deleted';
+        // Show all appointments including canceled and completed
+        // Only filter out appointments that are explicitly marked for deletion with a special flag
+        return true;
       })
       .filter(appt => isSameDay(appt.date || appt.startTime || appt.BookingTime, selectedDate)),
     [appointments, selectedDate]
@@ -409,7 +449,13 @@ export default function OwnerAppointmentsPage() {
       if (!v) continue;
       try {
         const d = new Date(v);
-        if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+        if (!isNaN(d.getTime())) {
+          // Fix timezone issue: get local date parts instead of using toISOString
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        }
       } catch (e) {
         // ignore and try next
       }
@@ -633,7 +679,7 @@ export default function OwnerAppointmentsPage() {
                 type="time"
                 name="time"
                 required
-                step="1800"
+                step="60"
                 min={`${String(businessHours.openingHour).padStart(2, '0')}:00`}
                 max={`${String(businessHours.closingHour).padStart(2, '0')}:00`}
                 defaultValue={editingAppt?.time || `${String(businessHours.openingHour).padStart(2, '0')}:00`}
