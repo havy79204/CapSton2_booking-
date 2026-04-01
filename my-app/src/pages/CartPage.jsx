@@ -26,6 +26,7 @@ const CartPage = () => {
   const [giftCode, setGiftCode] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cod')
   const [selectedMap, setSelectedMap] = useState({})
+  const [orderSuccess, setOrderSuccess] = useState(null)
 
   const cartItems = useMemo(() => (Array.isArray(cart?.Items) ? cart.Items : []), [cart])
   const defaultAddress = cart?.DefaultAddress || null
@@ -109,9 +110,8 @@ const CartPage = () => {
         giftCode,
       })
 
-      alert(`Order ${result?.OrderId || ''} created successfully!`)
+      setOrderSuccess(result?.OrderId || '')
       setSelectedMap({})
-      navigate('/orders')
     } catch (err) {
       alert(err?.message || 'Checkout failed')
     }
@@ -123,6 +123,26 @@ const CartPage = () => {
 
   if (error) {
     return <div className="error">{error}</div>
+  }
+
+  if (orderSuccess) {
+    return (
+      <section className="cart-page">
+        <div className="cart-container">
+          <div className="order-success-card">
+            <div className="success-icon">
+              <IoCartOutline />
+            </div>
+            <h2>Order #{orderSuccess} created successfully!</h2>
+            <p>Thank you for your purchase. Your order has been placed.</p>
+            <div className="success-buttons">
+              <button className="home-btn" onClick={() => navigate('/')}>Go to Home</button>
+              <button className="orders-btn" onClick={() => navigate('/orders')}>View Orders</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    )
   }
 
   return (
