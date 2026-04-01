@@ -178,8 +178,8 @@
 
 .history-items-table th,
 .history-items-table td {
-  padding: 0.5rem 0.55rem;
-  font-size: 0.85rem;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.86rem;
   border-bottom: 1px solid #efe8e1;
 }
 
@@ -194,9 +194,10 @@
   vertical-align: middle;
 }
 
+/* Column layout: Product | Qty | Price | Discount | Total */
 .history-items-table th:nth-child(1),
 .history-items-table td:nth-child(1) {
-  width: 50%;
+  width: 52%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -204,14 +205,16 @@
 
 .history-items-table th:nth-child(2),
 .history-items-table td:nth-child(2) {
-  width: 10%;
+  width: 8%;
   text-align: center;
+  padding-left: 0.25rem;
 }
 
 .history-items-table th:nth-child(3),
 .history-items-table td:nth-child(3) {
   width: 14%;
   text-align: right;
+  padding-right: 0.5rem;
   white-space: nowrap;
 }
 
@@ -219,76 +222,71 @@
 .history-items-table td:nth-child(4) {
   width: 12%;
   text-align: right;
-  white-space: nowrap;
+  padding-right: 0.5rem;
+  color: #2c2c2c;
 }
 
 .history-items-table th:nth-child(5),
 .history-items-table td:nth-child(5) {
   width: 14%;
   text-align: right;
+  padding-right: 0.5rem;
   font-weight: 700;
   white-space: nowrap;
 }
 
-.history-items-table tbody tr:last-child td {
-  border-bottom: none;
+/* Ensure numbers don't wrap and have spacing to avoid overlap */
+.history-items-table td {
+  white-space: nowrap;
 }
 
+/* Fallback selectors for other table class names used elsewhere */
 .order-items-table th:nth-child(1),
 .order-items-table td:nth-child(1) {
-  width: 50%;
+  width: 52%;
 }
-
 .order-items-table th:nth-child(2),
 .order-items-table td:nth-child(2) {
-  width: 10%;
+  width: 8%;
   text-align: center;
 }
-
 .order-items-table th:nth-child(3),
 .order-items-table td:nth-child(3) {
   width: 14%;
   text-align: right;
 }
-
 .order-items-table th:nth-child(4),
 .order-items-table td:nth-child(4) {
   width: 12%;
   text-align: right;
 }
-
 .order-items-table th:nth-child(5),
 .order-items-table td:nth-child(5) {
   width: 14%;
   text-align: right;
-  font-weight: 700;
 }
 
 .booking-items-table th:nth-child(1),
 .booking-items-table td:nth-child(1) {
-  width: 56%;
+  width: 60%;
 }
-
 .booking-items-table th:nth-child(2),
 .booking-items-table td:nth-child(2) {
-  width: 18%;
+  width: 12%;
   text-align: center;
 }
-
 .booking-items-table th:nth-child(3),
 .booking-items-table td:nth-child(3) {
-  width: 26%;
+  width: 28%;
   text-align: right;
-  font-weight: 700;
 }
-
 .history-item-row {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) auto auto;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.84rem;
-}
+  width: 48%;
 
 .history-item-row strong {
   overflow: hidden;
@@ -296,20 +294,30 @@
   white-space: nowrap;
 }
 
-.history-actions {
+  width: 16%;
   display: flex;
   justify-content: flex-end;
 }
 
 .history-cancel-btn {
+  width: 18%;
+  text-align: right;
+  font-weight: 600;
   border: none;
   border-radius: 8px;
   background: #d32f2f;
   color: white;
+  width: 18%;
   padding: 0.45rem 0.7rem;
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
+.history-items-table tfoot td {
+  border-top: 1px dashed #dfd4ca;
+  border-bottom: none;
+  background: #faf7f4;
+  font-size: 0.83rem;
+}
 }
 
 .history-cancel-btn:hover {
@@ -372,31 +380,6 @@
   .history-items-table th,
   .history-items-table td {
     font-size: 0.8rem;
-    padding: 0.42rem 0.28rem;
-  }
-
-  .history-items-table th:nth-child(1),
-  .history-items-table td:nth-child(1) {
-    width: 42%;
-  }
-
-  .history-items-table th:nth-child(2),
-  .history-items-table td:nth-child(2) {
-    width: 10%;
-  }
-
-  .history-items-table th:nth-child(3),
-  .history-items-table td:nth-child(3) {
-    width: 16%;
-  }
-
-  .history-items-table th:nth-child(4),
-  .history-items-table td:nth-child(4) {
-    width: 14%;
-  }
-
-  .history-items-table th:nth-child(5),
-  .history-items-table td:nth-child(5) {
-    width: 18%;
+    padding: 0.4rem 0.3rem;
   }
 }

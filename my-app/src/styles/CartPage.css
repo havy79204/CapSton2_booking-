@@ -284,6 +284,12 @@
   cursor: pointer;
 }
 
+.gift-feedback {
+  margin: 0.5rem 0 0;
+  font-size: 0.82rem;
+  color: #7a5d42;
+}
+
 .sale-row {
   margin-top: 0.65rem;
   display: grid;

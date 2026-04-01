@@ -23,6 +23,10 @@ function isCompleted(status) {
   return value.includes('complete') || value.includes('confirm') || value.includes('done')
 }
 
+function fmtMoney(value) {
+  return Number(value || 0).toFixed(2)
+}
+
 const BookingHistoryPage = () => {
   const navigate = useNavigate()
   const { bookings, loading, error, cancelBooking } = useCustomerBookings(100)
@@ -138,8 +142,12 @@ const BookingHistoryPage = () => {
                       <p className="history-kv-value">{Number(booking.TotalDuration || 0)} mins</p>
                     </div>
                     <div className="history-kv">
+                      <p className="history-kv-label">Discount</p>
+                      <p className="history-kv-value">-${fmtMoney(booking.DiscountAmount || 0)}</p>
+                    </div>
+                    <div className="history-kv">
                       <p className="history-kv-label">Total Price</p>
-                      <p className="history-kv-value">${Number(booking.TotalPrice || 0).toFixed(2)}</p>
+                      <p className="history-kv-value">${fmtMoney(booking.TotalPrice || 0)}</p>
                     </div>
                   </div>
 
@@ -150,23 +158,32 @@ const BookingHistoryPage = () => {
                           <th>Service</th>
                           <th>Duration</th>
                           <th>Price</th>
+                          <th>Discount</th>
                         </tr>
                       </thead>
                       <tbody>
                         {services.length === 0 ? (
                           <tr>
-                            <td colSpan={3}>No service detail</td>
+                            <td colSpan={4}>No service detail</td>
                           </tr>
                         ) : (
                           services.map((service) => (
                             <tr key={service.BookingServiceId || `${booking.BookingId}-${service.ServiceId}`}>
                               <td>{service.ServiceName || service.ServiceId}</td>
                               <td>{Number(service.DurationMinutes || 0)} mins</td>
-                              <td>${Number(service.Price || 0).toFixed(2)}</td>
+                              <td>${fmtMoney(service.Price || 0)}</td>
+                              <td>$0.00</td>
                             </tr>
                           ))
                         )}
                       </tbody>
+                      <tfoot>
+                        <tr>
+                          <td colSpan={2}><strong>Subtotal</strong></td>
+                          <td><strong>${fmtMoney(booking.Subtotal || booking.TotalPrice || 0)}</strong></td>
+                          <td><strong>-${fmtMoney(booking.DiscountAmount || 0)}</strong></td>
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
 
