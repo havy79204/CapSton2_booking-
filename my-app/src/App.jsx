@@ -29,6 +29,7 @@ import NotificationPage from './pages/NotificationPage.jsx'
 import OrderHistoryPage from './pages/OrderHistoryPage.jsx'
 import ServiceCatalogPage from './pages/ServiceCatalogPage.jsx'
 import ProductCatalogPage from './pages/ProductCatalogPage.jsx'
+import PaymentVnpayReturnPage from './pages/PaymentVnpayReturnPage.jsx'
 import './App.css'
 
 import { getToken } from './lib/auth.js'
@@ -55,6 +56,7 @@ function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/payment/vnpay-return" element={<PaymentVnpayReturnPage />} />
 
       <Route
         path="/portals/owner/services/:id"
