@@ -65,6 +65,7 @@ export default function OwnerServicesPage() {
     images: [],
   })
   const [selectedImageIdx, setSelectedImageIdx] = useState(-1)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
   const imageInputRef = useRef(null)
 
@@ -79,6 +80,7 @@ export default function OwnerServicesPage() {
     setOpen(false)
     setEditing(null)
     setError('')
+    setDeleteConfirmOpen(false)
   }
 
   function openCreate() {
@@ -221,12 +223,22 @@ export default function OwnerServicesPage() {
     }
   }
 
+  function openDeleteConfirm() {
+    const serviceId = String(editing?.id || '').trim()
+    if (!serviceId) return
+    setDeleteConfirmOpen(true)
+  }
+
+  function closeDeleteConfirm() {
+    setDeleteConfirmOpen(false)
+  }
+
   async function onDeleteService() {
     const serviceId = String(editing?.id || '').trim()
     if (!serviceId) return
-    if (!window.confirm(`Delete service ${editing?.name || serviceId}?`)) return
 
     try {
+      setDeleteConfirmOpen(false)
       setError('')
       await api.del(`/api/owner/services/${serviceId}`)
       await refresh()
@@ -373,7 +385,7 @@ export default function OwnerServicesPage() {
               </button>
             ) : null}
             {editing?.id ? (
-              <button type="button" className="portal-modalBtn" onClick={onDeleteService}>
+              <button type="button" className="portal-modalBtn" onClick={openDeleteConfirm}>
                 Delete
               </button>
             ) : null}
@@ -519,6 +531,32 @@ export default function OwnerServicesPage() {
             </div>
           </PortalCard>
         </form>
+      </PortalModal>
+
+      <PortalModal
+        open={deleteConfirmOpen}
+        title="Confirm delete"
+        variant="confirm"
+        onClose={closeDeleteConfirm}
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={closeDeleteConfirm}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="portal-modalBtn"
+              onClick={onDeleteService}
+              style={{ backgroundColor: '#e74c3c' }}
+            >
+              Delete
+            </button>
+          </>
+        }
+      >
+        <p style={{ margin: 0 }}>
+          Are you sure you want to delete service &quot;{editing?.name || editing?.id || 'this service'}&quot;?
+        </p>
       </PortalModal>
 
       <PortalModal
