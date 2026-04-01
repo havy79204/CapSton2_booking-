@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import { api } from '../../lib/api.js'
 import '../../styles/orders.css'
 import '../../styles/global-buttons.css'
@@ -80,6 +81,8 @@ export default function OwnerOrdersPage() {
   })
   const [orderSaving, setOrderSaving] = useState(false)
   const [deletingOrderId, setDeletingOrderId] = useState('')
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [orderToDelete, setOrderToDelete] = useState(null)
 
   // Editable items when updating an order
   const [editItems, setEditItems] = useState([])
@@ -325,31 +328,28 @@ export default function OwnerOrdersPage() {
     }
   }
 
+  function askDeleteOrder(order) {
+    if (!order) return
+    setOrderToDelete(order)
+    setDeleteConfirmOpen(true)
+  }
+
   async function onDeleteOrder(order) {
     const orderId = String(order?.OrderId || '').trim()
     if (!orderId) return
-    if (!window.confirm(`Delete order ${order.OrderCode || orderId}?`)) return
 
     try {
       setDeletingOrderId(orderId)
+      setDeleteConfirmOpen(false)
       setOrdersError('')
       await api.del(`/api/owner/retail/orders/${orderId}`)
-<<<<<<< HEAD
-=======
-<<<<<<< Updated upstream
-=======
       window.dispatchEvent(new CustomEvent('portal:success-modal', { 
         detail: { message: 'Order deleted successfully', title: 'Completed' } 
       }));
->>>>>>> origin/ThucAnh_fix_clean
       setOrderReport((prev) => ({
         ...prev,
         items: (prev.items || []).filter((item) => String(item?.OrderId || item?.Id || item?.id || '') !== orderId),
       }))
-<<<<<<< HEAD
-=======
->>>>>>> Stashed changes
->>>>>>> origin/ThucAnh_fix_clean
       if (orderEditing?.OrderId === orderId) {
         setOpenOrderModal(false)
         setOrderEditing(null)
@@ -361,6 +361,7 @@ export default function OwnerOrdersPage() {
       setOrdersError(err?.message || 'Unable to delete order')
     } finally {
       setDeletingOrderId('')
+      setOrderToDelete(null)
     }
   }
 
@@ -531,7 +532,7 @@ export default function OwnerOrdersPage() {
            <button
               type="button"
               className="portal-modalBtn"
-              onClick={() => onDeleteOrder(orderEditing)}
+              onClick={() => askDeleteOrder(orderEditing)}
               disabled={!orderEditing?.OrderId || deletingOrderId === orderEditing?.OrderId || orderSaving}
             >
               {deletingOrderId === orderEditing?.OrderId ? 'Deleting...' : 'Delete'}
@@ -660,6 +661,20 @@ export default function OwnerOrdersPage() {
           </PortalCard>
         </form>
       </PortalModal>
+
+      <ConfirmDeleteModal
+        open={deleteConfirmOpen}
+        title="Confirm delete"
+        message={`Are you sure you want to delete order "${orderToDelete?.OrderCode || orderToDelete?.OrderId || 'this order'}"?`}
+        detail="This action cannot be undone."
+        onClose={() => {
+          if (deletingOrderId) return
+          setDeleteConfirmOpen(false)
+          setOrderToDelete(null)
+        }}
+        onConfirm={() => onDeleteOrder(orderToDelete)}
+        confirming={Boolean(deletingOrderId)}
+      />
 
       <PortalModal
         open={openCreateOrderModal}

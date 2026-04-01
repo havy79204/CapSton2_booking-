@@ -139,6 +139,11 @@ const getStats = asyncHandler(async (req, res) => {
   res.json({ ok: true, data })
 })
 
+const getSalonContact = asyncHandler(async (req, res) => {
+  const data = await homepageService.getSalonContactInfo()
+  res.json({ ok: true, data })
+})
+
 /**
  * GET /api/homepage/recommendations
  * Query params: type=products|services, limit
@@ -165,5 +170,6 @@ module.exports = {
   getReviews,
   getMyReviews,
   getStats
-  , getRecommendations
+  , getRecommendations,
+  getSalonContact,
 }

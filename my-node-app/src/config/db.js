@@ -11,9 +11,6 @@ function getPool() {
     const config = {
       server: env.db.server,
       database: env.db.database,
-      
-      requestTimeout: 30000, // Tăng từ default 15s lên 30s
-      connectionTimeout: 30000,
 
       // If using SQL Authentication
       ...(env.db.user && {
@@ -34,12 +31,6 @@ function getPool() {
       },
 
       ...(hasExplicitPort && { port: parsedPort }),
-
-      pool: {
-        min: 2,
-        max: 20,
-        idleTimeoutMillis: 30000,
-      },
     }
 
     // advanced TLS options (if any)

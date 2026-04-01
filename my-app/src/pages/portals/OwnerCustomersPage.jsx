@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import '../../styles/customers.css'
 import '../../styles/global-buttons.css'
 import {
@@ -347,34 +348,15 @@ export default function OwnerCustomersPage() {
         </form>
       </PortalModal>
 
-      <PortalModal
+      <ConfirmDeleteModal
         open={deleteConfirmOpen}
-        title="Delete Customer"
+        title="Confirm delete"
+        message={`Are you sure you want to delete customer "${customerToDelete?.name || customerToDelete?.email || 'this customer'}"?`}
+        detail="This action cannot be undone."
         onClose={cancelDelete}
-        footer={
-          <>
-            <button type="button" className="portal-modalBtn" onClick={cancelDelete}>
-              Cancel
-            </button>
-            <button 
-              type="button" 
-              className="portal-modalBtn portal-modalBtnPrimary" 
-              onClick={confirmDelete}
-              disabled={deletingId === (customerToDelete?.id || customerToDelete?.email)}
-              style={{ backgroundColor: deletingId === (customerToDelete?.id || customerToDelete?.email) ? '#ccc' : '#e74c3c' }}
-            >
-              {deletingId === (customerToDelete?.id || customerToDelete?.email) ? 'Deleting...' : 'Delete'}
-            </button>
-          </>
-        }
-      >
-        <p style={{ fontSize: '15px', color: '#1f2937', marginBottom: '12px', lineHeight: '1.5', fontWeight: '500' }}>
-          Are you sure you want to delete <strong>{customerToDelete?.name}</strong>?
-        </p>
-        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '0' }}>
-          This action cannot be undone.
-        </p>
-      </PortalModal>
+        onConfirm={confirmDelete}
+        confirming={deletingId === (customerToDelete?.id || customerToDelete?.email)}
+      />
 
       <div className="portal-customer">
       <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', marginBottom: '12px', flexWrap: 'wrap' }}>

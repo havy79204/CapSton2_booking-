@@ -687,7 +687,6 @@ export default function OwnerDashboardPage() {
   const services = dashboard?.revenueByService || []
   const products = dashboard?.productPerformance || []
   const heatmap = dashboard?.bookingHeatmap || []
-  const insights = dashboard?.insights || []
   const actions = dashboard?.actions || []
 
   const revenuePeak = chartRows.reduce((best, row) => {
@@ -724,7 +723,6 @@ export default function OwnerDashboardPage() {
 
   return (
     <div className="dashboard-page">
-    
       <div className="portal-grid4 dashboard-kpiGrid">
         {cards.map((card) => (
           <PortalCard
@@ -745,7 +743,7 @@ export default function OwnerDashboardPage() {
         ))}
       </div>
 
- <div className="dashboard-filterRow">
+      <div className="dashboard-filterRow">
         <div className="dashboard-filtersCombined">
           <div className="dashboard-actions">
             {actions.map((a) => (

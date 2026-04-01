@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import '../../styles/schedule.css'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import {
   IconCalendar,
   IconCevronLeft,
@@ -627,25 +628,14 @@ export default function OwnerSchedulePage() {
         </form>
       </PortalModal>
 
-      <PortalModal
+      <ConfirmDeleteModal
         open={deleteConfirmOpen}
         title="Confirm delete"
-        variant="confirm"
+        message="Are you sure you want to delete this shift?"
+        detail="This action cannot be undone."
         onClose={() => setDeleteConfirmOpen(false)}
-        modalClassName="schedule-deleteConfirmModal"
-        footer={
-          <>
-            <button type="button" className="portal-modalBtn" onClick={() => setDeleteConfirmOpen(false)}>
-              Cancel
-            </button>
-            <button type="button" className="portal-modalBtn danger" onClick={onDeleteShift}>
-              Delete
-            </button>
-          </>
-        }
-      >
-        <p style={{ margin: 0 }}>Are you sure you want to delete this shift?</p>
-      </PortalModal>
+        onConfirm={onDeleteShift}
+      />
 
       {/* --- KPI SECTION --- */}
       <div className="schedule-page portal-grid3" style={{ marginTop: 18 }}>

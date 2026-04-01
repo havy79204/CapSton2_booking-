@@ -445,12 +445,6 @@ export default function OwnerSettingsPage() {
             <input className="portal-input" value={salon.address} onChange={(e) => setSalon((p) => ({ ...p, address: e.target.value }))} />
           </label>
 
-          <div className="portal-formGrid2">
-            <label className="portal-field">
-              <span className="portal-label">Tax code</span>
-              <input className="portal-input" value={salon.taxCode} onChange={(e) => setSalon((p) => ({ ...p, taxCode: e.target.value }))} />
-            </label>
-          </div>
 
           <label className="portal-field portal-fieldFull">
             <span className="portal-label">About salon</span>

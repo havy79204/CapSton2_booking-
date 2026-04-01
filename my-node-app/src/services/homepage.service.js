@@ -54,6 +54,36 @@ async function tableExists(tableName) {
   return Boolean(res.recordset?.length)
 }
 
+async function getSalonContactInfo() {
+  const settingsRes = await query(
+    `SELECT SettingKey, SettingValue
+     FROM SystemSettings
+     WHERE SettingKey IN ('SalonName', 'SalonPhone', 'SalonEmail', 'SalonAddress', 'SalonWebsite')`,
+  ).catch(() => ({ recordset: [] }))
+
+  const settingsMap = {}
+  for (const row of settingsRes.recordset || []) {
+    settingsMap[String(row.SettingKey || '').trim()] = String(row.SettingValue || '').trim()
+  }
+
+  const fallbackUser = await query(
+    `SELECT TOP 1 Name, Email, Phone
+     FROM Users
+     WHERE LOWER(LTRIM(RTRIM(ISNULL(RoleKey, '')))) IN ('owner', 'admin', '1')
+     ORDER BY CreatedAt DESC`,
+  ).catch(() => ({ recordset: [] }))
+
+  const owner = fallbackUser.recordset?.[0] || {}
+
+  return {
+    name: settingsMap.SalonName || String(owner.Name || '').trim() || 'NIOM&CE',
+    phone: settingsMap.SalonPhone || String(owner.Phone || '').trim() || '',
+    email: settingsMap.SalonEmail || String(owner.Email || '').trim() || '',
+    address: settingsMap.SalonAddress || '',
+    website: settingsMap.SalonWebsite || '',
+  }
+}
+
 /**
  * Get services list with categories
  */
@@ -670,6 +700,7 @@ module.exports = {
   createProductReview,
   getTopReviews,
   getUserReviews,
+  getSalonContactInfo,
   getSalonStats,
   getHomepageData
 }

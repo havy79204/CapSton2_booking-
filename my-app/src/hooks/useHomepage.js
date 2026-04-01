@@ -321,3 +321,29 @@ export function useSalonStats() {
 
   return { stats, loading, error }
 }
+
+export function useSalonContact() {
+  const [contact, setContact] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    async function fetchContact() {
+      try {
+        setLoading(true)
+        setError(null)
+        const result = await api.get('/api/homepage/contact')
+        setContact(result || null)
+      } catch (err) {
+        console.error('Error fetching salon contact:', err)
+        setError(err.message || 'Failed to fetch salon contact')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchContact()
+  }, [])
+
+  return { contact, loading, error }
+}

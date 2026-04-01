@@ -1071,12 +1071,18 @@ function normalizeOrderStatusInput(value) {
   const raw = String(value || '').trim().toLowerCase()
   if (!raw) return null
   if (raw === 'c' || raw === 'pending') return 'Pending'
+  if (raw === 'confirmed' || raw === 'confirm') return 'Confirmed'
   if (raw === 'processing') return 'Processing'
   if (raw === 'shipping' || raw === 'shipped' || raw === 'delivering' || raw === 'in transit' || raw === 'dang giao hang') return 'Shipping'
   if (raw === 'completed' || raw === 'complete' || raw === 'delivered') return 'Completed'
   if (raw === 'cancelled' || raw === 'canceled') return 'Cancelled'
   if (raw === 'failed') return 'Failed'
   return null
+}
+
+function hasStockDeductedForStatus(statusInput) {
+  const normalized = normalizeOrderStatusInput(statusInput)
+  return normalized === 'Processing' || normalized === 'Shipping' || normalized === 'Completed'
 }
 
 function parseDateOnly(value) {
@@ -1290,8 +1296,12 @@ async function syncRetailInventoryByProducts(productIds) {
   }
 }
 
-async function decreaseStockForOrder(orderId) {
+async function decreaseStockForOrder(orderId, options = {}) {
   const items = await getOrderItems(orderId)
+  const schema = await getSchemaInfo()
+
+  const orderRefRaw = String(options?.referenceId || orderId || '').trim()
+  const orderRef = orderRefRaw ? `CustomerOrder:${orderRefRaw}` : null
   for (const item of items) {
     const stockRes = await query(
       'SELECT TOP 1 Stock FROM Products WHERE ProductId = @productId',
@@ -1306,15 +1316,62 @@ async function decreaseStockForOrder(orderId) {
   }
 
   for (const item of items) {
+    const productId = String(item.ProductId || '').trim()
+    const quantity = Number(item.Quantity || 0)
     await query(
       `UPDATE Products
        SET Stock = CASE WHEN ISNULL(Stock, 0) >= @quantity THEN ISNULL(Stock, 0) - @quantity ELSE 0 END
        WHERE ProductId = @productId`,
       {
-        productId: item.ProductId,
-        quantity: Number(item.Quantity || 0),
+        productId,
+        quantity,
       }
     )
+
+    if (schema.inventoryHasCategoryId && productId && quantity > 0) {
+      const shadowId = retailShadowId(productId)
+      try {
+        await query(
+          `IF NOT EXISTS (SELECT 1 FROM InventoryItems WHERE InventoryItemId = @shadowId)
+           BEGIN
+             INSERT INTO InventoryItems (InventoryItemId, ProductId, CategoryId, Name, Unit, ConversionRate, Quantity, ReorderLevel, PriceVnd, ItemGroup)
+             SELECT @shadowId, p.ProductId, p.CategoryId, p.Name, 'sp', 1, COALESCE(p.Stock, 0), 0, NULL, 'retail'
+             FROM Products p
+             WHERE p.ProductId = @productId;
+           END
+
+           UPDATE InventoryItems
+           SET
+             ProductId = COALESCE(@productId, ProductId),
+             CategoryId = COALESCE((SELECT TOP 1 CategoryId FROM Products WHERE ProductId = @productId), CategoryId),
+             Quantity = (SELECT COALESCE(Stock, 0) FROM Products WHERE ProductId = @productId),
+             ItemGroup = 'retail'
+           WHERE InventoryItemId = @shadowId;
+
+           INSERT INTO InventoryTransactions (
+             TransactionId, InventoryItemId, Type, Quantity, ReferenceId, CreatedAt,
+             PerformedByRole, PerformedById, PerformedByName, PerformedByEmail
+           )
+           VALUES (
+             @txId, @shadowId, 'OUT', @quantity, @referenceId, GETDATE(),
+             @performedByRole, @performedById, @performedByName, @performedByEmail
+           );`,
+          {
+            shadowId,
+            productId,
+            txId: newId(),
+            quantity,
+            referenceId: orderRef,
+            performedByRole: options?.actor?.roleKey ?? null,
+            performedById: options?.actor?.userId ?? null,
+            performedByName: options?.actor?.name ?? null,
+            performedByEmail: options?.actor?.email ?? null,
+          }
+        )
+      } catch (err) {
+        console.warn('[retail] Unable to write inventory transaction for order stock-out:', err?.message || err)
+      }
+    }
   }
 
   await syncRetailInventoryByProducts(items.map((x) => x.ProductId))
@@ -1662,19 +1719,11 @@ async function createRetailOrder(payload = {}, { actor } = {}) {
         productName: item.productName,
       }
     )
-
-    await query(
-      `UPDATE Products
-       SET Stock = CASE WHEN ISNULL(Stock, 0) >= @quantity THEN ISNULL(Stock, 0) - @quantity ELSE 0 END
-       WHERE ProductId = @productId`,
-      {
-        productId: item.productId,
-        quantity: item.quantity,
-      }
-    )
   }
 
-  await syncRetailInventoryByProducts(resolvedItems.map((item) => item.productId))
+  if (hasStockDeductedForStatus(status)) {
+    await decreaseStockForOrder(orderId, { actor, referenceId: orderId })
+  }
 
   if (actor?.userId) {
     try {
@@ -1697,7 +1746,7 @@ async function createRetailOrder(payload = {}, { actor } = {}) {
   return getRetailOrder(orderId)
 }
 
-async function updateRetailOrder(orderIdInput, payload = {}) {
+async function updateRetailOrder(orderIdInput, payload = {}, { actor } = {}) {
   const orderId = String(orderIdInput || '').trim()
   if (!orderId) {
     const err = new Error('Missing orderId')
@@ -1727,12 +1776,15 @@ async function updateRetailOrder(orderIdInput, payload = {}) {
   }
 
   if (nextStatus && nextStatus !== current.Status) {
-    if (nextStatus === 'Cancelled' && current.Status !== 'Cancelled') {
-      await restoreStockForOrder(orderId)
+    const hadStockDeducted = hasStockDeductedForStatus(current.Status)
+    const shouldDeductStock = hasStockDeductedForStatus(nextStatus)
+
+    if (!hadStockDeducted && shouldDeductStock) {
+      await decreaseStockForOrder(orderId, { actor, referenceId: orderId })
     }
 
-    if (current.Status === 'Cancelled' && nextStatus !== 'Cancelled') {
-      await decreaseStockForOrder(orderId)
+    if (hadStockDeducted && !shouldDeductStock) {
+      await restoreStockForOrder(orderId)
     }
 
     if (nextStatus === 'Completed') {
@@ -1795,22 +1847,24 @@ async function updateRetailOrder(orderIdInput, payload = {}) {
   }
 
   if (userId && paymentMethod !== undefined) {
-    const normalizedPayment = String(paymentMethod || '').trim().toUpperCase()
-    const paymentEvent = normalizedPayment === 'COD' ? 'payment_pending' : 'payment_success'
-    try {
-      await notifyCustomerEvent({
-        userId,
-        event: paymentEvent,
-        orderId,
-        payload: { orderId },
-      })
+    // Do not emit payment_success from order update. Payment success must come from gateway callback only.
+    const paymentEvent = 'payment_pending'
+    if (paymentEvent) {
+      try {
+        await notifyCustomerEvent({
+          userId,
+          event: paymentEvent,
+          orderId,
+          payload: { orderId },
+        })
 
-      await notifyOwnerEvent({
-        event: paymentEvent,
-        orderId,
-      })
-    } catch (err) {
-      console.warn('[retail] Update payment notify/email failed:', err?.message || err)
+        await notifyOwnerEvent({
+          event: paymentEvent,
+          orderId,
+        })
+      } catch (err) {
+        console.warn('[retail] Update payment notify/email failed:', err?.message || err)
+      }
     }
   }
 
@@ -1840,7 +1894,7 @@ async function deleteRetailOrder(orderIdInput) {
   }
 
   const normalizedStatus = normalizeOrderStatusInput(current.Status) || 'Pending'
-  if (normalizedStatus !== 'Cancelled') {
+  if (hasStockDeductedForStatus(normalizedStatus)) {
     await restoreStockForOrder(orderId)
   }
 

@@ -158,7 +158,7 @@ const putRetailOrder = asyncHandler(async (req, res) => {
     return
   }
 
-  const data = await retailService.updateRetailOrder(orderId, req.body || {})
+  const data = await retailService.updateRetailOrder(orderId, req.body || {}, { actor: getActor(req) })
   res.json({ ok: true, data })
 })
 

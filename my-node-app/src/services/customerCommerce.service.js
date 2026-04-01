@@ -1,5 +1,8 @@
 const { query, newId } = require('../config/query')
+const crypto = require('crypto')
+const { env } = require('../config/config')
 const { getSettingsMap } = require('./settings.service')
+const { upsertPaymentRecord, resolveInvoiceIdForPayment } = require('./paymentPersistence.service')
 const { notifyCustomerEvent, notifyOwnerEvent, scheduleBookingReminders } = require('./notifications.service')
 
 let _ordersChannelColumnPromise = null
@@ -196,7 +199,7 @@ function derivePaymentStatus(orderStatus, paymentMethod) {
   const method = String(paymentMethod || '').trim().toLowerCase()
 
   if (status === 'cancelled' || status === 'canceled' || status === 'failed') return 'Failed'
-  if (status === 'completed' || status === 'delivered') return 'Paid'
+  if (status === 'completed' || status === 'delivered' || status === 'paid' || status === 'confirmed') return 'Paid'
   if (method === 'cod' || method === 'store') return 'Pay On Delivery'
   return 'C Payment'
 }
@@ -213,6 +216,196 @@ function calcOrderDiscountAmount(row) {
   if (giftApplied > 0) return giftApplied
   const diff = subtotal - total
   return diff > 0 ? diff : 0
+}
+
+function calcPromotionDiscountAmount(subtotalInput, promotion) {
+  const subtotal = Math.max(0, Number(subtotalInput || 0))
+  if (subtotal <= 0 || !promotion) return 0
+
+  const value = Number(promotion.value || 0)
+  if (!Number.isFinite(value) || value <= 0) return 0
+
+  const type = String(promotion.discountType || '').trim().toLowerCase()
+  if (type === 'percentage') {
+    return Math.max(0, Math.min(subtotal, (subtotal * Math.min(100, value)) / 100))
+  }
+
+  return Math.max(0, Math.min(subtotal, value))
+}
+
+function calcLegacyCartDiscountAmount(subtotalInput) {
+  const subtotal = Math.max(0, Number(subtotalInput || 0))
+  return subtotal >= 30 ? 5 : 0
+}
+
+async function countOrderPromotionUsageByUser(userId, promotionCode) {
+  const code = normalizePromoCode(promotionCode)
+  if (!code) return 0
+
+  const res = await query(
+    `SELECT COUNT(1) AS UsedCount
+     FROM Orders
+     WHERE UserId = @userId
+       AND UPPER(LTRIM(RTRIM(ISNULL(GiftCardCode, '')))) = @code
+       AND LOWER(LTRIM(RTRIM(ISNULL(Status, 'pending')))) NOT IN ('cancel', 'cancelled', 'failed')`,
+    { userId, code },
+  )
+  return Number(res.recordset?.[0]?.UsedCount || 0)
+}
+
+async function countOrderPromotionUsageGlobal(promotionCode) {
+  const code = normalizePromoCode(promotionCode)
+  if (!code) return 0
+
+  const res = await query(
+    `SELECT COUNT(1) AS UsedCount
+     FROM Orders
+     WHERE UPPER(LTRIM(RTRIM(ISNULL(GiftCardCode, '')))) = @code
+       AND LOWER(LTRIM(RTRIM(ISNULL(Status, 'pending')))) NOT IN ('cancel', 'cancelled', 'failed')`,
+    { code },
+  )
+  return Number(res.recordset?.[0]?.UsedCount || 0)
+}
+
+async function resolvePromotionIdByCode(rawCode) {
+  const code = normalizePromoCode(rawCode)
+  if (!code) return null
+
+  try {
+    const hasPromotionCode = await columnExists('Promotions', 'PromotionCode')
+    const hasCode = await columnExists('Promotions', 'Code')
+    const hasStatus = await columnExists('Promotions', 'Status')
+    const hasIsActive = await columnExists('Promotions', 'IsActive')
+
+    const codeColumn = hasPromotionCode ? 'PromotionCode' : hasCode ? 'Code' : null
+    if (!codeColumn) return null
+
+    const activeClauses = []
+    if (hasIsActive) activeClauses.push('(IsActive = 1)')
+    if (hasStatus) activeClauses.push("(LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) IN ('active','published'))")
+    const activeWhere = activeClauses.length ? ` AND (${activeClauses.join(' OR ')})` : ''
+
+    const promoRes = await query(
+      `SELECT TOP 1 PromotionId
+       FROM Promotions
+       WHERE UPPER(LTRIM(RTRIM(CONVERT(NVARCHAR(200), ${codeColumn})))) = @code${activeWhere}`,
+      { code },
+    )
+
+    const promoId = promoRes.recordset?.[0]?.PromotionId
+    return promoId === undefined || promoId === null ? null : promoId
+  } catch (err) {
+    console.warn('[invoice] Unable to resolve PromotionId by code:', err?.message || err)
+    return null
+  }
+}
+
+async function upsertInvoiceSnapshot({
+  userId,
+  orderId = null,
+  bookingId = null,
+  subtotal = 0,
+  discountAmount = 0,
+  finalAmount = 0,
+  status = 'Pending',
+  promotionCode = '',
+}) {
+  const invoiceId = `INV-${String(orderId || bookingId || newId()).trim()}`
+  const safeUserId = String(userId || '').trim() || null
+  const safeOrderId = String(orderId || '').trim() || null
+  const safeBookingId = String(bookingId || '').trim() || null
+  const safePromo = String(promotionCode || '').trim()
+  const totalAmount = Math.max(0, Number(subtotal || 0))
+  const discount = Math.max(0, Math.min(totalAmount, Number(discountAmount || 0)))
+  const final = Math.max(0, Number(finalAmount || 0))
+
+  await query(
+    `IF EXISTS (SELECT 1 FROM Invoices WHERE InvoiceId = @invoiceId)
+     BEGIN
+       UPDATE Invoices
+       SET
+         UserId = COALESCE(@userId, UserId),
+         BookingId = COALESCE(@bookingId, BookingId),
+         OrderId = COALESCE(@orderId, OrderId),
+         TotalAmount = @totalAmount,
+         DiscountAmount = @discountAmount,
+         FinalAmount = @finalAmount,
+         Status = @status
+       WHERE InvoiceId = @invoiceId;
+     END
+     ELSE
+     BEGIN
+       INSERT INTO Invoices (
+         InvoiceId,
+         UserId,
+         BookingId,
+         OrderId,
+         TotalAmount,
+         DiscountAmount,
+         FinalAmount,
+         Status,
+         CreatedAt
+       )
+       VALUES (
+         @invoiceId,
+         @userId,
+         @bookingId,
+         @orderId,
+         @totalAmount,
+         @discountAmount,
+         @finalAmount,
+         @status,
+         SYSUTCDATETIME()
+       );
+     END;`,
+    {
+      invoiceId,
+      userId: safeUserId,
+      bookingId: safeBookingId,
+      orderId: safeOrderId,
+      totalAmount,
+      discountAmount: discount,
+      finalAmount: final,
+      status: String(status || 'Pending').trim() || 'Pending',
+    },
+  )
+
+  if (discount > 0 && safePromo) {
+    const resolvedPromotionId = await resolvePromotionIdByCode(safePromo)
+    if (resolvedPromotionId !== null) {
+      await query(
+        `IF EXISTS (
+           SELECT 1 FROM InvoicePromotions
+           WHERE InvoiceId = @invoiceId AND PromotionId = @promotionId
+         )
+         BEGIN
+           UPDATE InvoicePromotions
+           SET DiscountAmount = @discountAmount
+           WHERE InvoiceId = @invoiceId AND PromotionId = @promotionId;
+         END
+         ELSE
+         BEGIN
+           INSERT INTO InvoicePromotions (Id, InvoiceId, PromotionId, DiscountAmount)
+           VALUES (@id, @invoiceId, @promotionId, @discountAmount);
+         END;`,
+        {
+          id: newId(),
+          invoiceId,
+          promotionId: resolvedPromotionId,
+          discountAmount: discount,
+        },
+      )
+    } else {
+      console.warn(`[invoice] Skip InvoicePromotions link: PromotionId not found for code ${safePromo}`)
+    }
+  }
+
+  return {
+    invoiceId,
+    totalAmount,
+    discountAmount: discount,
+    finalAmount: final,
+  }
 }
 
 async function columnExists(tableName, columnName) {
@@ -234,6 +427,99 @@ async function getOrdersChannelColumn() {
     return null
   })()
   return _ordersChannelColumnPromise
+}
+
+function formatVnpayDate(date = new Date()) {
+  const vnDate = new Date(date.getTime() + 7 * 60 * 60 * 1000)
+  const yyyy = vnDate.getUTCFullYear()
+  const mm = String(vnDate.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(vnDate.getUTCDate()).padStart(2, '0')
+  const hh = String(vnDate.getUTCHours()).padStart(2, '0')
+  const mi = String(vnDate.getUTCMinutes()).padStart(2, '0')
+  const ss = String(vnDate.getUTCSeconds()).padStart(2, '0')
+  return `${yyyy}${mm}${dd}${hh}${mi}${ss}`
+}
+
+function sortObjectByKey(obj) {
+  return Object.keys(obj)
+    .sort()
+    .reduce((acc, key) => {
+      acc[key] = encodeURIComponent(String(obj[key] ?? '')).replace(/%20/g, '+')
+      return acc
+    }, {})
+}
+
+function buildRawHashData(sortedPayload) {
+  return Object.keys(sortedPayload)
+    .map((key) => `${key}=${String(sortedPayload[key] ?? '')}`)
+    .join('&')
+}
+
+function safeClientIp(rawIp) {
+  const value = String(rawIp || '').trim()
+  if (!value) return '127.0.0.1'
+  if (value === '::1') return '127.0.0.1'
+  if (value.startsWith('::ffff:')) return value.replace('::ffff:', '')
+  return value
+}
+
+function buildVnpayPaymentUrl({ orderId, amount, txnRef, ipAddress }) {
+  if (!env.vnpay?.enabled) {
+    const err = new Error('VNPAY is not configured. Please set VNPAY_TMN_CODE and VNPAY_HASH_SECRET in .env')
+    err.status = 500
+    throw err
+  }
+
+  if (!String(env.vnpay.returnUrl || '').trim()) {
+    const err = new Error('VNPAY_RETURN_URL is missing in server environment')
+    err.status = 500
+    throw err
+  }
+
+  const amountInt = Math.round(Number(amount || 0) * 100)
+  if (!Number.isFinite(amountInt) || amountInt <= 0) {
+    const err = new Error('Invalid order amount for VNPAY payment')
+    err.status = 400
+    throw err
+  }
+
+  const payload = {
+    vnp_Version: '2.1.0',
+    vnp_Command: 'pay',
+    vnp_TmnCode: env.vnpay.tmnCode,
+    vnp_Locale: env.vnpay.locale || 'vn',
+    vnp_CurrCode: env.vnpay.currency || 'VND',
+    vnp_TxnRef: String(txnRef || ''),
+    vnp_OrderInfo: String(orderId || ''),
+    vnp_OrderType: 'other',
+    vnp_Amount: String(amountInt),
+    vnp_ReturnUrl: env.vnpay.returnUrl,
+    vnp_IpAddr: safeClientIp(ipAddress),
+    vnp_CreateDate: formatVnpayDate(new Date()),
+  }
+
+  const sorted = sortObjectByKey(payload)
+  const signData = buildRawHashData(sorted)
+
+  const signed = crypto
+    .createHmac('sha512', env.vnpay.hashSecret)
+    .update(signData)
+    .digest('hex')
+
+  const finalQuery = `${buildRawHashData(sorted)}&vnp_SecureHash=${signed}`
+  if (String(process.env.VNPAY_DEBUG || '').trim() === '1') {
+    console.log('[VNPAY DEBUG] signData:', signData)
+    console.log('[VNPAY DEBUG] secureHash:', signed)
+    console.log('[VNPAY DEBUG] url:', `${env.vnpay.url}?${finalQuery}`)
+  }
+  return `${env.vnpay.url}?${finalQuery}`
+}
+
+function buildVnpTxnRef(orderId) {
+  const cleanedOrder = String(orderId || '').replace(/[^a-zA-Z0-9]/g, '').slice(-12)
+  const timePart = String(Date.now())
+  const randomPart = Math.random().toString(36).slice(2, 8).toUpperCase()
+  return `VNP${cleanedOrder}${timePart}${randomPart}`.slice(0, 34)
 }
 
 async function getDefaultAddress(userId) {
@@ -1096,7 +1382,7 @@ async function clearCart(userIdInput) {
   return getCart(userId)
 }
 
-async function checkoutCart(userIdInput, payload = {}) {
+async function checkoutCart(userIdInput, payload = {}, options = {}) {
   const userId = requireUserId(userIdInput)
   const cart = await getCart(userId)
   const itemIds = Array.isArray(payload.itemIds) ? payload.itemIds.map((x) => String(x || '').trim()).filter(Boolean) : []
@@ -1128,9 +1414,68 @@ async function checkoutCart(userIdInput, payload = {}) {
   const ctx = await getCustomerContext(userId)
   const defaultAddress = ctx.defaultAddress
   const subtotal = selectedItems.reduce((sum, item) => sum + item.LineTotal, 0)
-  const total = subtotal
+
+  const settingsMap = await getSettingsMap()
+  const bookingSettings = buildBookingSettings(settingsMap)
+  const giftCode = String(payload.giftCode || '').trim()
+  let appliedPromotion = null
+
+  if (giftCode && !bookingSettings.promotionAllowCustomerApply) {
+    const err = new Error('Promotion codes are disabled for customer order')
+    err.status = 400
+    throw err
+  }
+
+  if (giftCode) {
+    if (!bookingSettings.promotionEnabled) {
+      const err = new Error('Promotions are currently disabled')
+      err.status = 400
+      throw err
+    }
+
+    appliedPromotion = findActivePromotionByCode(settingsMap, giftCode)
+    if (!appliedPromotion) {
+      const err = new Error('Invalid or expired promotion code')
+      err.status = 400
+      throw err
+    }
+
+    const maxUsesPerUser = parsePositiveInt(appliedPromotion.maxUsesPerUser, 0)
+    if (maxUsesPerUser > 0) {
+      const [bookingUsage, orderUsage] = await Promise.all([
+        countPromotionUsageByUser(userId, giftCode),
+        countOrderPromotionUsageByUser(userId, giftCode),
+      ])
+      if (bookingUsage + orderUsage >= maxUsesPerUser) {
+        const err = new Error(`This promotion can only be used ${maxUsesPerUser} times per user`)
+        err.status = 400
+        throw err
+      }
+    }
+
+    const maxUsesGlobal = parsePositiveInt(appliedPromotion.maxUses, 0)
+    if (maxUsesGlobal > 0) {
+      const [bookingUsage, orderUsage] = await Promise.all([
+        countPromotionUsageGlobal(giftCode),
+        countOrderPromotionUsageGlobal(giftCode),
+      ])
+      if (bookingUsage + orderUsage >= maxUsesGlobal) {
+        const err = new Error('This promotion has reached its usage limit')
+        err.status = 400
+        throw err
+      }
+    }
+  }
+
+  const promotionDiscount = calcPromotionDiscountAmount(subtotal, appliedPromotion)
+  const discountAmount = Math.max(0, promotionDiscount)
+  const netAmount = Math.max(0, subtotal - discountAmount)
+  const taxAmount = netAmount * 0.1
+  const shippingAmount = selectedItems.length > 0 ? 3 : 0
+  const total = Math.max(0, netAmount + taxAmount + shippingAmount)
 
   const paymentMethod = normalizePaymentMethod(payload.paymentMethod)
+  const isOnlinePayment = String(paymentMethod || '').toLowerCase() === 'online'
   const customerName = String(payload.customerName || defaultAddress?.FullName || ctx.user.Name || '').trim() || null
   const customerPhone = String(payload.customerPhone || defaultAddress?.PhoneNumber || ctx.user.Phone || '').trim() || null
   const addressText = String(
@@ -1194,7 +1539,7 @@ async function checkoutCart(userIdInput, payload = {}) {
      );`,
     {
       userId,
-      status: 'Pending',
+      status: isOnlinePayment ? 'Awaiting' : 'Pending',
       customerName,
       customerPhone,
       customerAddress: addressText,
@@ -1202,8 +1547,8 @@ async function checkoutCart(userIdInput, payload = {}) {
       subtotal,
       total,
       paymentMethod,
-      giftCardCode: payload.giftCode ? String(payload.giftCode).trim() : null,
-      giftCardApplied: 0,
+      giftCardCode: appliedPromotion ? normalizePromoCode(giftCode) : null,
+      giftCardApplied: discountAmount,
     }
   )
 
@@ -1213,6 +1558,16 @@ async function checkoutCart(userIdInput, payload = {}) {
     err.status = 500
     throw err
   }
+
+  const invoiceSnapshot = await upsertInvoiceSnapshot({
+    userId,
+    orderId,
+    subtotal,
+    discountAmount,
+    finalAmount: total,
+    status: 'Pending',
+    promotionCode: appliedPromotion ? normalizePromoCode(giftCode) : '',
+  })
 
   for (const item of selectedItems) {
     await query(
@@ -1241,31 +1596,47 @@ async function checkoutCart(userIdInput, payload = {}) {
         productName: item.Name,
       }
     )
-
-    await query(
-      `UPDATE Products
-       SET Stock = CASE WHEN ISNULL(Stock, 0) >= @quantity THEN ISNULL(Stock, 0) - @quantity ELSE 0 END
-       WHERE ProductId = @productId`,
-      {
-        productId: item.ProductId,
-        quantity: item.Quantity,
-      }
-    )
   }
 
-  for (const item of selectedItems) {
-    await query('DELETE FROM CartItems WHERE CartItemId = @cartItemId', { cartItemId: item.CartItemId })
+  if (!isOnlinePayment) {
+    for (const item of selectedItems) {
+      await query('DELETE FROM CartItems WHERE CartItemId = @cartItemId', { cartItemId: item.CartItemId })
+    }
+  }
+
+  let paymentUrl = null
+  if (isOnlinePayment) {
+    const transactionCode = buildVnpTxnRef(orderId)
+    try {
+      const invoiceId = await resolveInvoiceIdForPayment({
+        invoiceId: invoiceSnapshot.invoiceId,
+        orderId,
+        userId,
+        amount: total,
+      })
+
+      await upsertPaymentRecord({
+        invoiceId,
+        amount: total,
+        paymentMethod: 'VNPAY',
+        status: 'Pending',
+        transactionCode,
+        paidAt: null,
+      })
+    } catch (err) {
+      console.warn('[checkout] Unable to persist pending payment record:', err?.message || err)
+    }
+
+    paymentUrl = buildVnpayPaymentUrl({
+      orderId,
+      amount: total,
+      txnRef: transactionCode,
+      ipAddress: options?.ipAddress,
+    })
   }
 
   try {
-    await notifyCustomerEvent({
-      userId,
-      event: 'order_created',
-      orderId,
-      payload: { orderId },
-    })
-
-    if (String(paymentMethod || '').toLowerCase() === 'online') {
+    if (isOnlinePayment) {
       await notifyCustomerEvent({
         userId,
         event: 'payment_pending',
@@ -1277,26 +1648,37 @@ async function checkoutCart(userIdInput, payload = {}) {
         event: 'payment_pending',
         orderId,
       })
-    }
+    } else {
+      await notifyCustomerEvent({
+        userId,
+        event: 'order_created',
+        orderId,
+        payload: { orderId },
+      })
 
-    await notifyOwnerEvent({
-      event: 'order_new',
-      orderId,
-    })
+      await notifyOwnerEvent({
+        event: 'order_new',
+        orderId,
+      })
+    }
   } catch (err) {
     console.warn('[customerCommerce] Order notify/email failed:', err?.message || err)
   }
 
+  const initialOrderStatus = isOnlinePayment ? 'Awaiting' : 'Pending'
+
   return {
     OrderId: orderId,
-    Status: 'Pending',
+    Status: initialOrderStatus,
     PaymentMethod: paymentMethod,
-    PaymentStatus: derivePaymentStatus('Pending', paymentMethod),
+    PaymentStatus: derivePaymentStatus(initialOrderStatus, paymentMethod),
+    PaymentUrl: paymentUrl,
+    PaymentGateway: paymentUrl ? 'VNPAY' : null,
     Summary: {
       Subtotal: subtotal,
-      Tax: 0,
-      Shipping: 0,
-      DiscountAmount: 0,
+      Tax: taxAmount,
+      Shipping: shippingAmount,
+      DiscountAmount: discountAmount,
       Total: total,
       ItemCount: selectedItems.length,
     },
@@ -1312,8 +1694,17 @@ async function listBookings(userIdInput, limit = 20) {
         b.BookingTime,
         b.Status,
         b.Notes,
-        b.CreatedAt
+        b.CreatedAt,
+        inv.TotalAmount AS InvoiceTotalAmount,
+        inv.DiscountAmount AS InvoiceDiscountAmount,
+        inv.FinalAmount AS InvoiceFinalAmount
      FROM Bookings b
+     OUTER APPLY (
+       SELECT TOP 1 i.TotalAmount, i.DiscountAmount, i.FinalAmount
+       FROM Invoices i
+       WHERE i.BookingId = b.BookingId
+       ORDER BY i.CreatedAt DESC
+     ) inv
      WHERE b.CustomerUserId = @userId
      ORDER BY b.BookingTime DESC, b.CreatedAt DESC`,
     { userId, limit: Math.min(Math.max(Number(limit) || 20, 1), 100) }
@@ -1349,6 +1740,10 @@ async function listBookings(userIdInput, limit = 20) {
       ImageUrl: s.ImageUrl || null,
     }))
 
+    const subtotal = Number(row.InvoiceTotalAmount || services.reduce((sum, s) => sum + s.Price, 0))
+    const discountAmount = Math.max(0, Number(row.InvoiceDiscountAmount || 0))
+    const finalAmount = Number(row.InvoiceFinalAmount || Math.max(subtotal - discountAmount, 0))
+
     results.push({
       BookingId: row.BookingId,
       CustomerUserId: row.CustomerUserId,
@@ -1357,7 +1752,9 @@ async function listBookings(userIdInput, limit = 20) {
       Notes: row.Notes || '',
       CreatedAt: row.CreatedAt,
       Services: services,
-      TotalPrice: services.reduce((sum, s) => sum + s.Price, 0),
+      Subtotal: subtotal,
+      DiscountAmount: discountAmount,
+      TotalPrice: finalAmount,
       TotalDuration: services.reduce((sum, s) => sum + s.DurationMinutes, 0),
     })
   }
@@ -1365,10 +1762,12 @@ async function listBookings(userIdInput, limit = 20) {
   return results
 }
 
-async function createBooking(userIdInput, payload = {}) {
+async function createBooking(userIdInput, payload = {}, options = {}) {
   const userId = requireUserId(userIdInput)
   const serviceItems = Array.isArray(payload.serviceItems) ? payload.serviceItems : []
   const preferredStaffId = String(payload.staffId || '').trim() || null
+  const paymentMethod = normalizePaymentMethod(payload.paymentMethod)
+  const isOnlinePayment = String(paymentMethod || '').toLowerCase() === 'online'
 
   const normalizedItems = serviceItems
     .map((item) => ({
@@ -1509,6 +1908,7 @@ async function createBooking(userIdInput, payload = {}) {
 
   // Calculate total duration from services
   const staffServices = new Map()
+  let bookingSubtotal = 0
   for (const item of normalizedItems) {
     const svcRes = await query(
       `SELECT TOP 1 ServiceId, DurationMinutes
@@ -1613,7 +2013,7 @@ async function createBooking(userIdInput, payload = {}) {
       bookingId,
       userId,
       bookingTime: when,
-      status: 'pending',
+      status: isOnlinePayment ? 'awaiting' : 'pending',
       notes: notesValue || null,
     }
   )
@@ -1633,6 +2033,8 @@ async function createBooking(userIdInput, payload = {}) {
       err.status = 404
       throw err
     }
+
+    bookingSubtotal += Number(svc.Price || 0) * Number(item.quantity || 0)
 
     let resolvedStaffId = item.staffId || null
     if (!resolvedStaffId && !isReturningCustomer) {
@@ -1695,59 +2097,128 @@ async function createBooking(userIdInput, payload = {}) {
     }
   }
 
+  const bookingDiscount = calcPromotionDiscountAmount(bookingSubtotal, appliedPromotion)
+  const bookingFinalAmount = Math.max(0, bookingSubtotal - bookingDiscount)
+
+  const bookingInvoiceSnapshot = await upsertInvoiceSnapshot({
+    userId,
+    bookingId,
+    subtotal: bookingSubtotal,
+    discountAmount: bookingDiscount,
+    finalAmount: bookingFinalAmount,
+    status: 'Pending',
+    promotionCode: appliedPromotion ? normalizePromoCode(giftCode) : '',
+  })
+
+  let paymentUrl = null
+  if (isOnlinePayment) {
+    const transactionCode = buildVnpTxnRef(bookingId)
+    try {
+      const invoiceId = await resolveInvoiceIdForPayment({
+        invoiceId: bookingInvoiceSnapshot.invoiceId,
+        orderId: bookingId,
+        userId,
+        amount: bookingFinalAmount,
+      })
+
+      await upsertPaymentRecord({
+        invoiceId,
+        amount: bookingFinalAmount,
+        paymentMethod: 'VNPAY',
+        status: 'Pending',
+        transactionCode,
+        paidAt: null,
+      })
+    } catch (err) {
+      console.warn('[createBooking] Unable to persist pending payment record:', err?.message || err)
+    }
+
+    paymentUrl = buildVnpayPaymentUrl({
+      orderId: bookingId,
+      amount: bookingFinalAmount,
+      txnRef: transactionCode,
+      ipAddress: options?.ipAddress,
+    })
+  }
+
   const latest = await listBookings(userId, 1)
   try {
-    await notifyCustomerEvent({
-      userId,
-      event: 'booking_created',
-      bookingId,
-      payload: { bookingTime: when.toISOString() },
-    })
-
-    await scheduleBookingReminders({
-      userId,
-      bookingId,
-      bookingTime: when.toISOString(),
-    })
-
-    const firstStaffId = [...assignedStaffIds][0]
-    if (firstStaffId) {
-      const staffRes = await query(
-        `SELECT TOP 1 u.Name
-         FROM Staff s
-         LEFT JOIN Users u ON u.UserId = s.UserId
-         WHERE s.StaffId = @staffId`,
-        { staffId: firstStaffId },
-      )
-      const staffName = String(staffRes.recordset?.[0]?.Name || '').trim() || null
+    if (isOnlinePayment) {
       await notifyCustomerEvent({
         userId,
-        event: 'booking_staff_assigned',
+        event: 'payment_pending',
         bookingId,
-        payload: { staffName },
+        payload: { bookingId },
+      })
+
+      await notifyOwnerEvent({
+        event: 'payment_pending',
+        bookingId,
       })
     } else {
+      await notifyCustomerEvent({
+        userId,
+        event: 'booking_created',
+        bookingId,
+        payload: { bookingTime: when.toISOString() },
+      })
+
+      await scheduleBookingReminders({
+        userId,
+        bookingId,
+        bookingTime: when.toISOString(),
+      })
+
+      const firstStaffId = [...assignedStaffIds][0]
+      if (firstStaffId) {
+        const staffRes = await query(
+          `SELECT TOP 1 u.Name
+           FROM Staff s
+           LEFT JOIN Users u ON u.UserId = s.UserId
+           WHERE s.StaffId = @staffId`,
+          { staffId: firstStaffId },
+        )
+        const staffName = String(staffRes.recordset?.[0]?.Name || '').trim() || null
+        await notifyCustomerEvent({
+          userId,
+          event: 'booking_staff_assigned',
+          bookingId,
+          payload: { staffName },
+        })
+      } else {
+        await notifyOwnerEvent({
+          event: 'booking_unassigned',
+          bookingId,
+          payload: {
+            reason: 'Booking created without specialist assignment.',
+          },
+        })
+      }
+
       await notifyOwnerEvent({
-        event: 'booking_unassigned',
+        event: 'booking_new',
         bookingId,
         payload: {
-          reason: 'Booking created without specialist assignment.',
+          bookingTime: when.toISOString(),
         },
       })
     }
-
-    await notifyOwnerEvent({
-      event: 'booking_new',
-      bookingId,
-      payload: {
-        bookingTime: when.toISOString(),
-      },
-    })
   } catch (err) {
     console.warn('[customerCommerce] Booking notify/email failed:', err?.message || err)
   }
 
-  return latest[0] || { BookingId: bookingId }
+  const bookingStatus = isOnlinePayment ? 'awaiting' : 'pending'
+  const latestBooking = latest[0] || { BookingId: bookingId }
+  return {
+    ...latestBooking,
+    Subtotal: bookingSubtotal,
+    DiscountAmount: bookingDiscount,
+    TotalPrice: bookingFinalAmount,
+    PaymentMethod: paymentMethod,
+    PaymentStatus: derivePaymentStatus(bookingStatus, paymentMethod),
+    PaymentUrl: paymentUrl,
+    PaymentGateway: paymentUrl ? 'VNPAY' : null,
+  }
 }
 
 async function listOrders(userIdInput, limit = 20) {
@@ -1927,26 +2398,6 @@ async function cancelOrder(userIdInput, orderIdInput) {
     const err = new Error(`Only pending orders can be cancelled. Current status: ${order.Status}`)
     err.status = 409
     throw err
-  }
-
-  const itemsRes = await query(
-    `SELECT ProductId, Quantity
-     FROM OrderItems
-     WHERE OrderId = @orderId`,
-    { orderId }
-  )
-
-  const items = itemsRes.recordset || []
-  for (const item of items) {
-    await query(
-      `UPDATE Products
-       SET Stock = ISNULL(Stock, 0) + @quantity
-       WHERE ProductId = @productId`,
-      {
-        productId: item.ProductId,
-        quantity: Number(item.Quantity || 0),
-      }
-    )
   }
 
   await query(

@@ -408,7 +408,7 @@ const BookingPage = () => {
 
     try {
       setSubmitting(true)
-      await createBooking({
+      const result = await createBooking({
         date: selectedDate,
         time: selectedTime,
         notes,
@@ -421,6 +421,12 @@ const BookingPage = () => {
           staffId: isReturningCustomer ? selectedStaffId : null,
         })),
       })
+
+      if (paymentMethod === 'online' && result?.PaymentUrl) {
+        window.location.href = result.PaymentUrl
+        return
+      }
+
       setResultTitle('Successfully!')
       setResultMessage('Your booking request has been submitted. We will contact you soon!')
       setResultModalOpen(true)
