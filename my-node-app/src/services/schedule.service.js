@@ -86,22 +86,31 @@ async function columnExists(tableName, columnName) {
   }
 }
 
+let _staffRoleSqlPartsCache = null
+
 async function getStaffRoleSqlParts() {
+  // Return cached result if available (schema doesn't change at runtime)
+  if (_staffRoleSqlPartsCache) {
+    return _staffRoleSqlPartsCache
+  }
+
   try {
     const hasStaffSkills = await tableExists('StaffSkills')
     if (!hasStaffSkills) {
-      return {
+      _staffRoleSqlPartsCache = {
         selectSql: `CAST('' AS NVARCHAR(255)) AS Role`,
         joinSql: '',
       }
+      return _staffRoleSqlPartsCache
     }
 
     const hasCategoryId = await columnExists('StaffSkills', 'CategoryId')
     if (!hasCategoryId) {
-      return {
+      _staffRoleSqlPartsCache = {
         selectSql: `CAST('' AS NVARCHAR(255)) AS Role`,
         joinSql: '',
       }
+      return _staffRoleSqlPartsCache
     }
 
     const hasServiceCategories = await tableExists('ServiceCategories')
@@ -111,7 +120,7 @@ async function getStaffRoleSqlParts() {
       const categoryNameColumn = hasCategoryName ? 'CategoryName' : (hasName ? 'Name' : null)
 
       if (categoryNameColumn) {
-        return {
+        _staffRoleSqlPartsCache = {
           selectSql: `ISNULL(sp.Role, '') AS Role`,
           joinSql: `
             OUTER APPLY (
@@ -124,10 +133,11 @@ async function getStaffRoleSqlParts() {
               ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS Role
             ) sp`,
         }
+        return _staffRoleSqlPartsCache
       }
     }
 
-    return {
+    _staffRoleSqlPartsCache = {
       selectSql: `ISNULL(sp.Role, '') AS Role`,
       joinSql: `
         OUTER APPLY (
@@ -139,13 +149,15 @@ async function getStaffRoleSqlParts() {
           ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS Role
         ) sp`,
     }
+    return _staffRoleSqlPartsCache
   } catch (err) {
     console.error('Error in getStaffRoleSqlParts:', err.message)
     // Return safe default if something goes wrong
-    return {
+    _staffRoleSqlPartsCache = {
       selectSql: `CAST('' AS NVARCHAR(255)) AS Role`,
       joinSql: '',
     }
+    return _staffRoleSqlPartsCache
   }
 }
 
@@ -314,11 +326,11 @@ async function addShift(payload) {
        AND StaffId = @staffId
        AND StartHour = @startHour
        AND EndHour = @endHour
-       AND (
-         @isEditing = 0
-         OR WeekStartDate <> @oldShiftDate
-         OR StartHour <> @oldStartHour
-         OR EndHour <> @oldEndHour
+       AND NOT (
+         @isEditing = 1
+         AND WeekStartDate = @oldShiftDate
+         AND StartHour = @oldStartHour
+         AND EndHour = @oldEndHour
        )`,
     {
       shiftDate: shiftDateIso,
@@ -344,11 +356,11 @@ async function addShift(payload) {
      WHERE WeekStartDate = @shiftDate
        AND StaffId = @staffId
        AND NOT (EndHour <= @startHour OR StartHour >= @endHour)
-       AND (
-         @isEditing = 0
-         OR WeekStartDate <> @oldShiftDate
-         OR StartHour <> @oldStartHour
-         OR EndHour <> @oldEndHour
+       AND NOT (
+         @isEditing = 1
+         AND WeekStartDate = @oldShiftDate
+         AND StartHour = @oldStartHour
+         AND EndHour = @oldEndHour
        )`,
     {
       shiftDate: shiftDateIso,

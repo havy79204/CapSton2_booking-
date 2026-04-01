@@ -16,9 +16,12 @@ const getStaff = asyncHandler(async (req, res) => {
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean)
+  const selectedDate = String(req.query?.date || '').trim()
 
-  const data = await commerceService.listAvailableStaff(serviceIds)
-  res.json({ ok: true, data })
+  console.log('[DEBUG] getStaff:', { serviceIds, selectedDate, query: req.query })
+
+  const data = await commerceService.listAvailableStaff(serviceIds, selectedDate)
+  res.json({ ok: true, data, debug: { selectedDate, serviceIds } })
 })
 
 const getAddresses = asyncHandler(async (req, res) => {

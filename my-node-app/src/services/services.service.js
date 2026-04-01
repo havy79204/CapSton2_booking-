@@ -39,6 +39,8 @@ function normalizeImageUrls(input) {
 
 const ACTIVE_SERVICE_WHERE = `(s.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), s.Status)))) = 'active')`
 const NOT_DELETED_SERVICE_WHERE = `(s.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), s.Status)))) NOT IN ('deleted', 'delete'))`
+const _tableExistsCache = new Map()
+const _columnExistsCache = new Map()
 
 function isForeignKeyConstraintError(err) {
   if (!err) return false
@@ -53,23 +55,49 @@ function isForeignKeyConstraintError(err) {
 }
 
 async function columnExists(tableName, columnName) {
-  const res = await query(
-    `SELECT 1 AS ok
-     FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_NAME = @t AND COLUMN_NAME = @c`,
-    { t: tableName, c: columnName }
-  )
-  return Boolean(res.recordset?.length)
+  const cacheKey = `column:${tableName}:${columnName}`
+  if (_columnExistsCache.has(cacheKey)) {
+    return _columnExistsCache.get(cacheKey)
+  }
+
+  try {
+    const res = await query(
+      `SELECT 1 AS ok
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_NAME = @t AND COLUMN_NAME = @c`,
+      { t: tableName, c: columnName }
+    )
+    const exists = Boolean(res.recordset?.length)
+    _columnExistsCache.set(cacheKey, exists)
+    return exists
+  } catch {
+    const exists = false
+    _columnExistsCache.set(cacheKey, exists)
+    return exists
+  }
 }
 
 async function tableExists(tableName) {
-  const res = await query(
-    `SELECT 1 AS ok
-     FROM INFORMATION_SCHEMA.TABLES
-     WHERE TABLE_NAME = @t`,
-    { t: tableName }
-  )
-  return Boolean(res.recordset?.length)
+  const cacheKey = `table:${tableName}`
+  if (_tableExistsCache.has(cacheKey)) {
+    return _tableExistsCache.get(cacheKey)
+  }
+
+  try {
+    const res = await query(
+      `SELECT 1 AS ok
+       FROM INFORMATION_SCHEMA.TABLES
+       WHERE TABLE_NAME = @t`,
+      { t: tableName }
+    )
+    const exists = Boolean(res.recordset?.length)
+    _tableExistsCache.set(cacheKey, exists)
+    return exists
+  } catch {
+    const exists = false
+    _tableExistsCache.set(cacheKey, exists)
+    return exists
+  }
 }
 
 async function ensureServiceCategorySchema() {
