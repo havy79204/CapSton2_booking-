@@ -15,7 +15,13 @@ const notificationsTableState = {
   exists: false,
 }
 
+const notificationSettingsTableState = {
+  checked: false,
+  exists: false,
+}
+
 const OWNER_MORNING_INSIGHT_LAST_RUN_KEY = 'Notifications:OwnerMorningInsights:LastRunDate'
+const OWNER_NOTIFY_SETTING_KEYS = ['NotifyNewAppt', 'NotifyLowStock', 'NotifyNewReview', 'NotifyDailyReport']
 
 function toKey({ scope, userId }) {
   const s = String(scope || 'unknown')
@@ -94,6 +100,43 @@ async function getSettingValue(settingKey) {
   return row ? row.SettingValue : null
 }
 
+async function getOwnerNotificationToggleMap() {
+  const res = await query(
+    `SELECT SettingKey, SettingValue
+     FROM SystemSettings
+     WHERE SettingKey IN ('NotifyNewAppt', 'NotifyLowStock', 'NotifyNewReview', 'NotifyDailyReport')`,
+    {},
+  )
+
+  const defaults = {
+    NotifyNewAppt: true,
+    NotifyLowStock: true,
+    NotifyNewReview: true,
+    NotifyDailyReport: false,
+  }
+
+  const map = { ...defaults }
+  for (const row of res.recordset || []) {
+    const key = String(row?.SettingKey || '').trim()
+    if (!OWNER_NOTIFY_SETTING_KEYS.includes(key)) continue
+    map[key] = parseDbBoolean(row?.SettingValue, defaults[key])
+  }
+
+  return map
+}
+
+function shouldDispatchOwnerEventBySettings(eventKey, toggles) {
+  const key = String(eventKey || '').trim().toLowerCase()
+  if (!key) return true
+
+  if (key === 'booking_new') return Boolean(toggles?.NotifyNewAppt)
+  if (key.startsWith('inventory_')) return Boolean(toggles?.NotifyLowStock)
+  if (key === 'customer_new_review' || key === 'customer_low_review') return Boolean(toggles?.NotifyNewReview)
+  if (key === 'revenue_report_daily') return Boolean(toggles?.NotifyDailyReport)
+
+  return true
+}
+
 async function setSettingValue(settingKey, value) {
   await query(
     `MERGE SystemSettings AS t
@@ -143,6 +186,62 @@ async function ensureNotificationsTableState() {
   notificationsTableState.exists = Boolean(result.recordset?.length)
   notificationsTableState.checked = true
   return notificationsTableState
+}
+
+async function ensureNotificationSettingsTableState() {
+  if (notificationSettingsTableState.checked) return notificationSettingsTableState
+
+  const result = await query(
+    `SELECT 1 AS ok
+     FROM INFORMATION_SCHEMA.TABLES
+     WHERE TABLE_NAME = 'NotificationSettings'`,
+    {},
+  )
+
+  notificationSettingsTableState.exists = Boolean(result.recordset?.length)
+  notificationSettingsTableState.checked = true
+  return notificationSettingsTableState
+}
+
+function parseDbBoolean(value, fallback = true) {
+  if (value === undefined || value === null) return fallback
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  const s = String(value).trim().toLowerCase()
+  if (!s) return fallback
+  return ['true', '1', 'yes', 'y', 'on'].includes(s)
+}
+
+async function getUserNotificationPreferences(userId) {
+  const safeUserId = String(userId || '').trim()
+  if (!safeUserId) {
+    return { enableNotifications: true, enableEmail: true }
+  }
+
+  const state = await ensureNotificationSettingsTableState()
+  if (!state.exists) {
+    return { enableNotifications: true, enableEmail: true }
+  }
+
+  const res = await query(
+    `SELECT TOP 1
+        EnableNotifications,
+        EnableEmail
+     FROM NotificationSettings
+     WHERE UserId = @userId
+     ORDER BY UpdatedAt DESC, CreatedAt DESC`,
+    { userId: safeUserId },
+  )
+
+  const row = res.recordset?.[0] || null
+  if (!row) {
+    return { enableNotifications: true, enableEmail: true }
+  }
+
+  return {
+    enableNotifications: parseDbBoolean(row.EnableNotifications, true),
+    enableEmail: parseDbBoolean(row.EnableEmail, true),
+  }
 }
 
 function resolveNotificationType(row) {
@@ -387,8 +486,64 @@ async function markOwnerMorningInsightRun(now = new Date()) {
 
 function shouldEmailOwnerPriority(priority) {
   const p = String(priority || '').trim().toLowerCase()
-  if (p === 'high' || p === 'medium') return true
+  if (p === 'high') return true
   return false
+}
+
+function formatOwnerDateTime(value) {
+  const d = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function resolveOwnerActorLabel(eventKey, payload = {}) {
+  const explicit = [
+    payload.actorName,
+    payload.performedBy,
+    payload.changedBy,
+    payload.customerName,
+    payload.staffName,
+  ].map((x) => String(x || '').trim()).find(Boolean)
+  if (explicit) return explicit
+
+  const role = String(payload.actorRole || '').trim().toLowerCase()
+  if (role === 'customer') return 'Customer'
+  if (role === 'staff') return 'Staff'
+  if (role === 'owner' || role === 'admin') return 'Owner/Admin'
+
+  const key = String(eventKey || '').trim().toLowerCase()
+  if (key.startsWith('booking_')) {
+    if (key === 'booking_new') return 'Customer'
+    if (key === 'booking_cancelled' || key === 'booking_rescheduled') return 'Customer/Staff'
+  }
+  if (key.startsWith('order_') || key.startsWith('payment_')) return 'Customer/System'
+
+  return 'System'
+}
+
+function buildOwnerBodyWithContext(baseBody, { eventKey, bookingId, orderId, payload = {} } = {}) {
+  const lines = []
+  const actorLabel = resolveOwnerActorLabel(eventKey, payload)
+  if (actorLabel) lines.push(`Actor: ${actorLabel}`)
+
+  const eventTime = payload.bookingTime
+    || payload.eventTime
+    || payload.occurredAt
+    || payload.createdAt
+    || payload.updatedAt
+    || null
+  const formattedTime = formatOwnerDateTime(eventTime)
+  if (formattedTime) lines.push(`Time: ${formattedTime}`)
+
+  const safeBookingId = String(bookingId || payload.bookingId || '').trim()
+  if (safeBookingId) lines.push(`Booking ID: ${safeBookingId}`)
+
+  const safeOrderId = String(orderId || payload.orderId || '').trim()
+  if (safeOrderId) lines.push(`Order ID: ${safeOrderId}`)
+
+  const metadata = lines.length ? ` Details: ${lines.join(' | ')}` : ''
+  return `${String(baseBody || '').trim()}${metadata}`.trim()
 }
 
 async function listOwnerUsers(limit = 50) {
@@ -1111,10 +1266,21 @@ async function notifyOwnerEvent({
   if (!state.exists) return { targeted: 0, saved: 0, emailed: 0 }
 
   const eventKey = String(event || '').trim().toLowerCase()
+  const ownerToggles = await getOwnerNotificationToggleMap()
+  if (!shouldDispatchOwnerEventBySettings(eventKey, ownerToggles)) {
+    return { targeted: 0, saved: 0, emailed: 0, skipped: true, reason: 'event_disabled_by_owner_settings' }
+  }
+
   const tpl = buildOwnerEventTemplate(eventKey, {
     ...payload,
     bookingId,
     orderId,
+  })
+  const enrichedBody = buildOwnerBodyWithContext(tpl.body, {
+    eventKey,
+    bookingId,
+    orderId,
+    payload,
   })
 
   const owners = await listOwnerUsers(50)
@@ -1127,6 +1293,9 @@ async function notifyOwnerEvent({
     : shouldEmailOwnerPriority(tpl.priority)
 
   for (const owner of owners) {
+    const ownerPrefs = await getUserNotificationPreferences(owner.userId)
+    if (!ownerPrefs.enableNotifications) continue
+
     const notificationId = String(newId())
     const nowIso = new Date().toISOString()
 
@@ -1169,8 +1338,8 @@ async function notifyOwnerEvent({
         notificationId,
         userId: owner.userId,
         title: tpl.title,
-        content: tpl.body,
-        body: tpl.body,
+        content: enrichedBody,
+        body: enrichedBody,
         createdAt: nowIso,
         updatedAt: nowIso,
         type: tpl.typeKey,
@@ -1182,11 +1351,11 @@ async function notifyOwnerEvent({
 
     saved += 1
 
-    if (sendEmailNow && owner.email) {
+    if (sendEmailNow && ownerPrefs.enableEmail && owner.email) {
       const viTpl = buildOwnerEmailTemplateVi(eventKey, payload, {
         subject: tpl.subject,
         title: tpl.title,
-        body: tpl.body,
+        body: enrichedBody,
       })
       const { text, html } = buildProfessionalEmailContent({
         title: viTpl.title,
@@ -1238,7 +1407,7 @@ async function notifyOwnerEvent({
       bookingId: bookingId || null,
       orderId: orderId || null,
       message: tpl.title,
-      body: tpl.body,
+      body: enrichedBody,
       occurredAt: new Date().toISOString(),
     })
   } catch {
@@ -2714,6 +2883,11 @@ async function notifyCustomerEvent({
   const safeUserId = String(userId || '').trim()
   if (!safeUserId) return null
 
+  const prefs = await getUserNotificationPreferences(safeUserId)
+  if (!prefs.enableNotifications) {
+    return { skipped: true, reason: 'notifications_disabled' }
+  }
+
   const eventKey = String(event || '').trim().toLowerCase()
 
   const tpl = buildCustomerEventTemplate(eventKey, {
@@ -2776,7 +2950,7 @@ async function notifyCustomerEvent({
     },
   )
 
-  if (scheduledIso || !sendEmailNow) {
+  if (scheduledIso || !sendEmailNow || !prefs.enableEmail) {
     return { notificationId, queuedEmail: Boolean(scheduledIso) }
   }
 
@@ -2860,22 +3034,45 @@ async function dispatchDueNotificationEmails(limit = 50) {
   const state = await ensureNotificationsTableState()
   if (!state.exists) return { processed: 0, sent: 0 }
 
+  const settingsState = await ensureNotificationSettingsTableState()
+
   const maxLimit = Math.min(Math.max(Number(limit) || 50, 1), 200)
-  const res = await query(
-    `SELECT TOP (@limit)
-        n.NotificationId,
-        n.UserId,
-        n.Title,
-        COALESCE(NULLIF(LTRIM(RTRIM(n.Body)), ''), NULLIF(LTRIM(RTRIM(n.Content)), ''), N'You have a new update.') AS MessageBody,
-        u.Email
-     FROM Notifications n
-     LEFT JOIN Users u ON u.UserId = n.UserId
-     WHERE n.ScheduledAt IS NOT NULL
-       AND n.ScheduledAt <= SYSUTCDATETIME()
-       AND n.EmailSentAt IS NULL
-     ORDER BY n.ScheduledAt ASC, n.NotificationId ASC`,
-    { limit: maxLimit },
-  )
+  const sqlText = settingsState.exists
+    ? `SELECT TOP (@limit)
+         n.NotificationId,
+         n.UserId,
+         n.Type,
+         n.Title,
+         COALESCE(NULLIF(LTRIM(RTRIM(n.Body)), ''), NULLIF(LTRIM(RTRIM(n.Content)), ''), N'You have a new update.') AS MessageBody,
+         u.Email
+       FROM Notifications n
+       LEFT JOIN Users u ON u.UserId = n.UserId
+       OUTER APPLY (
+         SELECT TOP 1 ns.EnableEmail
+         FROM NotificationSettings ns
+         WHERE ns.UserId = n.UserId
+         ORDER BY ns.UpdatedAt DESC, ns.CreatedAt DESC
+       ) ns
+       WHERE n.ScheduledAt IS NOT NULL
+         AND n.ScheduledAt <= SYSUTCDATETIME()
+         AND n.EmailSentAt IS NULL
+         AND ISNULL(ns.EnableEmail, 1) = 1
+       ORDER BY n.ScheduledAt ASC, n.NotificationId ASC`
+    : `SELECT TOP (@limit)
+         n.NotificationId,
+         n.UserId,
+         n.Type,
+         n.Title,
+         COALESCE(NULLIF(LTRIM(RTRIM(n.Body)), ''), NULLIF(LTRIM(RTRIM(n.Content)), ''), N'You have a new update.') AS MessageBody,
+         u.Email
+       FROM Notifications n
+       LEFT JOIN Users u ON u.UserId = n.UserId
+       WHERE n.ScheduledAt IS NOT NULL
+         AND n.ScheduledAt <= SYSUTCDATETIME()
+         AND n.EmailSentAt IS NULL
+       ORDER BY n.ScheduledAt ASC, n.NotificationId ASC`
+
+  const res = await query(sqlText, { limit: maxLimit })
 
   const rows = res.recordset || []
   let sentCount = 0

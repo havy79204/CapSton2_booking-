@@ -1,5 +1,84 @@
 const { query } = require('../config/query')
 
+const NOTIFY_STATE_KEYS = ['NotifyNewAppt', 'NotifyLowStock', 'NotifyNewReview', 'NotifyDailyReport']
+
+function parseBool(value, fallback = false) {
+  if (value === undefined || value === null) return fallback
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  const s = String(value).trim().toLowerCase()
+  if (!s) return fallback
+  return ['true', '1', 'yes', 'y', 'on'].includes(s)
+}
+
+function toBit(value, fallback = 0) {
+  return parseBool(value, Boolean(fallback)) ? 1 : 0
+}
+
+async function notificationSettingsTableExists() {
+  const result = await query(
+    `SELECT 1 AS ok
+     FROM INFORMATION_SCHEMA.TABLES
+     WHERE TABLE_NAME = 'NotificationSettings'`,
+  )
+  return Boolean(result?.recordset?.length)
+}
+
+async function getNotificationSettingsByUserId(userId) {
+  const safeUserId = String(userId || '').trim()
+  if (!safeUserId) return null
+
+  const hasTable = await notificationSettingsTableExists()
+  if (!hasTable) return null
+
+  const result = await query(
+    `SELECT TOP 1
+        UserId,
+        EnableNotifications,
+        EnableEmail,
+        CreatedAt,
+        UpdatedAt
+     FROM NotificationSettings
+     WHERE UserId = @userId
+     ORDER BY UpdatedAt DESC, CreatedAt DESC`,
+    { userId: safeUserId },
+  )
+
+  return result?.recordset?.[0] || null
+}
+
+async function upsertNotificationSettingsByUserId({ userId, enableNotifications, enableEmail }) {
+  const safeUserId = String(userId || '').trim()
+  if (!safeUserId) return
+
+  const hasTable = await notificationSettingsTableExists()
+  if (!hasTable) return
+
+  await query(
+    `MERGE NotificationSettings AS t
+     USING (
+       SELECT
+         @userId AS UserId,
+         @enableNotifications AS EnableNotifications,
+         @enableEmail AS EnableEmail
+     ) AS s
+     ON t.UserId = s.UserId
+     WHEN MATCHED THEN
+       UPDATE SET
+         EnableNotifications = s.EnableNotifications,
+         EnableEmail = s.EnableEmail,
+         UpdatedAt = SYSUTCDATETIME()
+     WHEN NOT MATCHED THEN
+       INSERT (UserId, EnableNotifications, EnableEmail, CreatedAt, UpdatedAt)
+       VALUES (s.UserId, s.EnableNotifications, s.EnableEmail, SYSUTCDATETIME(), SYSUTCDATETIME());`,
+    {
+      userId: safeUserId,
+      enableNotifications: toBit(enableNotifications, 1),
+      enableEmail: toBit(enableEmail, 1),
+    },
+  )
+}
+
 function splitName(fullName) {
   const raw = String(fullName || '').trim()
   if (!raw) return { firstName: '', lastName: '' }
@@ -20,7 +99,7 @@ async function getLatestActiveAdminUser() {
   return result?.recordset?.[0] || null
 }
 
-async function getSettingsMap() {
+async function getSettingsMap({ userId } = {}) {
   const result = await query('SELECT SettingKey, SettingValue FROM SystemSettings')
   const map = {}
   for (const r of result.recordset || []) {
@@ -69,6 +148,11 @@ async function getSettingsMap() {
     CommissionTierHigh: '2000000',
     CommissionRateHigh: '0.15',
     CommissionTiers: '[]',
+    NotifyNewAppt: 'true',
+    NotifyLowStock: 'true',
+    NotifyNewReview: 'true',
+    NotifyDailyReport: 'false',
+    NotifyEmail: 'true',
   }
 
   for (const [key, value] of Object.entries(defaultSettings)) {
@@ -128,10 +212,26 @@ async function getSettingsMap() {
     map.CommissionTiers = []
   }
 
+  const notificationSettings = await getNotificationSettingsByUserId(userId)
+  if (notificationSettings) {
+    const enableNotifications = parseBool(notificationSettings.EnableNotifications, true)
+    const enableEmail = parseBool(notificationSettings.EnableEmail, true)
+
+    map.NotifyEmail = String(enableEmail)
+
+    if (!enableNotifications) {
+      for (const key of NOTIFY_STATE_KEYS) {
+        map[key] = 'false'
+      }
+    }
+  }
+
   return map
 }
 
-async function updateSettingsMap(updates) {
+async function updateSettingsMap(updates, { userId } = {}) {
+  const safeUpdates = updates && typeof updates === 'object' ? updates : {}
+
   for (const [key, value] of Object.entries(updates || {})) {
     await query(
       `MERGE SystemSettings AS t
@@ -150,6 +250,44 @@ async function updateSettingsMap(updates) {
       }
     )
   }
+
+  const safeUserId = String(userId || '').trim()
+  if (!safeUserId) return
+
+  const touchedNotificationSettings =
+    Object.prototype.hasOwnProperty.call(safeUpdates, 'NotifyEmail') ||
+    NOTIFY_STATE_KEYS.some((key) => Object.prototype.hasOwnProperty.call(safeUpdates, key))
+
+  if (!touchedNotificationSettings) return
+
+  const keysToRead = ['NotifyEmail', ...NOTIFY_STATE_KEYS]
+  const dbSettingsRes = await query(
+    `SELECT SettingKey, SettingValue
+     FROM SystemSettings
+     WHERE SettingKey IN ('NotifyEmail', 'NotifyNewAppt', 'NotifyLowStock', 'NotifyNewReview', 'NotifyDailyReport')`,
+  )
+  const dbSettings = {}
+  for (const row of dbSettingsRes.recordset || []) {
+    dbSettings[row.SettingKey] = row.SettingValue
+  }
+
+  const effective = {}
+  for (const key of keysToRead) {
+    if (Object.prototype.hasOwnProperty.call(safeUpdates, key)) {
+      effective[key] = safeUpdates[key]
+    } else {
+      effective[key] = dbSettings[key]
+    }
+  }
+
+  const enableNotifications = NOTIFY_STATE_KEYS.some((key) => parseBool(effective[key], false))
+  const enableEmail = parseBool(effective.NotifyEmail, true)
+
+  await upsertNotificationSettingsByUserId({
+    userId: safeUserId,
+    enableNotifications,
+    enableEmail,
+  })
 }
 
 module.exports = {
