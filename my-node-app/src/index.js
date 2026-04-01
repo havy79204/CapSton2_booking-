@@ -3,6 +3,7 @@ const http = require('http')
 const { createApp } = require('./app')
 const { getPool } = require('./config/db')
 const { initSocketServer } = require('./realtime/socket')
+const { dispatchDueNotificationEmails, dispatchOwnerInsights } = require('./services/notifications.service')
 
 function printDbHint(err) {
   if (!err) return
@@ -31,6 +32,30 @@ async function main() {
   server.listen(env.port, () => {
     console.log(`API listening on http://localhost:${env.port}`)
   })
+
+  const reminderIntervalMs = 60 * 1000
+  setInterval(async () => {
+    try {
+      const result = await dispatchDueNotificationEmails(50)
+      if (result.sent > 0) {
+        console.log(`[notifications] sent ${result.sent}/${result.processed} scheduled email(s)`)
+      }
+    } catch (err) {
+      console.warn('[notifications] scheduled email dispatch failed:', err?.message || err)
+    }
+  }, reminderIntervalMs)
+
+  const ownerInsightIntervalMs = 5 * 60 * 1000
+  setInterval(async () => {
+    try {
+      const result = await dispatchOwnerInsights({ morningOnly: true })
+      if (result.dispatched > 0) {
+        console.log(`[notifications] dispatched ${result.dispatched} owner insight notification(s)`)
+      }
+    } catch (err) {
+      console.warn('[notifications] owner insight dispatch failed:', err?.message || err)
+    }
+  }, ownerInsightIntervalMs)
 
   server.on('error', (err) => {
     if (err && err.code === 'EADDRINUSE') {

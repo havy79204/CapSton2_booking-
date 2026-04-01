@@ -2,6 +2,7 @@ const { query, newId } = require('../config/query')
 const { toServiceListItem } = require('../models/service.model')
 const fs = require('fs/promises')
 const path = require('path')
+const { notifyAllCustomersEvent } = require('./notifications.service')
 
 const serviceSchemaState = {
   checked: false,
@@ -282,6 +283,21 @@ async function createService(payload) {
 
   await replaceServiceImages(id, images)
 
+  if (String(status || 'active').trim().toLowerCase() === 'active') {
+    try {
+      await notifyAllCustomersEvent({
+        event: 'service_new',
+        payload: {
+          serviceId: id,
+          serviceName: String(name || '').trim() || 'New service',
+          body: `${String(name || 'A new service').trim()} is now available.`,
+        },
+      })
+    } catch (err) {
+      console.warn('[services] service_new notification failed:', err?.message || err)
+    }
+  }
+
   return { id }
 }
 
@@ -372,8 +388,14 @@ async function updateService(serviceId, payload) {
   const price = Number(priceVnd)
   const duration = durationMinutes === undefined || durationMinutes === null ? null : Number(durationMinutes)
 
-  const exists = await query('SELECT TOP 1 ServiceId FROM Services WHERE ServiceId = @serviceId', { serviceId })
-  if (!exists.recordset?.length) {
+  const existingRes = await query(
+    `SELECT TOP 1 ServiceId, Name, Price, Status
+     FROM Services
+     WHERE ServiceId = @serviceId`,
+    { serviceId },
+  )
+  const existing = existingRes.recordset?.[0]
+  if (!existing) {
     const err = new Error('Service not found')
     err.status = 404
     throw err
@@ -408,6 +430,38 @@ async function updateService(serviceId, payload) {
 
   if (images !== undefined) {
     await replaceServiceImages(serviceId, images)
+  }
+
+  const oldPrice = Number(existing.Price)
+  const newPrice = Number.isFinite(price) ? price : oldPrice
+  const nextStatus = String(status || existing.Status || '').trim().toLowerCase()
+  const prevStatus = String(existing.Status || '').trim().toLowerCase()
+  const nextName = String(name || existing.Name || '').trim() || 'Service'
+
+  try {
+    if (Number.isFinite(oldPrice) && Number.isFinite(newPrice) && newPrice < oldPrice) {
+      await notifyAllCustomersEvent({
+        event: 'service_discount',
+        payload: {
+          serviceId,
+          serviceName: nextName,
+          oldPrice,
+          newPrice,
+          body: `${nextName} is now discounted from ${oldPrice.toLocaleString('vi-VN')} to ${newPrice.toLocaleString('vi-VN')} VND.`,
+        },
+      })
+    } else if (prevStatus !== 'active' && nextStatus === 'active') {
+      await notifyAllCustomersEvent({
+        event: 'service_new',
+        payload: {
+          serviceId,
+          serviceName: nextName,
+          body: `${nextName} is now available.`,
+        },
+      })
+    }
+  } catch (err) {
+    console.warn('[services] service update notification failed:', err?.message || err)
   }
 
   return { id: serviceId }

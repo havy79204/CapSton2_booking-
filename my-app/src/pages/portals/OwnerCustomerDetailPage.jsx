@@ -17,7 +17,7 @@ function initialOf(name) {
 function mapBookingStatusClass(status) {
   const s = String(status || '').toLowerCase()
   if (s.includes('confirm')) return 'status-confirmed'
-  if (s.includes('C')) return 'status-C'
+  if (s.includes('pending')) return 'status-pending'
   if (s.includes('complete')) return 'status-completed'
   if (s.includes('cancel')) return 'status-cancelled'
   return ''
@@ -26,7 +26,7 @@ function mapBookingStatusClass(status) {
 function normalizeOrderStatus(status) {
   const s = String(status || '').trim().toLowerCase()
   if (!s) return 'Pending'
-  if (s === 'c' || s === 'pending') return 'Pending'
+  if (s === 'pending') return 'Pending'
   if (s === 'processing') return 'Processing'
   if (s === 'shipping' || s === 'shipped' || s === 'delivering' || s === 'in transit') return 'Shipping'
   if (s === 'completed' || s === 'complete' || s === 'delivered') return 'Completed'
