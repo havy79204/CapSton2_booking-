@@ -3,19 +3,19 @@ const notificationsService = require('../../services/notifications.service')
 
 function getUserIdFromReq(req) {
   const sub = req.user?.sub
-  const userId = Number(sub)
-  return Number.isFinite(userId) ? userId : null
+  const userId = String(sub || '').trim()
+  return userId || null
 }
 
 const getNotifications = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
-  const data = await notificationsService.listNotifications({ scope: 'owner', userId })
+  const data = await notificationsService.listOwnerNotifications({ userId })
   res.json({ ok: true, data })
 })
 
 const postMarkRead = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
-  const data = await notificationsService.markAllRead({ scope: 'owner', userId })
+  const data = await notificationsService.markAllOwnerNotificationsRead({ userId })
   res.json({ ok: true, data })
 })
 

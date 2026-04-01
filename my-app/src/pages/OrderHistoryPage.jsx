@@ -6,14 +6,14 @@ import '../styles/HistoryPage.css'
 
 function statusClass(status) {
   const value = String(status || '').toLowerCase()
-  if (value === 'C') return 'C'
+  if (value === 'pending') return 'pending'
   if (value.includes('cancel') || value.includes('failed')) return 'cancelled'
   if (value.includes('paid') || value.includes('deliver') || value.includes('complete')) return 'success'
   return 'default'
 }
 
-function isC(status) {
-  return String(status || '').trim().toLowerCase() === 'C'
+function isPending(status) {
+  return String(status || '').trim().toLowerCase() === 'pending'
 }
 
 function fmtMoney(value) {
@@ -28,11 +28,11 @@ const OrderHistoryPage = () => {
   const handleCancel = async (order) => {
     const orderId = order?.OrderId
     if (!orderId) return
-    if (!isC(order.Status)) {
-      alert('Only C orders can be cancelled')
+    if (!isPending(order.Status)) {
+      alert('Only pending orders can be cancelled')
       return
     }
-    if (!window.confirm('Cancel this C order?')) return
+    if (!window.confirm('Cancel this pending order?')) return
 
     try {
       setCancellingId(orderId)
@@ -118,7 +118,7 @@ const OrderHistoryPage = () => {
                   </table>
                 </div>
 
-                {isC(order.Status) ? (
+                {isPending(order.Status) ? (
                   <div className="history-actions">
                     <button
                       className="history-cancel-btn"

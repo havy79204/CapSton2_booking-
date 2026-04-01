@@ -37,6 +37,13 @@ function parseDbServer(input) {
 }
 
 const parsedServer = parseDbServer(process.env.DB_SERVER)
+const dbInstanceFromEnv = process.env.DB_INSTANCE ? String(process.env.DB_INSTANCE).trim() : ''
+const resolvedDbServer = parsedServer.server || 'localhost'
+const resolvedDbInstance = parsedServer.instanceName || dbInstanceFromEnv || undefined
+
+const nodeEnvLower = String(process.env.NODE_ENV || 'development').toLowerCase()
+const isProduction = nodeEnvLower === 'production'
+const isDevelopment = nodeEnvLower === 'development'
 
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -47,14 +54,16 @@ const env = {
   },
 
   db: {
-    user: required('DB_USER'),
-    password: required('DB_PASSWORD'),
-    server: parsedServer.server || required('DB_SERVER'),
-    instanceName: process.env.DB_INSTANCE || parsedServer.instanceName,
-    database: required('DB_DATABASE'),
+    server: resolvedDbServer,
+    instanceName: resolvedDbInstance,
+    database: process.env.DB_DATABASE,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
     port: asInt(process.env.DB_PORT, 1433),
     encrypt: asBool(process.env.DB_ENCRYPT, false),
     trustServerCertificate: asBool(process.env.DB_TRUST_SERVER_CERT, true),
+    tlsMinVersion: process.env.DB_TLS_MIN_VERSION ? String(process.env.DB_TLS_MIN_VERSION).trim() : '',
+    tlsCiphers: process.env.DB_TLS_CIPHERS ? String(process.env.DB_TLS_CIPHERS).trim() : '',
   },
 
   auth: {
@@ -69,6 +78,11 @@ const env = {
             return crypto.randomBytes(32).toString('hex')
           })()),
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  },
+
+  features: {
+    quickLoginEnabled: !isProduction && asBool(process.env.ENABLE_QUICK_LOGIN, isDevelopment),
+    quickLoginDbFallback: !isProduction && asBool(process.env.QUICK_LOGIN_DB_FALLBACK, true),
   },
 
   smtp: {
@@ -91,9 +105,13 @@ const env = {
     locale: process.env.VNPAY_LOCALE ? String(process.env.VNPAY_LOCALE).trim() : 'vn',
     currency: process.env.VNPAY_CURRENCY ? String(process.env.VNPAY_CURRENCY).trim() : 'VND',
   },
-
-  features: {
-    quickLoginEnabled: asBool(process.env.ENABLE_QUICK_LOGIN, true),
+  ngrok: {
+    enabled: asBool(process.env.NGROK_ENABLED, false),
+    authToken: process.env.NGROK_AUTH_TOKEN ? String(process.env.NGROK_AUTH_TOKEN).trim() : '',
+    region: process.env.NGROK_REGION ? String(process.env.NGROK_REGION).trim() : '',
+    bin: process.env.NGROK_BIN ? String(process.env.NGROK_BIN).trim() : '',
+    frontendEnabled: asBool(process.env.NGROK_FRONTEND_ENABLED, false),
+    frontendPort: asInt(process.env.NGROK_FRONTEND_PORT, 5173),
   },
 }
 

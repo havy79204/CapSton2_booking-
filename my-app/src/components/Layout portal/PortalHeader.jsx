@@ -1,12 +1,14 @@
 import React from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { io } from 'socket.io-client'
 import { IconBell, IconMessage, IconSearch } from './PortalIcons.jsx'
 import { api } from '../../lib/api.js'
-import { clearToken } from '../../lib/auth.js'
+import { clearToken, getToken } from '../../lib/auth.js'
 
 export default function PortalHeader() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [unreadCount, setUnreadCount] = React.useState(0)
 
   const onLogout = React.useCallback(async () => {
     try {
@@ -18,6 +20,54 @@ export default function PortalHeader() {
     clearToken()
     window.location.href = '/login'
   }, [])
+
+  const loadUnreadCount = React.useCallback(async () => {
+    try {
+      const data = await api.get('/api/owner/notifications')
+      const list = Array.isArray(data) ? data : []
+      setUnreadCount(list.filter((item) => !item?.read).length)
+    } catch {
+      // ignore header badge fetch errors
+    }
+  }, [])
+
+  React.useEffect(() => {
+    loadUnreadCount()
+  }, [loadUnreadCount])
+
+  React.useEffect(() => {
+    const onCountUpdate = (event) => {
+      const count = Number(event?.detail?.unreadCount || 0)
+      setUnreadCount(Math.max(0, count))
+    }
+
+    window.addEventListener('owner:notifications-count', onCountUpdate)
+    return () => window.removeEventListener('owner:notifications-count', onCountUpdate)
+  }, [])
+
+  React.useEffect(() => {
+    const token = getToken()
+    if (!token) return undefined
+
+    const rawBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
+    const socketBase = String(rawBase || '').replace(/\/+$/, '')
+
+    const socket = io(socketBase, {
+      auth: { token },
+      transports: ['polling', 'websocket'],
+    })
+
+    const onOwnerNotification = () => {
+      loadUnreadCount()
+    }
+
+    socket.on('owner:notification', onOwnerNotification)
+
+    return () => {
+      socket.off('owner:notification', onOwnerNotification)
+      socket.disconnect()
+    }
+  }, [loadUnreadCount])
 
   const headerMeta = React.useMemo(() => {
     const path = location.pathname
@@ -58,7 +108,11 @@ export default function PortalHeader() {
               onClick={() => navigate('/portals/owner/notifications')}
             >
               <IconBell />
-              <span className="portal-dot" aria-hidden="true" />
+              {unreadCount > 0 ? (
+                <span className="portal-notificationBadge" aria-hidden="true">
+                  {Math.min(unreadCount, 99)}
+                </span>
+              ) : null}
             </button>
             <button
               className="portal-iconBtn"

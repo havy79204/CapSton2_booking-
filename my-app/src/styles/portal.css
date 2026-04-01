@@ -557,6 +557,25 @@ input[class*="search"]::placeholder {
   background: var(--danger);
 }
 
+.portal-notificationBadge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #d92d20;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+  line-height: 1;
+}
+
 /* Content */
 .portal-content {
   padding: 24px 24px 36px;

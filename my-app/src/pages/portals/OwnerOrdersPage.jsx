@@ -55,7 +55,6 @@ function defaultCreateOrderForm() {
 function normalizeDisplayStatus(status) {
   const raw = String(status || '').trim().toLowerCase()
   if (!raw) return '-'
-  if (raw === 'c') return 'Pending'
   return status
 }
 
@@ -124,6 +123,12 @@ export default function OwnerOrdersPage() {
       setProducts([])
     }
   }, [])
+
+  const refreshOrdersInBackground = useCallback((nextFilters) => {
+    Promise.resolve()
+      .then(() => loadOrders(nextFilters))
+      .catch(() => {})
+  }, [loadOrders])
 
   useEffect(() => {
     loadProducts()
@@ -243,8 +248,24 @@ export default function OwnerOrdersPage() {
         items: itemsPayload,
       })
 
+      setOrderReport((prev) => ({
+        ...prev,
+        items: (prev.items || []).map((item) => {
+          const id = item?.Id || item?.id || item?.OrderId || item?.OrderCode
+          if (String(id || '') !== String(orderEditing.OrderId)) return item
+          return {
+            ...item,
+            CustomerName: orderForm.customerName,
+            CustomerPhone: orderForm.customerPhone,
+            CustomerAddress: orderForm.customerAddress,
+            PaymentMethod: orderForm.paymentMethod,
+            Status: orderForm.status,
+          }
+        }),
+      }))
+
       setOpenOrderModal(false)
-      await loadOrders(orderFilters)
+      refreshOrdersInBackground(orderFilters)
     } catch (err) {
       console.error(err)
       setOrdersError(err?.message || 'Unable to update order')
@@ -287,8 +308,8 @@ export default function OwnerOrdersPage() {
 
       setOpenCreateOrderModal(false)
       resetCreateOrder()
-      await loadOrders(orderFilters)
-      await loadProducts()
+      refreshOrdersInBackground(orderFilters)
+      Promise.resolve().then(loadProducts).catch(() => {})
     } catch (err) {
       console.error(err)
       setOrdersError(err?.message || 'Unable to create order')
@@ -306,12 +327,16 @@ export default function OwnerOrdersPage() {
       setDeletingOrderId(orderId)
       setOrdersError('')
       await api.del(`/api/owner/retail/orders/${orderId}`)
+      setOrderReport((prev) => ({
+        ...prev,
+        items: (prev.items || []).filter((item) => String(item?.OrderId || item?.Id || item?.id || '') !== orderId),
+      }))
       if (orderEditing?.OrderId === orderId) {
         setOpenOrderModal(false)
         setOrderEditing(null)
       }
-      await loadOrders(orderFilters)
-      await loadProducts()
+      refreshOrdersInBackground(orderFilters)
+      Promise.resolve().then(loadProducts).catch(() => {})
     } catch (err) {
       console.error(err)
       setOrdersError(err?.message || 'Unable to delete order')

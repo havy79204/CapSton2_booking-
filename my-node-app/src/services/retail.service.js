@@ -1,4 +1,10 @@
 const { query, newId } = require('../config/query')
+const {
+  notifyCustomerEvent,
+  notifyAllCustomersEvent,
+  notifyOwnerEvent,
+  notifyWishlistDiscountByProduct,
+} = require('./notifications.service')
 const fs = require('fs/promises')
 const path = require('path')
 
@@ -670,8 +676,14 @@ async function updateRetailProduct(productId, payload) {
     throw err
   }
 
-  const exists = await query('SELECT TOP 1 ProductId FROM Products WHERE ProductId = @id', { id: productId })
-  if (!exists.recordset?.length) {
+  const existingRes = await query(
+    `SELECT TOP 1 ProductId, Name, Price, Status
+     FROM Products
+     WHERE ProductId = @id`,
+    { id: productId },
+  )
+  const existing = existingRes.recordset?.[0]
+  if (!existing) {
     const err = new Error('Product not found')
     err.status = 404
     throw err
@@ -737,6 +749,45 @@ async function updateRetailProduct(productId, payload) {
       price: sellPrice !== undefined ? sellPrice : null,
     }
   )
+
+  const oldPrice = Number(existing.Price)
+  const updatedPrice = sellPrice !== undefined ? Number(sellPrice) : oldPrice
+  const updatedName = String(name || existing.Name || '').trim() || 'Product'
+  const previousStatus = String(existing.Status || '').trim().toLowerCase()
+  const currentStatus = String(status || existing.Status || '').trim().toLowerCase()
+
+  try {
+    if (Number.isFinite(oldPrice) && Number.isFinite(updatedPrice) && updatedPrice < oldPrice) {
+      await notifyAllCustomersEvent({
+        event: 'product_discount',
+        payload: {
+          productId,
+          productName: updatedName,
+          oldPrice,
+          newPrice: updatedPrice,
+          body: `${updatedName} is now discounted from ${oldPrice.toLocaleString('vi-VN')} to ${updatedPrice.toLocaleString('vi-VN')} VND.`,
+        },
+      })
+
+      await notifyWishlistDiscountByProduct({
+        productId,
+        oldPrice,
+        newPrice: updatedPrice,
+        productName: updatedName,
+      })
+    } else if (previousStatus !== 'active' && currentStatus === 'active') {
+      await notifyAllCustomersEvent({
+        event: 'product_new',
+        payload: {
+          productId,
+          productName: updatedName,
+          body: `${updatedName} is now available in our catalog.`,
+        },
+      })
+    }
+  } catch (err) {
+    console.warn('[retail] update product notification failed:', err?.message || err)
+  }
 
   if (nextImages) {
     await replaceProductImages(productId, nextImages)
@@ -940,6 +991,21 @@ async function createRetailProduct(payload) {
       categoryId,
     }
   )
+
+  try {
+    if (String(status || '').trim().toLowerCase() === 'active') {
+      await notifyAllCustomersEvent({
+        event: 'product_new',
+        payload: {
+          productId: id,
+          productName: String(name || '').trim() || 'New product',
+          body: `${String(name || 'A new product').trim()} is now available in our catalog.`,
+        },
+      })
+    }
+  } catch (err) {
+    console.warn('[retail] create product notification failed:', err?.message || err)
+  }
 
   await replaceProductImages(id, nextImages)
 
@@ -1609,6 +1675,25 @@ async function createRetailOrder(payload = {}, { actor } = {}) {
   }
 
   await syncRetailInventoryByProducts(resolvedItems.map((item) => item.productId))
+
+  if (actor?.userId) {
+    try {
+      await notifyCustomerEvent({
+        userId: actor.userId,
+        event: 'order_created',
+        orderId,
+        payload: { orderId },
+      })
+
+      await notifyOwnerEvent({
+        event: 'order_new',
+        orderId,
+      })
+    } catch (err) {
+      console.warn('[retail] Create order notify/email failed:', err?.message || err)
+    }
+  }
+
   return getRetailOrder(orderId)
 }
 
@@ -1621,7 +1706,7 @@ async function updateRetailOrder(orderIdInput, payload = {}) {
   }
 
   const found = await query(
-    `SELECT TOP 1 OrderId, Status
+    `SELECT TOP 1 OrderId, Status, UserId
      FROM Orders
      WHERE OrderId = @orderId`,
     { orderId }
@@ -1679,6 +1764,55 @@ async function updateRetailOrder(orderIdInput, payload = {}) {
       paymentMethod: paymentMethod !== undefined ? paymentMethod : null,
     }
   )
+
+  const userId = String(current.UserId || '').trim()
+  if (userId && nextStatus && nextStatus !== current.Status) {
+    const statusMap = {
+      Pending: 'order_processing',
+      Processing: 'order_processing',
+      Shipping: 'order_shipping',
+      Completed: 'order_delivered',
+      Cancelled: 'order_cancelled',
+      Failed: 'order_failed',
+    }
+
+    const event = statusMap[nextStatus] || 'order_processing'
+    try {
+      await notifyCustomerEvent({
+        userId,
+        event,
+        orderId,
+        payload: { orderId },
+      })
+
+      await notifyOwnerEvent({
+        event,
+        orderId,
+      })
+    } catch (err) {
+      console.warn('[retail] Update order status notify/email failed:', err?.message || err)
+    }
+  }
+
+  if (userId && paymentMethod !== undefined) {
+    const normalizedPayment = String(paymentMethod || '').trim().toUpperCase()
+    const paymentEvent = normalizedPayment === 'COD' ? 'payment_pending' : 'payment_success'
+    try {
+      await notifyCustomerEvent({
+        userId,
+        event: paymentEvent,
+        orderId,
+        payload: { orderId },
+      })
+
+      await notifyOwnerEvent({
+        event: paymentEvent,
+        orderId,
+      })
+    } catch (err) {
+      console.warn('[retail] Update payment notify/email failed:', err?.message || err)
+    }
+  }
 
   return getRetailOrder(orderId)
 }

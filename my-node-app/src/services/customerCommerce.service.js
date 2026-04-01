@@ -1,5 +1,6 @@
 const { query, newId } = require('../config/query')
 const { getSettingsMap } = require('./settings.service')
+const { notifyCustomerEvent, notifyOwnerEvent, scheduleBookingReminders } = require('./notifications.service')
 
 let _ordersChannelColumnPromise = null
 const ACTIVE_SERVICE_WHERE = `(Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) = 'active')`
@@ -625,7 +626,7 @@ async function getAutoAssignedStaffId() {
      FROM Staff s
      LEFT JOIN BookingServices bs ON bs.StaffId = s.StaffId
      LEFT JOIN Bookings b ON b.BookingId = bs.BookingId
-       AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, 'C')))) IN ('C', 'confirmed', 'booked')
+      AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, 'Pending')))) IN ('c', 'pending', 'confirmed', 'booked')
      WHERE s.Status IS NULL
        OR LOWER(LTRIM(RTRIM(s.Status))) NOT IN (N'nghỉ', 'inactive', 'off')
      GROUP BY s.StaffId
@@ -660,7 +661,7 @@ async function getAutoAssignedStaffIdForService(serviceIdInput) {
          AND (sv.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), sv.Status)))) = 'active')
        LEFT JOIN BookingServices bs ON bs.StaffId = s.StaffId
        LEFT JOIN Bookings b ON b.BookingId = bs.BookingId
-         AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, 'C')))) IN ('c', 'confirmed', 'booked')
+         AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, 'Pending')))) IN ('c', 'pending', 'confirmed', 'booked')
        WHERE s.Status IS NULL
          OR LOWER(LTRIM(RTRIM(s.Status))) NOT IN (N'nghỉ', 'inactive', 'off')
        GROUP BY s.StaffId
@@ -682,7 +683,7 @@ async function getAutoAssignedStaffIdForService(serviceIdInput) {
          AND ss.ServiceId = @serviceId
        LEFT JOIN BookingServices bs ON bs.StaffId = s.StaffId
        LEFT JOIN Bookings b ON b.BookingId = bs.BookingId
-         AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, 'C')))) IN ('c', 'confirmed', 'booked')
+         AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, 'Pending')))) IN ('c', 'pending', 'confirmed', 'booked')
        WHERE s.Status IS NULL
          OR LOWER(LTRIM(RTRIM(s.Status))) NOT IN (N'nghỉ', 'inactive', 'off')
        GROUP BY s.StaffId
@@ -1079,7 +1080,7 @@ async function checkoutCart(userIdInput, payload = {}) {
      );`,
     {
       userId,
-      status: 'C',
+      status: 'Pending',
       customerName,
       customerPhone,
       customerAddress: addressText,
@@ -1142,11 +1143,41 @@ async function checkoutCart(userIdInput, payload = {}) {
     await query('DELETE FROM CartItems WHERE CartItemId = @cartItemId', { cartItemId: item.CartItemId })
   }
 
+  try {
+    await notifyCustomerEvent({
+      userId,
+      event: 'order_created',
+      orderId,
+      payload: { orderId },
+    })
+
+    if (String(paymentMethod || '').toLowerCase() === 'online') {
+      await notifyCustomerEvent({
+        userId,
+        event: 'payment_pending',
+        orderId,
+        payload: { orderId },
+      })
+
+      await notifyOwnerEvent({
+        event: 'payment_pending',
+        orderId,
+      })
+    }
+
+    await notifyOwnerEvent({
+      event: 'order_new',
+      orderId,
+    })
+  } catch (err) {
+    console.warn('[customerCommerce] Order notify/email failed:', err?.message || err)
+  }
+
   return {
     OrderId: orderId,
-    Status: 'C',
+    Status: 'Pending',
     PaymentMethod: paymentMethod,
-    PaymentStatus: derivePaymentStatus('C', paymentMethod),
+    PaymentStatus: derivePaymentStatus('Pending', paymentMethod),
     Summary: {
       Subtotal: subtotal,
       Tax: 0,
@@ -1275,6 +1306,12 @@ async function createBooking(userIdInput, payload = {}) {
   }
 
   if (bookingMinutes < openMinutes || bookingMinutes >= closeMinutes) {
+    try {
+      await notifyOwnerEvent({
+        event: 'booking_rejected',
+        payload: { reason: `Booking request outside working hours (${bookingSettings.openTime}-${bookingSettings.closeTime}).` },
+      })
+    } catch {}
     const err = new Error(`Booking time must be within working hours (${bookingSettings.openTime} - ${bookingSettings.closeTime})`)
     err.status = 400
     throw err
@@ -1284,6 +1321,12 @@ async function createBooking(userIdInput, payload = {}) {
   const breakEndMinutes = parseTimeToMinutes(bookingSettings.breakEnd)
   if (breakStartMinutes !== null && breakEndMinutes !== null && breakStartMinutes < breakEndMinutes) {
     if (bookingMinutes >= breakStartMinutes && bookingMinutes < breakEndMinutes) {
+      try {
+        await notifyOwnerEvent({
+          event: 'booking_rejected',
+          payload: { reason: 'Booking request falls into break time window.' },
+        })
+      } catch {}
       const err = new Error('Selected time is within salon break time')
       err.status = 400
       throw err
@@ -1292,6 +1335,12 @@ async function createBooking(userIdInput, payload = {}) {
 
   const slotMinutes = Math.max(5, Math.trunc(bookingSettings.slotMinutes || 30))
   if ((bookingMinutes - openMinutes) % slotMinutes !== 0) {
+    try {
+      await notifyOwnerEvent({
+        event: 'booking_rejected',
+        payload: { reason: `Booking request not aligned with ${slotMinutes}-minute slot configuration.` },
+      })
+    } catch {}
     const err = new Error(`Selected time is not aligned with ${slotMinutes}-minute booking slots`)
     err.status = 400
     throw err
@@ -1342,6 +1391,7 @@ async function createBooking(userIdInput, payload = {}) {
 
   const isReturningCustomer = await hasPreviousBookings(userId)
   const autoStaffId = !isReturningCustomer ? await getAutoAssignedStaffId() : null
+  const assignedStaffIds = new Set()
 
   // Calculate total duration from services
   const staffServices = new Map()
@@ -1391,6 +1441,25 @@ async function createBooking(userIdInput, payload = {}) {
     )
 
     if (conflictRes.recordset && conflictRes.recordset.length > 0) {
+      try {
+        await notifyOwnerEvent({
+          event: 'booking_conflict',
+          payload: {
+            bookingTime: bookingStart.toISOString(),
+            reason: 'Booking conflict detected while creating customer booking.',
+          },
+        })
+      } catch {}
+
+      try {
+        await notifyCustomerEvent({
+          userId,
+          event: 'booking_rejected',
+          payload: { reason: 'Your requested specialist/time slot is unavailable. Please choose another slot.' },
+        })
+      } catch (notifyErr) {
+        console.warn('[customerCommerce] Booking rejected notify/email failed:', notifyErr?.message || notifyErr)
+      }
       const err = new Error('The selected specialist is not available at this time. Please choose another time slot or specialist.')
       err.status = 409
       throw err
@@ -1443,6 +1512,7 @@ async function createBooking(userIdInput, payload = {}) {
     }
 
     if (resolvedStaffId) {
+      assignedStaffIds.add(String(resolvedStaffId))
       const supported = await staffSupportsService(resolvedStaffId, item.serviceId)
       if (!supported) {
         if (!isReturningCustomer) {
@@ -1491,6 +1561,57 @@ async function createBooking(userIdInput, payload = {}) {
   }
 
   const latest = await listBookings(userId, 1)
+  try {
+    await notifyCustomerEvent({
+      userId,
+      event: 'booking_created',
+      bookingId,
+      payload: { bookingTime: when.toISOString() },
+    })
+
+    await scheduleBookingReminders({
+      userId,
+      bookingId,
+      bookingTime: when.toISOString(),
+    })
+
+    const firstStaffId = [...assignedStaffIds][0]
+    if (firstStaffId) {
+      const staffRes = await query(
+        `SELECT TOP 1 u.Name
+         FROM Staff s
+         LEFT JOIN Users u ON u.UserId = s.UserId
+         WHERE s.StaffId = @staffId`,
+        { staffId: firstStaffId },
+      )
+      const staffName = String(staffRes.recordset?.[0]?.Name || '').trim() || null
+      await notifyCustomerEvent({
+        userId,
+        event: 'booking_staff_assigned',
+        bookingId,
+        payload: { staffName },
+      })
+    } else {
+      await notifyOwnerEvent({
+        event: 'booking_unassigned',
+        bookingId,
+        payload: {
+          reason: 'Booking created without specialist assignment.',
+        },
+      })
+    }
+
+    await notifyOwnerEvent({
+      event: 'booking_new',
+      bookingId,
+      payload: {
+        bookingTime: when.toISOString(),
+      },
+    })
+  } catch (err) {
+    console.warn('[customerCommerce] Booking notify/email failed:', err?.message || err)
+  }
+
   return latest[0] || { BookingId: bookingId }
 }
 
@@ -1561,7 +1682,7 @@ async function listOrders(userIdInput, limit = 20) {
     orders.push({
       OrderId: row.OrderId,
       UserId: row.UserId,
-      Status: row.Status || 'C',
+      Status: row.Status || 'Pending',
       CreatedAt: row.CreatedAt,
       CustomerName: row.CustomerName || '',
       CustomerPhone: row.CustomerPhone || '',
@@ -1594,7 +1715,7 @@ async function cancelBooking(userIdInput, bookingIdInput) {
   }
 
   const bookingRes = await query(
-    `SELECT TOP 1 BookingId, CustomerUserId, ISNULL(Status, 'C') AS Status
+    `SELECT TOP 1 BookingId, CustomerUserId, ISNULL(Status, 'Pending') AS Status
      FROM Bookings
      WHERE BookingId = @bookingId AND CustomerUserId = @userId`,
     { bookingId, userId }
@@ -1624,6 +1745,22 @@ async function cancelBooking(userIdInput, bookingIdInput) {
     }
   )
 
+  try {
+    await notifyCustomerEvent({
+      userId,
+      event: 'booking_cancelled',
+      bookingId,
+      payload: { bookingId },
+    })
+
+    await notifyOwnerEvent({
+      event: 'booking_cancelled',
+      bookingId,
+    })
+  } catch (err) {
+    console.warn('[customerCommerce] Cancel booking notify/email failed:', err?.message || err)
+  }
+
   return { BookingId: bookingId, Status: 'Cancelled' }
 }
 
@@ -1638,7 +1775,7 @@ async function cancelOrder(userIdInput, orderIdInput) {
   }
 
   const orderRes = await query(
-    `SELECT TOP 1 OrderId, ISNULL(Status, 'C') AS Status
+    `SELECT TOP 1 OrderId, ISNULL(Status, 'Pending') AS Status
      FROM Orders
      WHERE OrderId = @orderId AND UserId = @userId`,
     { orderId, userId }
@@ -1687,6 +1824,22 @@ async function cancelOrder(userIdInput, orderIdInput) {
       status: 'Cancelled',
     }
   )
+
+  try {
+    await notifyCustomerEvent({
+      userId,
+      event: 'order_cancelled',
+      orderId,
+      payload: { orderId },
+    })
+
+    await notifyOwnerEvent({
+      event: 'order_cancelled',
+      orderId,
+    })
+  } catch (err) {
+    console.warn('[customerCommerce] Cancel order notify/email failed:', err?.message || err)
+  }
 
   return { OrderId: orderId, Status: 'Cancelled' }
 }

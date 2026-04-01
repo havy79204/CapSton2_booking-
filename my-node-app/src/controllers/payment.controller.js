@@ -1,5 +1,39 @@
 const crypto = require('crypto')
 const { env } = require('../config/config')
+const { query } = require('../config/query')
+const { notifyCustomerEvent, notifyOwnerEvent } = require('../services/notifications.service')
+
+async function notifyPaymentResult(orderIdInput, isSuccess, reason = '') {
+  const orderId = String(orderIdInput || '').trim()
+  if (!orderId) return
+
+  try {
+    const orderRes = await query(
+      `SELECT TOP 1 UserId
+       FROM Orders
+       WHERE OrderId = @orderId`,
+      { orderId },
+    )
+
+    const userId = String(orderRes.recordset?.[0]?.UserId || '').trim()
+    if (!userId) return
+
+    await notifyCustomerEvent({
+      userId,
+      orderId,
+      event: isSuccess ? 'payment_success' : 'payment_failed',
+      payload: { orderId, reason },
+    })
+
+    await notifyOwnerEvent({
+      event: isSuccess ? 'payment_success' : 'payment_failed',
+      orderId,
+      payload: { reason },
+    })
+  } catch (err) {
+    console.warn('[payment] notify payment result failed:', err?.message || err)
+  }
+}
 
 function buildFrontendReturnUrl(params = {}) {
   const base = String(env.vnpay?.frontendReturnUrl || '').trim()
@@ -53,6 +87,10 @@ async function vnpayReturn(req, res) {
     // Verify checksum
     if (hmac !== secureHash) {
       console.error('[VNPAY] Invalid secure hash')
+      await notifyOwnerEvent({
+        event: 'system_error',
+        payload: { reason: 'VNPAY invalid secure hash callback detected.' },
+      })
       const redirectUrl = buildFrontendReturnUrl({
         status: 'failed',
         code: 'INVALID_HASH',
@@ -79,6 +117,7 @@ async function vnpayReturn(req, res) {
     if (responseCode === '00') {
       // Payment successful
       console.log('[VNPAY] Payment successful!')
+      await notifyPaymentResult(orderId, true)
       const redirectUrl = buildFrontendReturnUrl({
         status: 'success',
         code: 'PAYMENT_SUCCESS',
@@ -98,6 +137,7 @@ async function vnpayReturn(req, res) {
     } else {
       // Payment failed
       console.warn(`[VNPAY] Payment failed with code: ${responseCode}`)
+      await notifyPaymentResult(orderId, false, `Payment failed with code ${responseCode}`)
       const redirectUrl = buildFrontendReturnUrl({
         status: 'failed',
         code: `PAYMENT_FAILED_${responseCode}`,
@@ -115,6 +155,10 @@ async function vnpayReturn(req, res) {
     }
   } catch (err) {
     console.error('[VNPAY] Error processing callback:', err)
+    await notifyOwnerEvent({
+      event: 'system_error',
+      payload: { reason: `VNPAY callback error: ${err?.message || 'Unknown error'}` },
+    })
     const redirectUrl = buildFrontendReturnUrl({
       status: 'failed',
       code: 'SERVER_ERROR',

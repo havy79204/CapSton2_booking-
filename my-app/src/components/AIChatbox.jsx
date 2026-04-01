@@ -340,8 +340,8 @@ export default function AIChatbox() {
         <div className={`chat-content ${mode === 'welcome' ? 'welcome-mode' : ''}`}>
           {mode === 'welcome' && (
             <div className="welcome-screen">
-              <h1 className="welcome-title">Chào bạn!</h1>
-              <p className="welcome-subtitle">Hôm nay tôi có thể giúp gì cho bạn?</p>
+              <h1 className="welcome-title">Hello you!</h1>
+              <p className="welcome-subtitle">How can I help you today?</p>
             </div>
           )}
 
