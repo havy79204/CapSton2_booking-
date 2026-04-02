@@ -1,12 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
-import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import { IconAlertTriangle, IconBarCart, IconCheckCircle, IconSearch, IconStore } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
 import { useNavigate } from 'react-router-dom'
 import '../../styles/products.css'
-import '../../styles/global-buttons.css'
 function formatVnd(value) {
   const n = Number(value || 0)
   return n.toLocaleString('en-US')
@@ -87,7 +85,6 @@ export default function OwnerProductsPage() {
   const [variantsFor, setVariantsFor] = useState(null)
   const [variantsError, setVariantsError] = useState('')
   const [variants, setVariants] = useState([])
-  const [variantToDelete, setVariantToDelete] = useState(null)
   const [newVariant, setNewVariant] = useState({ name: '', stock: '0' })
 
   const variantsTotalStock = useMemo(() => {
@@ -103,6 +100,7 @@ export default function OwnerProductsPage() {
     kind: '',
     status: '',
     sellPriceVnd: '0',
+    importPriceVnd: '',
     images: [],
     description: '',
   })
@@ -230,6 +228,7 @@ export default function OwnerProductsPage() {
         kind: String(saved.form.kind || ''),
         status: String(saved.form.status || ''),
         sellPriceVnd: String(saved.form.sellPriceVnd || '0'),
+        importPriceVnd: String(saved.form.importPriceVnd || ''),
         images: Array.isArray(saved.form.images) ? saved.form.images.filter(Boolean).slice(0, 8) : [],
         description: String(saved.form.description || ''),
       })
@@ -422,7 +421,7 @@ export default function OwnerProductsPage() {
   function openCreate() {
     setEditing(null)
     setError('')
-    setForm({ name: '', categoryId: '', kind: '', status: '', sellPriceVnd: '0', images: [], description: '' })
+    setForm({ name: '', categoryId: '', kind: '', status: '', sellPriceVnd: '0', importPriceVnd: '', images: [], description: '' })
     setSelectedImageIdx(-1)
     setOpen(true)
   }
@@ -445,6 +444,7 @@ export default function OwnerProductsPage() {
       kind: item?.kind || item?.categoryName || '',
       status: item?.status || '',
       sellPriceVnd: String(item?.price ?? '0'),
+      importPriceVnd: '',
       images: Array.isArray(item?.images) ? item.images : item?.imageUrl ? [item.imageUrl] : [],
       description: item?.description || '',
     })
@@ -480,6 +480,13 @@ export default function OwnerProductsPage() {
       return
     }
 
+    const importPriceRaw = digitsOnly(form.importPriceVnd)
+    const importPrice = Number(importPriceRaw || 0)
+    if (importPriceRaw && (!Number.isFinite(importPrice) || importPrice < 0)) {
+      setError('Import price must be 0 or greater')
+      return
+    }
+
     try {
       setError('')
       const payload = {
@@ -490,17 +497,12 @@ export default function OwnerProductsPage() {
         images: Array.isArray(form.images) ? form.images : [],
         description: form.description,
       }
+      if (importPriceRaw) payload.importPriceVnd = String(importPrice)
 
       if (editing?.id) {
         await api.put(`/api/owner/retail/products/${editing.id}`, payload)
-        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
-          detail: { message: 'Product updated successfully', title: 'Completed' } 
-        }));
       } else {
         await api.post('/api/owner/retail/products', payload)
-        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
-          detail: { message: 'Product created successfully', title: 'Completed' } 
-        }));
       }
 
       await load()
@@ -619,11 +621,6 @@ export default function OwnerProductsPage() {
       console.error(err)
       setVariantsError(err?.message || 'Unable to delete variant')
     }
-  }
-
-  function requestDeleteVariant(variant) {
-    if (!variant?.id) return
-    setVariantToDelete(variant)
   }
 
   function openDetail(product) {
@@ -843,22 +840,20 @@ export default function OwnerProductsPage() {
         <div className="products-pagination">
           <button
             type="button"
-            className="products-paginationBtn"
+            className="portal-ghostBtn"
             disabled={page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            aria-label="Previous page"
           >
-            ‹
+            Previous
           </button>
           <span className="products-paginationText">Page {page} / {totalPages}</span>
           <button
             type="button"
-            className="products-paginationBtn"
+            className="portal-ghostBtn"
             disabled={page >= totalPages}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            aria-label="Next page"
           >
-            ›
+            Next
           </button>
         </div>
       </PortalCard>
@@ -937,18 +932,6 @@ export default function OwnerProductsPage() {
                 </div>
               ) : null}
             </label>
-          </div>
-
-          <div className="portal-modalGrid2">
-            <label className="portal-field" style={{ marginTop: 12 }}>
-              <span className="portal-label">Price (VND) <span className="products-required">*</span></span>
-              <input
-                className="portal-input"
-                inputMode="numeric"
-                value={form.sellPriceVnd}
-                onChange={(e) => setForm((p) => ({ ...p, sellPriceVnd: digitsOnly(e.target.value) }))}
-              />
-            </label>
 
             <label className="portal-field" style={{ marginTop: 12 }}>
               <span className="portal-label">Status <span className="products-required">*</span></span>
@@ -964,6 +947,29 @@ export default function OwnerProductsPage() {
                   <option value={form.status}>{form.status}</option>
                 ) : null}
               </select>
+            </label>
+          </div>
+
+          <div className="portal-modalGrid2">
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Price (VND) <span className="products-required">*</span></span>
+              <input
+                className="portal-input"
+                inputMode="numeric"
+                value={form.sellPriceVnd}
+                onChange={(e) => setForm((p) => ({ ...p, sellPriceVnd: digitsOnly(e.target.value) }))}
+              />
+            </label>
+
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Import Price (VND)</span>
+              <input
+                className="portal-input"
+                inputMode="numeric"
+                placeholder="Optional"
+                value={form.importPriceVnd}
+                onChange={(e) => setForm((p) => ({ ...p, importPriceVnd: digitsOnly(e.target.value) }))}
+              />
             </label>
           </div>
 
@@ -1140,7 +1146,7 @@ export default function OwnerProductsPage() {
                         <button type="button" className="portal-ghostBtn" onClick={() => onUpdateVariant(v)}>
                           Save
                         </button>
-                        <button type="button" className="portal-ghostBtn danger" onClick={() => requestDeleteVariant(v)}>
+                        <button type="button" className="portal-ghostBtn danger" onClick={() => onDeleteVariant(v)}>
                           Delete
                         </button>
                       </div>
@@ -1184,19 +1190,6 @@ export default function OwnerProductsPage() {
           </form>
         </PortalCard>
       </PortalModal>
-
-      <ConfirmDeleteModal
-        open={Boolean(variantToDelete)}
-        title="Confirm delete"
-        message={`Are you sure you want to delete variant "${variantToDelete?.name || variantToDelete?.id || 'this variant'}"?`}
-        detail="This action cannot be undone."
-        onClose={() => setVariantToDelete(null)}
-        onConfirm={async () => {
-          const target = variantToDelete
-          setVariantToDelete(null)
-          await onDeleteVariant(target)
-        }}
-      />
     </div>
   )
 }
