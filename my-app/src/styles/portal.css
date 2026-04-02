@@ -2796,7 +2796,7 @@ input[class*="search"]::placeholder {
   }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 640px) {
   .portal-layout {
     grid-template-columns: 1fr;
   }

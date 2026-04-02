@@ -94,6 +94,7 @@ const env = {
 
   features: {
     quickLoginEnabled: asBool(process.env.ENABLE_QUICK_LOGIN, true),
+    quickLoginDbFallback: asBool(process.env.QUICK_LOGIN_DB_FALLBACK, true),
   },
 }
 

@@ -120,6 +120,14 @@ const BookingPage = () => {
   }, [serviceSelections])
 
   const { staffs, loading: staffLoading, error: staffError } = useCustomerStaff(selectedServiceIdsForStaff)
+  
+  // Reset selected staff if they're not in the filtered list
+  useEffect(() => {
+    if (selectedStaffId && staffs.length > 0 && !staffs.some(s => s.StaffId === selectedStaffId)) {
+      console.log('Resetting selected staff - not in filtered list')
+      setSelectedStaffId('')
+    }
+  }, [selectedStaffId, staffs])
   const {
     bookings,
     loading: bookingsLoading,
@@ -207,6 +215,9 @@ const BookingPage = () => {
   const selectedServiceItems = useMemo(() => {
     return serviceSelections.filter((service) => Number(service.quantity || 0) > 0)
   }, [serviceSelections])
+
+  // Show staff picker if there are any services available (regardless of quantity)
+  const hasAnyServices = serviceSelections.length > 0
 
   const isReturningCustomer = Array.isArray(bookings) && bookings.length > 0
   const selectedStaff = (Array.isArray(staffs) ? staffs : []).find((staff) => String(staff.StaffId) === String(selectedStaffId)) || null
@@ -351,7 +362,7 @@ const BookingPage = () => {
       return
     }
 
-    if (isReturningCustomer && !selectedStaffId) {
+    if (!selectedStaffId) {
       alert('Please choose a specialist before booking.')
       return
     }
@@ -371,11 +382,11 @@ const BookingPage = () => {
         notes,
         paymentMethod,
         giftCode: allowCustomerApply ? giftCode : '',
-        staffId: isReturningCustomer ? selectedStaffId : null,
+        staffId: selectedStaffId,
         serviceItems: selectedServiceItems.map((service) => ({
           serviceId: service.ServiceId,
           quantity: Number(service.quantity || 1),
-          staffId: isReturningCustomer ? selectedStaffId : null,
+          staffId: selectedStaffId,
         })),
       })
       setResultTitle('Successfully!')
@@ -385,7 +396,7 @@ const BookingPage = () => {
       setGiftCode('')
       setAppliedPromotion(null)
       setPromoMessage('')
-      if (!isReturningCustomer) setSelectedStaffId('')
+      // Don't reset staffId to keep selection for next booking
       setServiceSelections((prev) => prev.map((service) => ({ ...service, quantity: 0 })))
     } catch (err) {
       setResultTitle('Error')
@@ -460,19 +471,14 @@ const BookingPage = () => {
               <div className="booking-inline-section">
                 <label><IoPersonOutline /> Technician</label>
                 <div className="info-row">
-                  {selectedServiceItems.length === 0 ? (
+                  {!hasAnyServices ? (
                     <div>
                       <strong>Our Specialist Team</strong>
-                      <p>Coose services first to continue</p>
-                    </div>
-                  ) : !isReturningCustomer ? (
-                    <div>
-                      <strong>Auto assignment for new customers</strong>
-                      <p>System will assign available specialist automatically</p>
+                      <p>Choose services first to continue</p>
                     </div>
                   ) : (
                     <div className="staff-picker-block">
-                      <strong>Coose your specialist</strong>
+                      <strong>Choose your specialist</strong>
                       <select
                         className="staff-select"
                         value={selectedStaffId}

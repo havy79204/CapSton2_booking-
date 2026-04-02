@@ -15,6 +15,16 @@ import OwnerSettingsPage from './pages/portals/OwnerSettingsPage.jsx'
 import OwnerNotificationsPage from './pages/portals/OwnerNotificationsPage.jsx'
 import OwnerChatPage from './pages/portals/OwnerChatPage.jsx'
 import OwnerCustomerDetailPage from './pages/portals/OwnerCustomerDetailPage.jsx'
+import StaffPortalLayout from './components/Layout portal/StaffPortalLayout.jsx'
+import StaffAppointmentsPage from './pages/portals/staff/StaffAppointmentsPage.jsx'
+import StaffSchedulePage from './pages/portals/staff/StaffSchedulePage.jsx'
+import StaffStaffPage from './pages/portals/staff/StaffStaffPage.jsx'
+import StaffServicesPage from './pages/portals/staff/StaffServicesPage.jsx'
+import StaffInventoryPage from './pages/portals/staff/StaffInventoryPage.jsx'
+import StaffProductsPage from './pages/portals/staff/StaffProductsPage.jsx'
+import StaffOrdersPage from './pages/portals/staff/StaffOrdersPage.jsx'
+import StaffNotificationsPage from './pages/portals/staff/StaffNotificationsPage.jsx'
+import StaffChatPage from './pages/portals/staff/StaffChatPage.jsx'
 import Header from './components/Header.jsx'
 import Footer from './components/Footer.jsx'
 import AIChatbox from './components/AIChatbox.jsx'
@@ -121,6 +131,26 @@ function App() {
         <Route path="notifications" element={<OwnerNotificationsPage />} />
         <Route path="chat" element={<OwnerChatPage />} />
         <Route index element={<Navigate to="/portals/owner/dashboard" replace />} />
+      </Route>
+
+      <Route
+        path="/portals/staff"
+        element={
+          <RequireAuth>
+            <StaffPortalLayout />
+          </RequireAuth>
+        }
+      >
+        <Route path="appointments" element={<StaffAppointmentsPage />} />
+        <Route path="schedule" element={<StaffSchedulePage />} />
+        <Route path="staff" element={<StaffStaffPage />} />
+        <Route path="services" element={<StaffServicesPage />} />
+        <Route path="inventory" element={<StaffInventoryPage />} />
+        <Route path="products" element={<StaffProductsPage />} />
+        <Route path="orders" element={<StaffOrdersPage />} />
+        <Route path="notifications" element={<StaffNotificationsPage />} />
+        <Route path="chat" element={<StaffChatPage />} />
+        <Route index element={<Navigate to="/portals/staff/schedule" replace />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/login" replace />} />

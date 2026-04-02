@@ -372,6 +372,92 @@ async function getInventory() {
   return { items, history }
 }
 
+async function getInventoryItemById(itemId) {
+  if (!itemId) return null
+
+  const schema = await getSchemaInfo()
+  const hasCategoryMapping = schema.productsHasCategoryId && schema.inventoryHasCategoryId && schema.hasProductCategories
+  const serviceKindExpr = hasCategoryMapping ? 'COALESCE(pc.Name, CAST(NULL AS NVARCHAR(100)))' : 'CAST(NULL AS NVARCHAR(100))'
+
+  // Try to get from InventoryItems first
+  const invResult = await query(
+    `SELECT
+        i.InventoryItemId,
+        CAST(CONCAT('service:', i.InventoryItemId) AS NVARCHAR(100)) AS SkuKey,
+        i.Name,
+        ${serviceKindExpr} AS CategoryName,
+        i.Unit,
+        i.ConversionRate,
+        i.Quantity,
+        i.ReorderLevel,
+        txInfo.LastAt AS LastAt,
+        CAST('service' AS NVARCHAR(20)) AS ItemGroup,
+        CAST(COALESCE(i.PriceVnd, 0) AS DECIMAL(12,2)) AS PriceVnd,
+        CAST(NULL AS DECIMAL(12,2)) AS SellPriceVnd,
+        CAST(NULL AS NVARCHAR(200)) AS Supplier
+      FROM InventoryItems i
+      ${hasCategoryMapping ? 'LEFT JOIN ProductCategories pc ON pc.CategoryId = i.CategoryId' : ''}
+      OUTER APPLY (
+        SELECT MAX(t.CreatedAt) AS LastAt
+        FROM InventoryTransactions t
+        WHERE t.InventoryItemId = i.InventoryItemId
+          AND t.Type = 'IN'
+      ) txInfo
+      WHERE i.InventoryItemId = @id
+        ${schema.inventoryHasStatus
+          ? "AND (i.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), i.Status)))) NOT IN ('deleted', 'delete'))"
+          : "AND COALESCE(i.ItemGroup, 'service') <> 'deleted'"}`,
+    { id: itemId }
+  )
+
+  if (invResult.recordset?.length) {
+    return toInventoryItem(invResult.recordset[0])
+  }
+
+  // Try to get from Products (retail items)
+  const retailKindExpr = hasCategoryMapping
+    ? 'COALESCE(pc.Name, pcShadow.Name, CAST(NULL AS NVARCHAR(100)))'
+    : 'CAST(NULL AS NVARCHAR(100))'
+
+  const prodResult = await query(
+    `SELECT
+        p.ProductId AS InventoryItemId,
+        CAST(CONCAT('retail:', p.ProductId) AS NVARCHAR(100)) AS SkuKey,
+        p.Name,
+        ${retailKindExpr} AS CategoryName,
+        CAST('sp' AS NVARCHAR(50)) AS Unit,
+        CAST(1 AS DECIMAL(10,2)) AS ConversionRate,
+        CAST(COALESCE(p.Stock, 0) AS DECIMAL(10,2)) AS Quantity,
+        CAST(0 AS DECIMAL(10,2)) AS ReorderLevel,
+        txInfo.LastAt AS LastAt,
+        CAST('retail' AS NVARCHAR(20)) AS ItemGroup,
+        CAST(COALESCE(r.PriceVnd, 0) AS DECIMAL(12,2)) AS PriceVnd,
+        CAST(COALESCE(p.Price, 0) AS DECIMAL(12,2)) AS SellPriceVnd,
+        CAST(NULL AS NVARCHAR(200)) AS Supplier
+      FROM Products p
+      LEFT JOIN InventoryItems r ON r.InventoryItemId = CONCAT('retail_', p.ProductId)
+      ${hasCategoryMapping ? 'LEFT JOIN ProductCategories pc ON pc.CategoryId = p.CategoryId' : ''}
+      ${hasCategoryMapping ? 'LEFT JOIN ProductCategories pcShadow ON pcShadow.CategoryId = r.CategoryId' : ''}
+      OUTER APPLY (
+        SELECT MAX(t.CreatedAt) AS LastAt
+        FROM InventoryTransactions t
+        WHERE t.InventoryItemId = CONCAT('retail_', p.ProductId)
+          AND t.Type = 'IN'
+      ) txInfo
+      WHERE p.ProductId = @id
+        ${schema.productsHasStatus
+          ? "AND (p.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), p.Status)))) NOT IN ('deleted', 'delete'))"
+          : ''}`,
+    { id: itemId }
+  )
+
+  if (prodResult.recordset?.length) {
+    return toInventoryItem(prodResult.recordset[0])
+  }
+
+  return null
+}
+
 async function createInventoryItem(payload, { actor } = {}) {
   const { name, qty, minQty, unit, group, category, kind, priceVnd, supplier, importPrice, sellPriceVnd, description, imageUrl, status } = payload || {}
   const schema = await getSchemaInfo()
@@ -1120,6 +1206,7 @@ async function deleteItem(itemId) {
 
 module.exports = {
   getInventory,
+  getInventoryItemById,
   createInventoryItem,
   updateItem,
   stockIn,

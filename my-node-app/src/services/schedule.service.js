@@ -149,7 +149,8 @@ async function getStaffRoleSqlParts() {
   }
 }
 
-async function getSchedule(weekStartQuery) {
+async function getSchedule(weekStartQuery, options = {}) {
+  const { staffId } = options || {}
   const base = weekStartQuery ? new Date(weekStartQuery) : new Date()
   const weekStart = mondayOf(base)
   if (!weekStart) {
@@ -165,12 +166,15 @@ async function getSchedule(weekStartQuery) {
   const columns = buildWeekColumns(weekStart)
 
   const roleSql = await getStaffRoleSqlParts()
+  const staffFilter = staffId ? 'WHERE s.StaffId = @staffId' : ''
   const staffRes = await query(
     `SELECT s.StaffId, ${roleSql.selectSql}, u.Name, u.AvatarUrl
      FROM Staff s
      LEFT JOIN Users u ON u.UserId = s.UserId
      ${roleSql.joinSql}
-     ORDER BY u.Name`
+     ${staffFilter}
+     ORDER BY u.Name`,
+    staffId ? { staffId } : {}
   )
 
   const staffList = (staffRes.recordset || []).map((r) => ({
@@ -180,12 +184,18 @@ async function getSchedule(weekStartQuery) {
     avatarUrl: r.AvatarUrl || '',
   }))
 
+  const availFilter = staffId ? 'AND StaffId = @staffId' : ''
   const availRes = await query(
     `SELECT StaffId, WeekStartDate, StartHour, EndHour
      FROM StaffAvailability
      WHERE WeekStartDate >= @weekStart
-       AND WeekStartDate <= @weekEnd`,
-    { weekStart: weekStartIso, weekEnd: weekEndIso }
+       AND WeekStartDate <= @weekEnd
+       ${availFilter}`,
+    { 
+      weekStart: weekStartIso, 
+      weekEnd: weekEndIso,
+      ...(staffId ? { staffId } : {})
+    }
   )
 
   const availMap = new Map()
