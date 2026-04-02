@@ -30,10 +30,14 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
   const [cartModalOpen, setCartModalOpen] = useState(false);
   const [cartMessage, setCartMessage] = useState('');
   
-  const productVariants = [];
+  const productVariants = Array.isArray(product?.Variants)
+    ? product.Variants
+    : Array.isArray(product?.ProductVariants)
+      ? product.ProductVariants
+      : [];
   
   const [selectedVariant, setSelectedVariant] = useState(
-    productVariants.length > 0 ? productVariants[0] : null
+    productVariants.find((v) => Number(v?.Stock || 0) > 0) || productVariants[0] || null
   );
 
   const galleryImages = (() => {

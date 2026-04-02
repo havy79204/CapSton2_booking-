@@ -11,6 +11,19 @@ function getActor(req) {
   }
 }
 
+function normalizeRole(input) {
+  return String(input || '').trim().toLowerCase()
+}
+
+function ensureOwnerOrAdmin(req) {
+  const role = normalizeRole(req?.user?.roleKey)
+  if (role === '1' || role === 'owner' || role === 'admin') return
+
+  const err = new Error('Forbidden: only owner/admin can modify or delete inventory lots')
+  err.status = 403
+  throw err
+}
+
 const getInventory = asyncHandler(async (req, res) => {
   const data = await inventoryService.getInventory()
   res.json({ ok: true, data })
@@ -59,6 +72,47 @@ const postInventoryStockOut = asyncHandler(async (req, res) => {
   res.status(201).json({ ok: true, data })
 })
 
+const postInventoryFifoPreview = asyncHandler(async (req, res) => {
+  const data = await inventoryService.fifoPreview(req.body)
+  res.json({ ok: true, data })
+})
+
+const postInventoryImportExcel = asyncHandler(async (req, res) => {
+  const data = await inventoryService.importInventoryFromExcel(req.body, { actor: getActor(req) })
+  res.json({ ok: true, data })
+})
+
+const putInventoryLot = asyncHandler(async (req, res) => {
+  ensureOwnerOrAdmin(req)
+  const lotId = req.params?.lotId
+  if (!lotId) {
+    res.status(400).json({ ok: false, error: 'Missing lotId' })
+    return
+  }
+
+  const data = await inventoryService.updateLot(lotId, req.body, { actor: getActor(req) })
+  res.json({ ok: true, data })
+})
+
+const deleteInventoryLot = asyncHandler(async (req, res) => {
+  ensureOwnerOrAdmin(req)
+  const lotId = req.params?.lotId
+  if (!lotId) {
+    res.status(400).json({ ok: false, error: 'Missing lotId' })
+    return
+  }
+
+  const data = await inventoryService.deleteLot(lotId, { actor: getActor(req) })
+  res.json({ ok: true, data })
+})
+
+const getInventoryImportTemplate = asyncHandler(async (_req, res) => {
+  const buffer = await inventoryService.getInventoryImportTemplateBuffer()
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  res.setHeader('Content-Disposition', 'attachment; filename="inventory-import-template.xlsx"')
+  res.send(buffer)
+})
+
 module.exports = {
   getInventory,
   postInventoryItem,
@@ -66,4 +120,9 @@ module.exports = {
   deleteInventoryItem,
   postInventoryStockIn,
   postInventoryStockOut,
+  postInventoryFifoPreview,
+  postInventoryImportExcel,
+  putInventoryLot,
+  deleteInventoryLot,
+  getInventoryImportTemplate,
 }

@@ -91,10 +91,18 @@ async function request(path, options) {
   })
 
   const text = await res.text()
-  const json = text ? JSON.parse(text) : null
+  let json = null
+  if (text) {
+    try {
+      json = JSON.parse(text)
+    } catch {
+      json = null
+    }
+  }
 
   if (!res.ok) {
-    const message = json?.error || json?.message || res.statusText
+    const fallbackText = text ? String(text).trim() : ''
+    const message = json?.error || json?.message || fallbackText || res.statusText
     // If unauthorized, notify the app so it can decide how to handle re-authentication.
     if (res.status === 401) {
       try {
@@ -112,6 +120,7 @@ async function request(path, options) {
     const err = new Error(message)
     err.status = res.status
     err.body = json
+    err.raw = text
     throw err
   }
 

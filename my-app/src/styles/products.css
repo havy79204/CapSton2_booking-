@@ -5,31 +5,232 @@
   color: #301103;
 }
 
+.products-page {
+  --products-section-gap: 14px;
+}
+
+.products-page .portal-tableWrap {
+  border-radius: 14px;
+  border: 1px solid rgba(120, 95, 54, 0.2);
+  background: rgba(255, 255, 255, 0.42);
+  overflow: auto;
+}
+
+.products-page .portal-table {
+  width: 100%;
+  min-width: 920px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.products-page .portal-table th:nth-child(1),
+.products-page .portal-table td:nth-child(1) {
+  width: 22%;
+}
+
+.products-page .portal-table th:nth-child(2),
+.products-page .portal-table td:nth-child(2) {
+  width: 16%;
+}
+
+.products-page .portal-table th:nth-child(3),
+.products-page .portal-table td:nth-child(3) {
+  width: 11%;
+}
+
+.products-page .portal-table th:nth-child(4),
+.products-page .portal-table td:nth-child(4),
+.products-page .portal-table th:nth-child(5),
+.products-page .portal-table td:nth-child(5),
+.products-page .portal-table th:nth-child(6),
+.products-page .portal-table td:nth-child(6) {
+  width: 8%;
+}
+
+.products-page .portal-table th:nth-child(7),
+.products-page .portal-table td:nth-child(7) {
+  width: 9%;
+}
+
+.products-page .portal-table th:nth-child(8),
+.products-page .portal-table td:nth-child(8) {
+  width: 18%;
+}
+
 .products-page .portal-table th {
-  background: rgba(255,255,255,0.05);
+  background: rgba(255, 255, 255, 0.12);
   color: #301103;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 800;
+  border-bottom: 1px solid rgba(120, 95, 54, 0.22);
+  white-space: nowrap;
+}
+
+.products-page .portal-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(120, 95, 54, 0.14);
+  color: #2f1c0f;
+}
+
+.products-page .portal-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.products-page .portal-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.33);
 }
 
 .products-page .portal-invPill {
   background: rgba(91, 48, 3, 0.189);
-  padding: 4px 10px;
+  padding: 5px 10px;
   color: #301103;
+  border: 1px solid rgba(120, 95, 54, 0.22);
+  border-radius: 999px;
+  font-weight: 700;
 }
 
 .products-page .portal-invName {
-  font-weight: 600;
+  font-weight: 700;
   color: #301103;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.products-page .portal-table td:nth-child(2) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.products-page .portal-table th:nth-child(3),
+.products-page .portal-table th:nth-child(4),
+.products-page .portal-table th:nth-child(5),
+.products-page .portal-table th:nth-child(6),
+.products-page .portal-table td:nth-child(3),
+.products-page .portal-table td:nth-child(4),
+.products-page .portal-table td:nth-child(5),
+.products-page .portal-table td:nth-child(6) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.products-page .portal-table th:nth-child(7),
+.products-page .portal-table th:nth-child(8),
+.products-page .portal-table td:nth-child(7),
+.products-page .portal-table td:nth-child(8) {
+  text-align: center;
+}
+
+.products-page .portal-table td:nth-child(8) .portal-rowActions {
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.products-page .portal-table td:nth-child(8) .portal-ghostBtn {
+  min-width: 70px;
+  padding: 7px 10px;
 }
 
 .products-filterRow {
   display: grid;
   grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 12px;
-  margin: 12px 0;
+  margin: 0;
+}
+
+.products-topRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: var(--products-section-gap);
+}
+
+.products-topRow .portal-searchFull {
+  margin-top: 0;
+  width: 100%;
+}
+
+.products-topRow .portal-headerActions {
+  margin-top: 0;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.products-topRow .portal-primaryBtn {
+  white-space: nowrap;
 }
 
 .products-filterField {
   margin-top: 0;
+}
+
+.products-kpiGrid {
+  margin-top: 0;
+  margin-bottom: var(--products-section-gap);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.products-page .portal-invTableCard {
+  margin-top: var(--products-section-gap);
+}
+
+.products-sortHeader {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.products-sortToggle {
+  width: 20px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(244, 216, 170, 0.42);
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 2px 0;
+}
+
+.products-sortToggle:hover {
+  border-color: rgba(214, 173, 120, 0.75);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.products-sortTriangle {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  opacity: 0.42;
+  transition: opacity 0.2s ease;
+}
+
+.products-sortTriangle.up {
+  border-bottom: 6px solid #7b5d3d;
+}
+
+.products-sortTriangle.down {
+  border-top: 6px solid #7b5d3d;
+}
+
+.products-sortTriangle.is-active {
+  opacity: 1;
 }
 
 .products-pagination {
@@ -67,11 +268,32 @@
   text-align: center;
   color: #6b7280;
   padding: 22px 12px;
+  background: rgba(255, 255, 255, 0.28);
 }
 
 @media (max-width: 768px) {
+  .products-kpiGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .products-topRow {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .products-topRow .portal-headerActions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
   .products-filterRow {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1100px) {
+  .products-kpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -100,9 +322,9 @@
   letter-spacing: 0.3px;
 
   box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.35),
-    inset 0 -2px 6px rgba(0,0,0,0.18),
-    0 8px 24px rgba(0,0,0,0.28);
+    inset 0 1px 1px rgba(255, 255, 255, 0.35),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.18),
+    0 8px 24px rgba(0, 0, 0, 0.28);
 
   cursor: pointer;
   transition: all 0.25s ease;
