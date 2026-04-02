@@ -6,11 +6,15 @@ function PaymentVnpayReturnPage() {
   const { search } = useLocation()
   const params = new URLSearchParams(search)
 
-  const status = (params.get('status') || '').toLowerCase()
-  const code = params.get('code') || ''
-  const transactionId = params.get('transactionId') || ''
-  const orderId = params.get('orderId') || ''
+  const explicitStatus = (params.get('status') || '').toLowerCase()
+  const vnpResponseCode = String(params.get('vnp_ResponseCode') || '').trim()
+  const status = explicitStatus || (vnpResponseCode === '00' ? 'success' : (vnpResponseCode ? 'failed' : ''))
+
+  const code = params.get('code') || vnpResponseCode || ''
+  const transactionId = params.get('transactionId') || params.get('vnp_TransactionNo') || params.get('vnp_TxnRef') || ''
+  const orderId = params.get('orderId') || params.get('vnp_OrderInfo') || ''
   const amountRaw = params.get('amount') || ''
+  const vnpAmountRaw = params.get('vnp_Amount') || ''
 
   const isSuccess = status === 'success'
   const title = isSuccess ? 'Thanh toan thanh cong' : 'Thanh toan that bai'
@@ -19,7 +23,9 @@ function PaymentVnpayReturnPage() {
     : 'Khong the xac nhan thanh toan. Vui long thu lai hoac lien he ho tro.'
   const isBooking = /^BKG-/i.test(orderId)
 
-  const amount = Number(amountRaw)
+  const amount = vnpAmountRaw
+    ? Number(vnpAmountRaw) / 100
+    : Number(amountRaw)
   const normalizedAmount = Number.isFinite(amount) && amount > 0 ? amount.toLocaleString('vi-VN') : ''
 
   return (
