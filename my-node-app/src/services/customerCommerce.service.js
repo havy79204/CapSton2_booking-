@@ -2258,6 +2258,7 @@ async function listOrders(userIdInput, limit = 20) {
         o.GiftCardApplied
      FROM Orders o
       WHERE o.UserId = @userId
+        AND LOWER(LTRIM(RTRIM(ISNULL(o.Status, 'pending')))) <> 'awaiting'
      ORDER BY o.CreatedAt DESC, o.OrderId DESC`,
     {
       userId,

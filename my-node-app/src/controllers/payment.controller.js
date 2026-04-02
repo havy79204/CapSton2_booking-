@@ -292,7 +292,7 @@ async function applyOrderPaymentResult(orderIdInput, isSuccess) {
          SET Status = @status
          WHERE OrderId = @orderId`,
         {
-          status: 'Confirmed',
+          status: 'Pending',
           orderId,
         },
       )
@@ -354,7 +354,7 @@ async function applyBookingPaymentResult(orderIdInput, isSuccess) {
        SET Status = @status
        WHERE BookingId = @bookingId`,
       {
-        status: 'booked',
+        status: 'Pending',
         bookingId,
       },
     )
