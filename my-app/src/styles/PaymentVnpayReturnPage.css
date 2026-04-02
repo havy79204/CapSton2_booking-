@@ -1,0 +1,116 @@
+.payment-return-page {
+  position: relative;
+  min-height: calc(100vh - 140px);
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+  overflow: hidden;
+}
+
+.payment-return-background {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(64, 145, 255, 0.12), transparent 40%),
+    radial-gradient(circle at 80% 80%, rgba(46, 204, 113, 0.12), transparent 40%),
+    linear-gradient(180deg, #f8f6f2 0%, #ffffff 60%);
+  z-index: 0;
+}
+
+.payment-return-card {
+  position: relative;
+  z-index: 1;
+  width: min(680px, 100%);
+  background: #ffffff;
+  border: 1px solid #ece7e2;
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(29, 27, 26, 0.08);
+  padding: 1.4rem;
+}
+
+.payment-return-icon {
+  font-size: 3rem;
+  line-height: 1;
+  margin-bottom: 0.5rem;
+}
+
+.payment-return-icon.success {
+  color: #16a34a;
+}
+
+.payment-return-icon.failed {
+  color: #dc2626;
+}
+
+.payment-return-card h1 {
+  margin: 0;
+  font-size: 1.45rem;
+  color: #2c2c2c;
+}
+
+.payment-return-message {
+  margin: 0.5rem 0 1rem;
+  color: #5f5347;
+}
+
+.payment-return-meta {
+  display: grid;
+  gap: 0.5rem;
+  background: #faf8f4;
+  border: 1px solid #efe7de;
+  border-radius: 12px;
+  padding: 0.8rem;
+}
+
+.payment-return-row {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.payment-return-row span {
+  color: #7f7368;
+  font-size: 0.9rem;
+}
+
+.payment-return-row strong {
+  color: #2e2a26;
+  font-size: 0.95rem;
+  word-break: break-word;
+}
+
+.payment-return-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.payment-return-actions a {
+  text-decoration: none;
+  border: 1px solid #d9cfc4;
+  background: #fff;
+  color: #6d4c2f;
+  padding: 0.5rem 0.85rem;
+  border-radius: 999px;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.payment-return-actions a:hover {
+  background: #6d4c2f;
+  color: #fff;
+  border-color: #6d4c2f;
+}
+
+@media (max-width: 640px) {
+  .payment-return-card {
+    padding: 1rem;
+  }
+
+  .payment-return-row {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+}
