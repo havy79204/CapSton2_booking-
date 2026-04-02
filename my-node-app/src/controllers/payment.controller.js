@@ -5,6 +5,65 @@ const { upsertPaymentRecord, resolveInvoiceIdForPayment } = require('../services
 const { notifyCustomerEvent, notifyOwnerEvent, scheduleBookingReminders } = require('../services/notifications.service')
 const { getFrontendOriginForTxnRef, normalizeFrontendOrigin } = require('../services/vnpayFrontendReturnStore.service')
 
+let _invoiceColumnsLowerCache = null
+
+async function hasInvoiceColumn(columnName) {
+  const target = String(columnName || '').trim().toLowerCase()
+  if (!target) return false
+
+  if (!_invoiceColumnsLowerCache) {
+    _invoiceColumnsLowerCache = query(
+      `SELECT COLUMN_NAME
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_NAME = 'Invoices'`
+    )
+      .then((res) => new Set((res.recordset || []).map((r) => String(r.COLUMN_NAME || '').trim().toLowerCase())))
+      .catch(() => new Set())
+  }
+
+  const cols = await _invoiceColumnsLowerCache
+  return cols.has(target)
+}
+
+async function deletePaymentsAndInvoicesByReference(referenceIdInput, invoiceRefColumnInput) {
+  const referenceId = String(referenceIdInput || '').trim()
+  const invoiceRefColumn = String(invoiceRefColumnInput || '').trim()
+  if (!referenceId || !invoiceRefColumn) return
+
+  const hasRefColumn = await hasInvoiceColumn(invoiceRefColumn)
+  if (!hasRefColumn) return
+
+  const invoiceRef = `[${invoiceRefColumn}]`
+
+  await query(
+    `DELETE p
+     FROM Payments p
+     INNER JOIN Invoices i ON i.InvoiceId = p.InvoiceId
+     WHERE i.${invoiceRef} = @referenceId`,
+    { referenceId },
+  )
+
+  const legacyInvoiceId = referenceId.startsWith('INV-') ? referenceId : `INV-${referenceId}`
+  await query(
+    `DELETE FROM Payments
+     WHERE InvoiceId IN (@referenceId, @legacyInvoiceId)`,
+    {
+      referenceId,
+      legacyInvoiceId,
+    },
+  )
+
+  await query(
+    `DELETE FROM Invoices
+     WHERE ${invoiceRef} = @referenceId
+        OR InvoiceId IN (@referenceId, @legacyInvoiceId)`,
+    {
+      referenceId,
+      legacyInvoiceId,
+    },
+  )
+}
+
 async function notifyPaymentResult(orderIdInput, isSuccess, reason = '') {
   const referenceId = String(orderIdInput || '').trim()
   if (!referenceId) return
@@ -186,6 +245,7 @@ async function deleteOrderAfterPaymentFailure(orderId) {
   const safeOrderId = String(orderId || '').trim()
   if (!safeOrderId) return
 
+  await deletePaymentsAndInvoicesByReference(safeOrderId, 'OrderId')
   await query('DELETE FROM OrderItems WHERE OrderId = @orderId', { orderId: safeOrderId })
   await query('DELETE FROM Orders WHERE OrderId = @orderId', { orderId: safeOrderId })
 }
@@ -194,6 +254,7 @@ async function deleteBookingAfterPaymentFailure(bookingId) {
   const safeBookingId = String(bookingId || '').trim()
   if (!safeBookingId) return
 
+  await deletePaymentsAndInvoicesByReference(safeBookingId, 'BookingId')
   await query('DELETE FROM BookingServices WHERE BookingId = @bookingId', { bookingId: safeBookingId })
   await query('DELETE FROM Bookings WHERE BookingId = @bookingId', { bookingId: safeBookingId })
 }
