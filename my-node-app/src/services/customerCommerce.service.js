@@ -4,6 +4,7 @@ const { env } = require('../config/config')
 const { getSettingsMap } = require('./settings.service')
 const { upsertPaymentRecord, resolveInvoiceIdForPayment } = require('./paymentPersistence.service')
 const { notifyCustomerEvent, notifyOwnerEvent, scheduleBookingReminders } = require('./notifications.service')
+const { setFrontendOriginForTxnRef } = require('./vnpayFrontendReturnStore.service')
 
 let _ordersChannelColumnPromise = null
 const ACTIVE_SERVICE_WHERE = `(Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) = 'active')`
@@ -852,7 +853,24 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
     const hasCategoryIdInSkills = await columnExists('StaffSkills', 'CategoryId')
     const hasServiceIdInSkills = await columnExists('StaffSkills', 'ServiceId')
 
-    if (hasCategoryIdInSkills) {
+    if (hasServiceIdInSkills) {
+      const serviceParams = serviceIds.map((serviceId, idx) => {
+        const key = `serviceFilterId${idx}`
+        params[key] = serviceId
+        return `@${key}`
+      })
+
+      params.requiredServiceCount = serviceIds.length
+
+      staffFilterClause = `
+        AND (
+          SELECT COUNT(DISTINCT ss.ServiceId)
+          FROM StaffSkills ss
+          WHERE ss.StaffId = s.StaffId
+            AND ss.ServiceId IN (${serviceParams.join(', ')})
+        ) = @requiredServiceCount
+      `
+    } else if (hasCategoryIdInSkills) {
       const serviceParams = serviceIds.map((serviceId, idx) => {
         const key = `serviceId${idx}`
         params[key] = serviceId
@@ -879,28 +897,17 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
           return `@${key}`
         })
 
+        params.requiredCategoryCount = categoryIds.length
+
         staffFilterClause = `
-          AND EXISTS (
-            SELECT 1
+          AND (
+            SELECT COUNT(DISTINCT ss.CategoryId)
             FROM StaffSkills ss
             WHERE ss.StaffId = s.StaffId
               AND ss.CategoryId IN (${categoryParams.join(', ')})
-          )`
+          ) = @requiredCategoryCount
+        `
       }
-    } else if (hasServiceIdInSkills) {
-      const serviceParams = serviceIds.map((serviceId, idx) => {
-        const key = `serviceFilterId${idx}`
-        params[key] = serviceId
-        return `@${key}`
-      })
-
-      staffFilterClause = `
-        AND EXISTS (
-          SELECT 1
-          FROM StaffSkills ss
-          WHERE ss.StaffId = s.StaffId
-            AND ss.ServiceId IN (${serviceParams.join(', ')})
-        )`
     }
   }
 
@@ -1607,6 +1614,8 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
   let paymentUrl = null
   if (isOnlinePayment) {
     const transactionCode = buildVnpTxnRef(orderId)
+    setFrontendOriginForTxnRef(transactionCode, options?.frontendOrigin)
+
     try {
       const invoiceId = await resolveInvoiceIdForPayment({
         invoiceId: invoiceSnapshot.invoiceId,
@@ -2113,6 +2122,8 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
   let paymentUrl = null
   if (isOnlinePayment) {
     const transactionCode = buildVnpTxnRef(bookingId)
+    setFrontendOriginForTxnRef(transactionCode, options?.frontendOrigin)
+
     try {
       const invoiceId = await resolveInvoiceIdForPayment({
         invoiceId: bookingInvoiceSnapshot.invoiceId,

@@ -13,6 +13,21 @@ function getClientIp(req) {
   return String(req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || '').trim()
 }
 
+function getFrontendOrigin(req) {
+  const originHeader = String(req.headers?.origin || '').trim()
+  if (originHeader) return originHeader
+
+  const refererHeader = String(req.headers?.referer || '').trim()
+  if (!refererHeader) return ''
+
+  try {
+    const u = new URL(refererHeader)
+    return `${u.protocol}//${u.host}`
+  } catch (_err) {
+    return ''
+  }
+}
+
 const getCustomerContext = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
   const data = await commerceService.getCustomerContext(userId)
@@ -76,6 +91,7 @@ const postBooking = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
   const data = await commerceService.createBooking(userId, req.body || {}, {
     ipAddress: getClientIp(req),
+    frontendOrigin: getFrontendOrigin(req),
   })
   res.status(201).json({ ok: true, data })
 })
@@ -144,6 +160,7 @@ const postCeckout = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
   const data = await commerceService.checkoutCart(userId, req.body || {}, {
     ipAddress: getClientIp(req),
+    frontendOrigin: getFrontendOrigin(req),
   })
   res.status(201).json({ ok: true, data })
 })

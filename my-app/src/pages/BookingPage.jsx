@@ -248,10 +248,22 @@ const BookingPage = () => {
   const isReturningCustomer = Array.isArray(bookings) && bookings.length > 0
   const selectedStaff = (Array.isArray(staffs) ? staffs : []).find((staff) => String(staff.StaffId) === String(selectedStaffId)) || null
   const selectedTechnician = selectedServiceItems.length === 0
-    ? 'Our Specialist Team'
-    : (!isReturningCustomer
-      ? 'Assigned automatically for new customers'
-      : (selectedStaff?.Name || 'Please choose a specialist'))
+    ? 'Choose services first'
+    : (selectedStaff?.Name || 'Please choose a specialist')
+
+  useEffect(() => {
+    if (!selectedServiceItems.length) {
+      if (selectedStaffId) setSelectedStaffId('')
+      return
+    }
+
+    const hasSelectedStaffInList = (Array.isArray(staffs) ? staffs : [])
+      .some((staff) => String(staff.StaffId) === String(selectedStaffId))
+
+    if (selectedStaffId && !hasSelectedStaffInList) {
+      setSelectedStaffId('')
+    }
+  }, [selectedServiceItems, staffs, selectedStaffId])
 
   const subtotal = selectedServiceItems.reduce(
     (sum, service) => sum + Number(service.Price || 0) * Number(service.quantity || 0),
@@ -388,7 +400,12 @@ const BookingPage = () => {
       return
     }
 
-    if (isReturningCustomer && !selectedStaffId) {
+    if (!selectedServiceItems.length) {
+      alert('Please select at least one service.')
+      return
+    }
+
+    if (!selectedStaffId) {
       alert('Please choose a specialist before booking.')
       return
     }
@@ -414,11 +431,11 @@ const BookingPage = () => {
         notes,
         paymentMethod,
         giftCode: allowCustomerApply ? giftCode : '',
-        staffId: isReturningCustomer ? selectedStaffId : null,
+        staffId: selectedStaffId || null,
         serviceItems: selectedServiceItems.map((service) => ({
           serviceId: service.ServiceId,
           quantity: Number(service.quantity || 1),
-          staffId: isReturningCustomer ? selectedStaffId : null,
+          staffId: selectedStaffId || null,
         })),
       })
 
@@ -434,7 +451,7 @@ const BookingPage = () => {
       setGiftCode('')
       setAppliedPromotion(null)
       setPromoMessage('')
-      if (!isReturningCustomer) setSelectedStaffId('')
+      setSelectedStaffId('')
       setServiceSelections((prev) => prev.map((service) => ({ ...service, quantity: 0 })))
     } catch (err) {
       setResultTitle('Error')
@@ -512,16 +529,12 @@ const BookingPage = () => {
                   {selectedServiceItems.length === 0 ? (
                     <div>
                       <strong>Our Specialist Team</strong>
-                      <p>Coose services first to continue</p>
-                    </div>
-                  ) : !isReturningCustomer ? (
-                    <div>
-                      <strong>Auto assignment for new customers</strong>
-                      <p>System will assign available specialist automatically</p>
+                      <p>Choose services first to continue</p>
                     </div>
                   ) : (
                     <div className="staff-picker-block">
-                      <strong>Coose your specialist</strong>
+                      <strong>Choose your specialist</strong>
+                      <p>Only specialists matching selected services are shown.</p>
                       <select
                         className="staff-select"
                         value={selectedStaffId}

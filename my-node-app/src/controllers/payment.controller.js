@@ -3,6 +3,7 @@ const { query } = require('../config/query')
 const { env } = require('../config/config')
 const { upsertPaymentRecord, resolveInvoiceIdForPayment } = require('../services/paymentPersistence.service')
 const { notifyCustomerEvent, notifyOwnerEvent, scheduleBookingReminders } = require('../services/notifications.service')
+const { getFrontendOriginForTxnRef, normalizeFrontendOrigin } = require('../services/vnpayFrontendReturnStore.service')
 
 async function notifyPaymentResult(orderIdInput, isSuccess, reason = '') {
   const referenceId = String(orderIdInput || '').trim()
@@ -342,12 +343,30 @@ async function persistVnpayResult({ orderId, amount, transactionId, status }) {
   }
 }
 
-function buildFrontendReturnUrl(params = {}) {
-  const base = String(env.vnpay?.frontendReturnUrl || '').trim()
-  if (!base) return ''
+function buildFrontendReturnUrl(params = {}, txnRef = '') {
+  const originFromTxn = getFrontendOriginForTxnRef(txnRef)
+
+  if (originFromTxn) {
+    const base = `${originFromTxn}/payment/vnpay-return`
+    try {
+      const u = new URL(base)
+      Object.entries(params).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return
+        u.searchParams.set(key, String(value))
+      })
+      return u.toString()
+    } catch (_err) {
+      // Fallback to env-defined frontend return URL below.
+    }
+  }
+
+  const envBase = String(env.vnpay?.frontendReturnUrl || '').trim()
+  const normalizedEnvOrigin = normalizeFrontendOrigin(envBase)
+  const fallbackBase = normalizedEnvOrigin ? `${normalizedEnvOrigin}/payment/vnpay-return` : envBase
+  if (!fallbackBase) return ''
 
   try {
-    const u = new URL(base)
+    const u = new URL(fallbackBase)
     Object.entries(params).forEach(([key, value]) => {
       if (value === undefined || value === null || value === '') return
       u.searchParams.set(key, String(value))
@@ -418,7 +437,8 @@ async function vnpayReturn(req, res) {
 
     // Check response code
     const responseCode = String(params['vnp_ResponseCode'] || '')
-    const transactionId = String(params['vnp_TransactionNo'] || params['vnp_TxnRef'] || '')
+    const txnRef = String(params['vnp_TxnRef'] || '').trim()
+    const transactionId = String(params['vnp_TransactionNo'] || txnRef || '')
     const orderId = String(params['vnp_OrderInfo'] || '').trim()
     const amount = Number(params['vnp_Amount'] || 0) / 100
 
@@ -441,7 +461,7 @@ async function vnpayReturn(req, res) {
         transactionId,
         orderId,
         amount,
-      })
+      }, txnRef)
       if (redirectUrl) return res.redirect(302, redirectUrl)
       return res.json({
         success: true,
@@ -465,7 +485,7 @@ async function vnpayReturn(req, res) {
         code: `PAYMENT_FAILED_${responseCode}`,
         transactionId,
         orderId,
-      })
+      }, txnRef)
       if (redirectUrl) return res.redirect(302, redirectUrl)
       return res.status(400).json({
         success: false,
