@@ -74,12 +74,12 @@
 }
 
 .btn.danger {
-  background: #ef4444;
+  background: #ff8c00;
   color: #fff;
 }
 
 .btn.danger:hover {
-  background: #dc2626;
+  background: #f97316;
 }
 
 /* ===== SELECT ===== */
@@ -164,9 +164,9 @@
   font-size: 12px;
   color: #6b7280;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding-top: 4px;
+  border-bottom: 1px solid transparent;
 }
 
 /* STAFF */
@@ -232,6 +232,7 @@
 .list-view th {
   padding: 10px;
   font-size: 14px;
+  vertical-align: middle;
 }
 
 .list-view tr:hover {

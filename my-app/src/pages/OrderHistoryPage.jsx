@@ -102,19 +102,38 @@ const OrderHistoryPage = () => {
                         <th>Product</th>
                         <th>Qty</th>
                         <th>Price</th>
+                        <th>Discount</th>
                         <th>Total</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(Array.isArray(order.Items) ? order.Items : []).map((item) => (
-                        <tr key={item.OrderItemId}>
-                          <td>{item.ProductName}</td>
-                          <td>{Number(item.Quantity || 0)}</td>
-                          <td>${fmtMoney(item.Price || 0)}</td>
-                          <td>${fmtMoney(item.LineTotal || 0)}</td>
+                      {(Array.isArray(order.Items) ? order.Items : []).length === 0 ? (
+                        <tr>
+                          <td colSpan={5}>No product details found for this order.</td>
                         </tr>
-                      ))}
+                      ) : (
+                        (Array.isArray(order.Items) ? order.Items : []).map((item) => (
+                          <tr key={item.OrderItemId}>
+                            <td>{item.ProductName}</td>
+                            <td>{Number(item.Quantity || 0)}</td>
+                            <td>${fmtMoney(item.Price || 0)}</td>
+                            <td>$0.00</td>
+                            <td>${fmtMoney(item.LineTotal || 0)}</td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={3}><strong>Subtotal</strong></td>
+                        <td><strong>-${fmtMoney(order.DiscountAmount || 0)}</strong></td>
+                        <td><strong>${fmtMoney(order.Subtotal || 0)}</strong></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4}><strong>Total</strong></td>
+                        <td><strong>${fmtMoney(order.Total || 0)}</strong></td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
 

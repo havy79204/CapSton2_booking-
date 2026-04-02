@@ -12,7 +12,8 @@ const {
   createProductReview,
   getReviews,
   getMyReviews,
-  getStats
+  getStats,
+  getSalonContact,
 } = require('../../controllers/customer/homepage.controller')
 
 const router = express.Router()
@@ -56,5 +57,8 @@ router.get('/reviews/me', requireAuth, getMyReviews)
 
 // GET /api/homepage/stats - Get salon statistics
 router.get('/stats', getStats)
+
+// GET /api/homepage/contact - Get salon contact info from settings
+router.get('/contact', getSalonContact)
 
 module.exports = { homepageRoutes: router }

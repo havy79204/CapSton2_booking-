@@ -8,6 +8,7 @@ import {
   IoWalletOutline,
 } from 'react-icons/io5'
 import { useCustomerCart } from '../hooks/useCustomerCommerce'
+import { useCustomerContext } from '../hooks/useCustomerCommerce'
 import '../styles/CartPage.css'
 
 const CartPage = () => {
@@ -22,14 +23,41 @@ const CartPage = () => {
     clearItems,
     checkout,
   } = useCustomerCart()
+  const { context } = useCustomerContext()
 
   const [giftCode, setGiftCode] = useState('')
+  const [appliedPromotion, setAppliedPromotion] = useState(null)
+  const [promoMessage, setPromoMessage] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cod')
   const [selectedMap, setSelectedMap] = useState({})
+  const [orderSuccess, setOrderSuccess] = useState(null)
 
   const cartItems = useMemo(() => (Array.isArray(cart?.Items) ? cart.Items : []), [cart])
   const defaultAddress = cart?.DefaultAddress || null
   const customer = cart?.Customer || null
+
+  const bookingSettings = context?.bookingSettings || {}
+  const promotionEnabled = Boolean(bookingSettings.promotionEnabled)
+  const allowCustomerApply = bookingSettings.promotionAllowCustomerApply !== false
+  const availablePromotions = useMemo(() => {
+    const list = Array.isArray(bookingSettings.promotions) ? bookingSettings.promotions : []
+    const now = new Date()
+    return list.filter((promo) => {
+      if (!promo || promo.isActive === false) return false
+      const code = String(promo.code || '').trim()
+      if (!code) return false
+
+      const start = promo.startDate ? new Date(promo.startDate) : null
+      const end = promo.endDate ? new Date(promo.endDate) : null
+      if (start && !Number.isNaN(start.getTime()) && now < start) return false
+      if (end && !Number.isNaN(end.getTime())) {
+        const inclusiveEnd = new Date(end)
+        inclusiveEnd.setHours(23, 59, 59, 999)
+        if (now > inclusiveEnd) return false
+      }
+      return true
+    })
+  }, [bookingSettings.promotions])
 
   const selectedItems = useMemo(() => {
     if (cartItems.length === 0) return []
@@ -41,10 +69,58 @@ const CartPage = () => {
   const allSelected = cartItems.length > 0 && selectedCount === cartItems.length
 
   const subtotal = selectedItems.reduce((sum, item) => sum + Number(item.Price || 0) * Number(item.Quantity || 0), 0)
-  const discount = subtotal >= 30 ? 5 : 0
+  const discount = useMemo(() => {
+    if (!appliedPromotion) return 0
+    const value = Number(appliedPromotion.value || 0)
+    if (!Number.isFinite(value) || value <= 0) return 0
+
+    if (String(appliedPromotion.discountType || '').toLowerCase() === 'percentage') {
+      return Math.min(subtotal, (subtotal * Math.min(100, value)) / 100)
+    }
+
+    return Math.min(subtotal, value)
+  }, [appliedPromotion, subtotal])
+
   const tax = (subtotal - discount) * 0.1
   const shipping = selectedCount > 0 ? 3 : 0
   const total = subtotal - discount + tax + shipping
+
+  const applyPromotionCode = () => {
+    const code = String(giftCode || '').trim()
+    setPromoMessage('')
+
+    if (!code) {
+      setAppliedPromotion(null)
+      setPromoMessage('Please enter a promotion code.')
+      return
+    }
+
+    if (!promotionEnabled) {
+      setAppliedPromotion(null)
+      setPromoMessage('Promotions are currently disabled.')
+      return
+    }
+
+    if (!allowCustomerApply) {
+      setAppliedPromotion(null)
+      setPromoMessage('This salon does not allow customers to apply promotion codes.')
+      return
+    }
+
+    const matched = availablePromotions.find(
+      (promo) => String(promo.code || '').trim().toUpperCase() === code.toUpperCase(),
+    )
+
+    if (!matched) {
+      setAppliedPromotion(null)
+      setPromoMessage('Invalid or expired promotion code.')
+      return
+    }
+
+    setAppliedPromotion(matched)
+    setGiftCode(String(matched.code || '').trim())
+    setPromoMessage(`Applied code: ${String(matched.code || '').trim()}`)
+  }
 
   const toggleAll = () => {
     if (allSelected) {
@@ -106,12 +182,16 @@ const CartPage = () => {
       const result = await checkout({
         itemIds: selectedItems.map((item) => item.CartItemId),
         paymentMethod,
-        giftCode,
+        giftCode: appliedPromotion ? giftCode : '',
       })
 
-      alert(`Order ${result?.OrderId || ''} created successfully!`)
+      if (paymentMethod === 'online' && result?.PaymentUrl) {
+        window.location.href = String(result.PaymentUrl)
+        return
+      }
+
+      setOrderSuccess(result?.OrderId || '')
       setSelectedMap({})
-      navigate('/orders')
     } catch (err) {
       alert(err?.message || 'Checkout failed')
     }
@@ -123,6 +203,26 @@ const CartPage = () => {
 
   if (error) {
     return <div className="error">{error}</div>
+  }
+
+  if (orderSuccess) {
+    return (
+      <section className="cart-page">
+        <div className="cart-container">
+          <div className="order-success-card">
+            <div className="success-icon">
+              <IoCartOutline />
+            </div>
+            <h2>Order #{orderSuccess} created successfully!</h2>
+            <p>Thank you for your purchase. Your order has been placed.</p>
+            <div className="success-buttons">
+              <button className="home-btn" onClick={() => navigate('/')}>Go to Home</button>
+              <button className="orders-btn" onClick={() => navigate('/orders')}>View Orders</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    )
   }
 
   return (
@@ -233,10 +333,15 @@ const CartPage = () => {
                   type="text"
                   placeholder="Enter Gift code..."
                   value={giftCode}
-                  onChange={(event) => setGiftCode(event.target.value)}
+                  onChange={(event) => {
+                    setGiftCode(event.target.value)
+                    setAppliedPromotion(null)
+                    setPromoMessage('')
+                  }}
                 />
-                <button type="button">Apply</button>
+                <button type="button" onClick={applyPromotionCode}>Apply</button>
               </div>
+              {promoMessage ? <p className="gift-feedback">{promoMessage}</p> : null}
               <div className="sale-row">
                 <IoPricetagOutline />
                 <span>Sale</span>

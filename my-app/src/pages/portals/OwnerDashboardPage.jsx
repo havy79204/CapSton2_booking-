@@ -687,7 +687,6 @@ export default function OwnerDashboardPage() {
   const services = dashboard?.revenueByService || []
   const products = dashboard?.productPerformance || []
   const heatmap = dashboard?.bookingHeatmap || []
-  const insights = dashboard?.insights || []
   const actions = dashboard?.actions || []
 
   const revenuePeak = chartRows.reduce((best, row) => {
@@ -724,10 +723,24 @@ export default function OwnerDashboardPage() {
 
   return (
     <div className="dashboard-page">
-      <div className="dashboard-actionsRow">
-        <div className="dashboard-headLeft">
-          <div className="dashboard-summary">{dashboard?.summary || ''}</div>
-        </div>
+      <div className="portal-grid4 dashboard-kpiGrid">
+        {cards.map((card) => (
+          <PortalCard
+            key={card.key}
+            className={`portal-kpi ${toneClass(card.status)} ${card.prominent ? 'is-prominent' : ''}`.trim()}
+            title={card.title}
+            right={<div className="portal-kpiIcon" style={{ background: card.iconBg }}><card.Icon /></div>}
+          >
+            <div className="portal-kpiValue">{card.value}</div>
+            <KpiProgress valueText={card.valueText} target={card.target} targetText={card.targetText} progressPct={card.progressPct} />
+            <div className="dashboard-kpiMeta">
+              <span className={`dashboard-kpiTrend ${toneClass(card.status)}`.trim()}>
+                {card.trendLabel || trendText(card.trend, card.delta)}
+              </span>
+              <span>{card.context}</span>
+            </div>
+          </PortalCard>
+        ))}
       </div>
 
       <div className="dashboard-filterRow">
@@ -748,26 +761,6 @@ export default function OwnerDashboardPage() {
             onRefYear={setRefYear}
           />
         </div>
-      </div>
-
-      <div className="portal-grid4 dashboard-kpiGrid">
-        {cards.map((card) => (
-          <PortalCard
-            key={card.key}
-            className={`portal-kpi ${toneClass(card.status)} ${card.prominent ? 'is-prominent' : ''}`.trim()}
-            title={card.title}
-            right={<div className="portal-kpiIcon" style={{ background: card.iconBg }}><card.Icon /></div>}
-          >
-            <div className="portal-kpiValue">{card.value}</div>
-            <KpiProgress valueText={card.valueText} target={card.target} targetText={card.targetText} progressPct={card.progressPct} />
-            <div className="dashboard-kpiMeta">
-              <span className={`dashboard-kpiTrend ${toneClass(card.status)}`.trim()}>
-                {card.trendLabel || trendText(card.trend, card.delta)}
-              </span>
-              <span>{card.context}</span>
-            </div>
-          </PortalCard>
-        ))}
       </div>
 
       <div className="portal-grid2 dashboard-sectionGrid">

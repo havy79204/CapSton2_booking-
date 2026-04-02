@@ -4,7 +4,7 @@ const { requireAuth } = require('../../middleware/auth')
 
 const router = express.Router()
 
-router.get('/inventory', controller.getInventory)
+router.get('/inventory', requireAuth, controller.getInventory)
 router.post('/inventory/items', requireAuth, controller.postInventoryItem)
 router.put('/inventory/items/:id', requireAuth, controller.putInventoryItem)
 router.delete('/inventory/items/:id', requireAuth, controller.deleteInventoryItem)
