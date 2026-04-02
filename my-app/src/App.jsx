@@ -1,4 +1,4 @@
-import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import LoginPage from './pages/LoginPage.jsx'
 import OwnerPortalLayout from './components/Layout portal/OwnerPortalLayout.jsx'
 import OwnerDashboardPage from './pages/portals/OwnerDashboardPage.jsx'
@@ -52,11 +52,17 @@ function CustomerLayout() {
   )
 }
 
+function LegacyVnpayReturnRedirect() {
+  const { search } = useLocation()
+  return <Navigate to={`/payment/vnpay-return${search || ''}`} replace />
+}
+
 function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/payment/vnpay-return" element={<PaymentVnpayReturnPage />} />
+      <Route path="/api/payments/vnpay-return" element={<LegacyVnpayReturnRedirect />} />
 
       <Route
         path="/portals/owner/services/:id"
