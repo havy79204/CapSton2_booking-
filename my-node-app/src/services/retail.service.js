@@ -1401,6 +1401,10 @@ async function listRetailOrders(filters = {}) {
   const offset = (page - 1) * pageSize
 
   const built = buildOrderFilters(filters, 'o')
+  // By default, do not show orders in 'awaiting' state in the retail management listing
+  if (!filters || (filters.status === undefined || filters.status === null || String(filters.status || '').trim() === '')) {
+    built.whereSql = `${built.whereSql} AND LOWER(LTRIM(RTRIM(ISNULL(o.Status, 'pending')))) <> 'awaiting'`
+  }
   const orderBy = resolveOrderSort(filters.sortBy, filters.sortDir, 'o')
   const channelSelectFromOrders = schema.ordersHasChannel
     ? 'o.Channel AS Cannel'
