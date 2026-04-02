@@ -225,7 +225,8 @@
 }
 
 .chat-content {
-  flex: 1;
+  flex: 1 1 auto;
+  max-height: calc(100vh - 160px);
   overflow-y: auto;
   padding: 20px;
   display: flex;
