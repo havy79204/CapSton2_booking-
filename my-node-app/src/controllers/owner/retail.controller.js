@@ -12,7 +12,8 @@ function getActor(req) {
 }
 
 const getRetailProducts = asyncHandler(async (req, res) => {
-  const data = await retailService.listRetailProducts()
+  const opts = req.query || {}
+  const data = await retailService.listRetailProducts(opts)
   res.json({ ok: true, data })
 })
 
@@ -157,7 +158,7 @@ const putRetailOrder = asyncHandler(async (req, res) => {
     return
   }
 
-  const data = await retailService.updateRetailOrder(orderId, req.body || {})
+  const data = await retailService.updateRetailOrder(orderId, req.body || {}, { actor: getActor(req) })
   res.json({ ok: true, data })
 })
 

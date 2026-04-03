@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import '../../styles/appointments.css'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import { api } from '../../lib/api.js'
 
 export default function OwnerAppointmentsPage() {
@@ -20,6 +21,7 @@ export default function OwnerAppointmentsPage() {
   const [viewMode, setViewMode] = useState('calendar')
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [appointmentToDelete, setAppointmentToDelete] = useState(null)
+  const [deletingAppointmentId, setDeletingAppointmentId] = useState('')
 
   const TIME_SLOT_MINUTES = 30
   const TIME_CELL_HEIGHT = 64
@@ -211,6 +213,9 @@ export default function OwnerAppointmentsPage() {
         return {
           ...a,
           id: a.BookingId || a.id || a.AppointmentId,
+          // Normalize ids so the edit form can reliably pre-select values
+          customerUserId: a.customerUserId || a.customerId,
+          staffId: a.staffId || a.StaffId || a.staffID,
           customer: customer?.Name || customer?.name || 'Unknown Customer',
           service: serviceNames || 'No Service',
           duration: totalDuration || 30,
@@ -278,13 +283,21 @@ export default function OwnerAppointmentsPage() {
     if (!appointmentToDelete) return
     try {
       const id = appointmentToDelete.id || appointmentToDelete.BookingId
-      await api.put(`/api/owner/appointments/${id}`, { status: 'delete' })
+      setDeletingAppointmentId(String(id || ''))
+      await api.put(`/api/owner/appointments/${id}`, { status: 'delete' });
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Appointment deleted successfully', title: 'Completed' } 
+      }));
       await fetchData()
       setDeleteConfirmOpen(false)
       setAppointmentToDelete(null)
     } catch (err) {
       console.error('Failed to delete appointment:', err)
-      alert('Failed to delete appointment!')
+      window.dispatchEvent(new CustomEvent('portal:toast', {
+        detail: { type: 'error', message: err?.message || 'Failed to delete appointment!' },
+      }))
+    } finally {
+      setDeletingAppointmentId('')
     }
   }
 
@@ -318,8 +331,39 @@ export default function OwnerAppointmentsPage() {
              String(a.id) !== String(editingAppt?.id);
     });
 
-    if (isOverlap({ time, duration: totalDuration }, sameStaffAppts)) {
-      alert("Nhân viên này đã có lịch trong khoảng thời gian này!");
+    // Only check for overlap when creating new appointment or when date/time/staff actually changed
+    const isNewAppointment = !editingAppt;
+    
+    // Robust schedule change detection
+    let hasScheduleChanged = false;
+    if (editingAppt) {
+      const staffChanged = String(editingAppt.staffId) !== String(staffId);
+      
+      // Handle date comparison properly
+      let currentDateStr = '';
+      if (editingAppt.date) {
+        const d = new Date(editingAppt.date);
+        currentDateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      }
+      const dateChanged = currentDateStr !== date; // date from form is YYYY-MM-DD
+      
+      // Handle time comparison - normalize both times
+      const currentTime = normalizeTime(editingAppt.time || '');
+      const newTime = normalizeTime(time);
+      const timeChanged = currentTime !== newTime;
+      
+      hasScheduleChanged = staffChanged || dateChanged || timeChanged;
+      
+      console.log('[DEBUG Schedule Check]', {
+        staffChanged, staffId, editingStaffId: editingAppt.staffId,
+        dateChanged, currentDateStr, formDate: date,
+        timeChanged, currentTime, newTime,
+        hasScheduleChanged
+      });
+    }
+
+    if ((isNewAppointment || hasScheduleChanged) && isOverlap({ time, duration: totalDuration }, sameStaffAppts)) {
+      alert("This staff member already has an appointment during this time!");
       return;
     }
 
@@ -349,25 +393,31 @@ export default function OwnerAppointmentsPage() {
       if (editingAppt) {
         if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) console.debug('OwnerAppointments: updating', targetId, payload)
         await api.put(`/api/owner/appointments/${targetId}`, payload);
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Appointment updated successfully', title: 'Completed' } 
+        }));
       } else {
         if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) console.debug('OwnerAppointments: creating', payload)
         await api.post('/api/owner/appointments', payload);
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Appointment created successfully', title: 'Completed' } 
+        }));
       }
       setOpen(false);
       setEditingAppt(null);
       setSelectedServiceIds([]);
       await fetchData();
     } catch (err) {
-      alert("Lỗi: " + (err.response?.data?.error || "Không thể lưu"));
+      alert("Error: " + (err.response?.data?.error || "Unable to save"));
     }
   }
 
   const filteredAppointments = useMemo(() => 
     appointments
       .filter(appt => {
-        const s = String(appt.status || '').toLowerCase();
-        // Keep canceled appointments visible; only hide actual deleted markers
-        return s !== 'delete' && s !== 'deleted';
+        // Show all appointments including canceled and completed
+        // Only filter out appointments that are explicitly marked for deletion with a special flag
+        return true;
       })
       .filter(appt => isSameDay(appt.date || appt.startTime || appt.BookingTime, selectedDate)),
     [appointments, selectedDate]
@@ -375,14 +425,11 @@ export default function OwnerAppointmentsPage() {
 
   const listAppointments = useMemo(() => {
     if (viewMode === 'list') {
-      return appointments.filter(a => {
-        const s = String(a.status || '').toLowerCase();
-        if (s === 'delete' || s === 'deleted') return false;
-        return selectedStaff === 'all' || String(a.staffId) === String(selectedStaff);
-      });
+      // Keep list view consistent with the calendar view (same date + hide deleted markers)
+      return filteredAppointments.filter(a => selectedStaff === 'all' || String(a.staffId) === String(selectedStaff));
     }
     return filteredAppointments;
-  }, [viewMode, appointments, filteredAppointments, selectedStaff]);
+  }, [viewMode, filteredAppointments, selectedStaff]);
 
   const visibleStaff = useMemo(() => {
     if (selectedStaff === 'all') return staffMembers;
@@ -409,7 +456,13 @@ export default function OwnerAppointmentsPage() {
       if (!v) continue;
       try {
         const d = new Date(v);
-        if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+        if (!isNaN(d.getTime())) {
+          // Fix timezone issue: get local date parts instead of using toISOString
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        }
       } catch (e) {
         // ignore and try next
       }
@@ -547,21 +600,21 @@ export default function OwnerAppointmentsPage() {
             <tbody>
               {listAppointments.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ padding: '12px', color: '#6b7280' }}>No appointments found.</td>
+                  <td colSpan={8} style={{ padding: '12px', color: '#6b7280' }}>No appointments found.</td>
                 </tr>
               )}
               {listAppointments.map(appt => {
                 const staff = staffMembers.find(s => String(s.id || s.UserId) === String(appt.staffId));
                 return (
                   <tr key={appt.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.date ? new Date(appt.date).toLocaleDateString() : (appt.BookingTime ? new Date(appt.BookingTime).toLocaleDateString() : '')}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.time}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{staff?.name || staff?.Name || '—'}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.service}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.customer}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>{appt.duration}m</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top', textTransform: 'capitalize' }}>{appt.status}</td>
-                    <td style={{ padding: '8px', verticalAlign: 'top' }}>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.date ? new Date(appt.date).toLocaleDateString() : (appt.BookingTime ? new Date(appt.BookingTime).toLocaleDateString() : '')}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.time}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{staff?.name || staff?.Name || '—'}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.service}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.customer}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.duration}m</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle', textTransform: 'capitalize' }}>{appt.status}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>
                       <button type="button" className="btn secondary" style={{ marginRight: '6px' }} onClick={(e) => handleEditClick(e, appt)}>Edit</button>
                       <button type="button" className="btn danger" onClick={(e) => handleDeleteClick(e, appt)}>Delete</button>
                     </td>
@@ -578,14 +631,18 @@ export default function OwnerAppointmentsPage() {
           <div style={{ display: 'flex', gap: '10px' }}>
             <div className="form-group" style={{ flex: 1 }}>
               <label>Customer</label>
-              <select name="customerUserId" required defaultValue={editingAppt?.customerUserId || ""}>
+              <select
+                name="customerUserId"
+                required
+                defaultValue={editingAppt?.customerUserId || editingAppt?.customerId || ""}
+              >
                 <option value="">Select customer</option>
                 {customers.map(c => <option key={c.UserId || c.id} value={c.UserId || c.id}>{c.Name || c.name}</option>)}
               </select>
             </div>
             <div className="form-group" style={{ flex: 1 }}>
               <label>Staff</label>
-              <select name="staffId" required defaultValue={editingAppt?.staffId || ""}>
+              <select name="staffId" required defaultValue={editingAppt?.staffId || editingAppt?.StaffId || ""}>
                 {staffMembers.map(s => <option key={s.id || s.UserId} value={s.id || s.UserId}>{s.name || s.Name}</option>)}
               </select>
             </div>
@@ -629,7 +686,7 @@ export default function OwnerAppointmentsPage() {
                 type="time"
                 name="time"
                 required
-                step="1800"
+                step="60"
                 min={`${String(businessHours.openingHour).padStart(2, '0')}:00`}
                 max={`${String(businessHours.closingHour).padStart(2, '0')}:00`}
                 defaultValue={editingAppt?.time || `${String(businessHours.openingHour).padStart(2, '0')}:00`}
@@ -659,36 +716,15 @@ export default function OwnerAppointmentsPage() {
         </form>
       </PortalModal>
 
-      <PortalModal
+      <ConfirmDeleteModal
         open={deleteConfirmOpen}
-        title="Delete Appointment"
+        title="Confirm delete"
+        message="Are you sure you want to delete this appointment?"
+        detail={`Date: ${String(appointmentToDelete?.date || 'N/A')} | Time: ${String(appointmentToDelete?.time || 'N/A')} | Staff: ${String(appointmentToDelete?.staffName || appointmentToDelete?.staff || 'N/A')}`}
         onClose={cancelDelete}
-        footer={
-          <>
-            <button type="button" className="portal-modalBtn" onClick={cancelDelete}>
-              Cancel
-            </button>
-            <button 
-              type="button" 
-              className="portal-modalBtn portal-modalBtnPrimary"
-              onClick={confirmDelete}
-              style={{ backgroundColor: '#e74c3c' }}
-            >
-              Delete
-            </button>
-          </>
-        }
-      >
-        <p style={{ fontSize: '15px', color: '#1f2937', marginBottom: '12px', lineHeight: '1.5', fontWeight: '500' }}>
-          Are you sure you want to delete this appointment?
-        </p>
-        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '0' }}>
-          <strong>Date:</strong> {String(appointmentToDelete?.date || 'N/A')} | <strong>Time:</strong> {String(appointmentToDelete?.time || 'N/A')} | <strong>Staff:</strong> {String(appointmentToDelete?.staffName || appointmentToDelete?.staff || 'N/A')}
-        </p>
-        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '0', marginTop: '8px' }}>
-          This action cannot be undone.
-        </p>
-      </PortalModal>
+        onConfirm={confirmDelete}
+        confirming={Boolean(deletingAppointmentId)}
+      />
     </div>
   );
 }

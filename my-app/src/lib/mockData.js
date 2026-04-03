@@ -904,7 +904,7 @@ export const mockBookings = [
     BookingId: 'BKG003',
     UserId: 'USR001',
     BookingTime: '2026-03-18T11:30:00Z',
-    Status: 'C',
+    Status: 'Pending',
     Notes: 'First time trying gel polish',
     CreatedAt: '2026-03-10T16:45:00Z'
   },
@@ -944,7 +944,7 @@ export const mockBookings = [
     BookingId: 'BKG008',
     UserId: 'USR001',
     BookingTime: '2026-03-25T09:00:00Z',
-    Status: 'C',
+    Status: 'Pending',
     Notes: 'Need quick service - event at 2pm',
     CreatedAt: '2026-03-11T08:00:00Z'
   },
@@ -976,7 +976,7 @@ export const mockBookings = [
     BookingId: 'BKG012',
     UserId: 'USR003',
     BookingTime: '2026-03-17T11:30:00Z',
-    Status: 'C',
+    Status: 'Pending',
     Notes: null,
     CreatedAt: '2026-03-10T16:45:00Z'
   }

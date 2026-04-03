@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import { IconSearch } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
 import '../../styles/service.css'
+import '../../styles/global-buttons.css'
 
 function formatVnd(value) {
   const n = Number(value || 0)
@@ -65,6 +67,7 @@ export default function OwnerServicesPage() {
     images: [],
   })
   const [selectedImageIdx, setSelectedImageIdx] = useState(-1)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
   const imageInputRef = useRef(null)
 
@@ -79,6 +82,7 @@ export default function OwnerServicesPage() {
     setOpen(false)
     setEditing(null)
     setError('')
+    setDeleteConfirmOpen(false)
   }
 
   function openCreate() {
@@ -221,12 +225,22 @@ export default function OwnerServicesPage() {
     }
   }
 
+  function openDeleteConfirm() {
+    const serviceId = String(editing?.id || '').trim()
+    if (!serviceId) return
+    setDeleteConfirmOpen(true)
+  }
+
+  function closeDeleteConfirm() {
+    setDeleteConfirmOpen(false)
+  }
+
   async function onDeleteService() {
     const serviceId = String(editing?.id || '').trim()
     if (!serviceId) return
-    if (!window.confirm(`Delete service ${editing?.name || serviceId}?`)) return
 
     try {
+      setDeleteConfirmOpen(false)
       setError('')
       await api.del(`/api/owner/services/${serviceId}`)
       await refresh()
@@ -259,8 +273,14 @@ export default function OwnerServicesPage() {
 
       if (editing?.id) {
         await api.put(`/api/owner/services/${editing.id}`, payload)
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Service updated successfully', title: 'Completed' } 
+        }));
       } else {
         await api.post('/api/owner/services', payload)
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Service created successfully', title: 'Completed' } 
+        }));
       }
 
       await refresh()
@@ -373,7 +393,7 @@ export default function OwnerServicesPage() {
               </button>
             ) : null}
             {editing?.id ? (
-              <button type="button" className="portal-modalBtn" onClick={onDeleteService}>
+              <button type="button" className="portal-modalBtn" onClick={openDeleteConfirm}>
                 Delete
               </button>
             ) : null}
@@ -521,6 +541,15 @@ export default function OwnerServicesPage() {
         </form>
       </PortalModal>
 
+      <ConfirmDeleteModal
+        open={deleteConfirmOpen}
+        title="Confirm delete"
+        message={`Are you sure you want to delete service "${editing?.name || editing?.id || 'this service'}"?`}
+        detail="This action cannot be undone."
+        onClose={closeDeleteConfirm}
+        onConfirm={onDeleteService}
+      />
+
       <PortalModal
         open={openCategory}
         title="Add service category"
@@ -663,20 +692,22 @@ export default function OwnerServicesPage() {
         <div className="service-pagination">
           <button
             type="button"
-            className="portal-ghostBtn"
+            className="service-paginationBtn"
             disabled={page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
+            aria-label="Previous page"
           >
-            Previous
+            ‹
           </button>
           <span className="service-paginationText">Page {page} / {totalPages}</span>
           <button
             type="button"
-            className="portal-ghostBtn"
+            className="service-paginationBtn"
             disabled={page >= totalPages}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            aria-label="Next page"
           >
-            Next
+            ›
           </button>
         </div>
       </PortalCard>

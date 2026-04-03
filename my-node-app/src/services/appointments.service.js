@@ -1,6 +1,7 @@
 const { query, newId } = require('../config/query')
 const { toAppointmentListItem } = require('../models/appointment.model')
 const { getSettingsMap } = require('./settings.service')
+const { notifyCustomerEvent, notifyOwnerEvent } = require('./notifications.service')
 
 function calculateCommission(revenue, tiers = {}) {
   const tierLow = tiers.CommissionTierLow !== undefined && tiers.CommissionTierLow !== null ? Number(tiers.CommissionTierLow) : (tiers.commissionTierLow !== undefined && tiers.commissionTierLow !== null ? Number(tiers.commissionTierLow) : 500000)
@@ -19,11 +20,11 @@ function calculateCommission(revenue, tiers = {}) {
 
 function normalizeAppointmentStatus(status) {
   const normalizedStatusInput = String(status || '').trim().toLowerCase()
+  if (normalizedStatusInput === 'c' || normalizedStatusInput === 'pending') return 'Pending'
   if (normalizedStatusInput === 'completed' || normalizedStatusInput === 'complete' || normalizedStatusInput === 'done') return 'Completed'
   if (normalizedStatusInput === 'canceled' || normalizedStatusInput === 'cancelled' || normalizedStatusInput === 'delete' || normalizedStatusInput === 'deleted') return 'Canceled'
   if (normalizedStatusInput === 'booked' || normalizedStatusInput === 'confirmed' || normalizedStatusInput === 'confirm') return 'Booked'
-  if (normalizedStatusInput === 'pending') return 'Pending'
-  return status || 'Booked'
+  return status || 'Pending'
 }
 
 async function applyCommissionForCompletedBooking(bookingId, staffId) {
@@ -129,21 +130,27 @@ async function listAppointments() {
     cu.Name AS CustomerName,
 
     -- SERVICE NAMES
-    ISNULL(STUFF((
-        SELECT ', ' + sv.Name
-        FROM BookingServices bs2
-        JOIN Services sv ON sv.ServiceId = bs2.ServiceId
-        WHERE bs2.BookingId = b.BookingId
-        FOR XML PATH('')
-    ), 1, 2, ''), 'No Service') AS AllServices,
+    ISNULL((
+        SELECT TOP 1 STUFF((
+            SELECT ', ' + sv.Name
+            FROM BookingServices bs2
+            JOIN Services sv ON sv.ServiceId = bs2.ServiceId
+            WHERE bs2.BookingId = b.BookingId
+            ORDER BY sv.Name
+            FOR XML PATH(''), TYPE
+        ).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
+    ), 'No Service') AS AllServices,
 
-    -- SERVICE IDS (FIX CHINH)
-    ISNULL(STUFF((
-        SELECT ',' + CAST(bs2.ServiceId AS VARCHAR)
-        FROM BookingServices bs2
-        WHERE bs2.BookingId = b.BookingId
-        FOR XML PATH('')
-    ), 1, 1, ''), '') AS ServiceIds,
+    -- SERVICE IDS
+    ISNULL((
+        SELECT STUFF((
+            SELECT ',' + CAST(bs2.ServiceId AS NVARCHAR(50))
+            FROM BookingServices bs2
+            WHERE bs2.BookingId = b.BookingId
+            ORDER BY bs2.ServiceId
+            FOR XML PATH(''), TYPE
+        ).value('.', 'NVARCHAR(MAX)'), 1, 1, '')
+    ), '') AS ServiceIds,
 
     -- TOTAL DURATION
     ISNULL((
@@ -173,7 +180,7 @@ ORDER BY b.BookingTime DESC`
     return {
       ...mapped,
       serviceIds: row.ServiceIds
-        ? row.ServiceIds.split(',').map(id => String(id))
+        ? row.ServiceIds.split(',').map(id => String(id).trim()).filter(Boolean)
         : []
     };
   });
@@ -352,6 +359,12 @@ async function updateAppointment(bookingId, payload) {
     throw err
   }
 
+  const currentBooking = exists.recordset?.[0] || null
+  const previousBookingTime = currentBooking?.BookingTime ? new Date(currentBooking.BookingTime) : null
+  const previousTimeMs = previousBookingTime && !Number.isNaN(previousBookingTime.getTime())
+    ? previousBookingTime.getTime()
+    : null
+
   // ===== UPDATE BOOKING =====
   await query(
     `UPDATE Bookings
@@ -409,13 +422,54 @@ async function updateAppointment(bookingId, payload) {
     await applyCommissionForCompletedBooking(bookingId, staffId)
   }
 
+  if (normalizedStatus === 'canceled' || normalizedStatus === 'cancelled') {
+    await notifyOwnerEvent({ event: 'booking_cancelled', bookingId })
+  } else if (normalizedStatus === 'pending') {
+    await notifyOwnerEvent({ event: 'booking_rescheduled', bookingId })
+  }
+
+  const targetCustomerUserId = String(currentBooking?.CustomerUserId || '').trim()
+  if (targetCustomerUserId) {
+    try {
+      if (normalizedStatus === 'canceled' || normalizedStatus === 'cancelled') {
+        await notifyCustomerEvent({
+          userId: targetCustomerUserId,
+          event: 'booking_cancelled',
+          bookingId,
+          payload: { bookingId },
+        })
+      } else {
+        const nextTimeMs = when.getTime()
+        if (previousTimeMs !== null && nextTimeMs !== previousTimeMs) {
+          await notifyCustomerEvent({
+            userId: targetCustomerUserId,
+            event: 'booking_rescheduled',
+            bookingId,
+            payload: { bookingTime: when.toISOString() },
+          })
+        }
+
+        if (normalizedStatus === 'completed') {
+          await notifyCustomerEvent({
+            userId: targetCustomerUserId,
+            event: 'post_feedback_request',
+            bookingId,
+            payload: { bookingId },
+          })
+        }
+      }
+    } catch (err) {
+      console.warn('[appointments] Notify customer failed:', err?.message || err)
+    }
+  }
+
   console.log(`[APPT UPDATE] ========== END ==========\n`)
   return { id: bookingId }
 }
 
 
 async function cancelAppointment(bookingId) {
-  const exists = await query('SELECT TOP 1 BookingId FROM Bookings WHERE BookingId = @bookingId', { bookingId })
+  const exists = await query('SELECT TOP 1 BookingId, CustomerUserId FROM Bookings WHERE BookingId = @bookingId', { bookingId })
   if (!exists.recordset?.length) {
     const err = new Error('Appointment not found')
     err.status = 404
@@ -426,6 +480,23 @@ async function cancelAppointment(bookingId) {
     bookingId,
     status: 'Canceled',
   })
+
+  await notifyOwnerEvent({ event: 'booking_cancelled', bookingId })
+
+  const customerUserId = String(exists.recordset?.[0]?.CustomerUserId || '').trim()
+  if (customerUserId) {
+    try {
+      await notifyCustomerEvent({
+        userId: customerUserId,
+        event: 'booking_cancelled',
+        bookingId,
+        payload: { bookingId },
+      })
+    } catch (err) {
+      console.warn('[appointments] Cancel notify customer failed:', err?.message || err)
+    }
+  }
+
   return { id: bookingId }
 }
 

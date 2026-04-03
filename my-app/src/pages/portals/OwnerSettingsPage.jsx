@@ -260,7 +260,9 @@ export default function OwnerSettingsPage() {
     setNotify((p) => ({ ...p, [stateKey]: value }))
     try {
       await updateSettings({ [settingKey]: value })
-      showPortalToast({ type: 'success', message: 'Notification setting updated.' })
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Notification setting updated.', title: 'Completed' } 
+      }))
     } catch (err) {
       console.error(err)
       setNotify((p) => ({ ...p, [stateKey]: prevValue }))
@@ -443,12 +445,6 @@ export default function OwnerSettingsPage() {
             <input className="portal-input" value={salon.address} onChange={(e) => setSalon((p) => ({ ...p, address: e.target.value }))} />
           </label>
 
-          <div className="portal-formGrid2">
-            <label className="portal-field">
-              <span className="portal-label">Tax code</span>
-              <input className="portal-input" value={salon.taxCode} onChange={(e) => setSalon((p) => ({ ...p, taxCode: e.target.value }))} />
-            </label>
-          </div>
 
           <label className="portal-field portal-fieldFull">
             <span className="portal-label">About salon</span>
@@ -1165,7 +1161,9 @@ export default function OwnerSettingsPage() {
               className="portal-outlineBtn"
               onClick={() => {
                 setSecurity({ currentPassword: '', newPassword: '', confirmPassword: '' })
-                showPortalToast({ type: 'success', message: 'Password form has been cleared.' })
+                window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+                  detail: { message: 'Password form has been cleared.', title: 'Completed' } 
+                }))
               }}
             >
               Cancel

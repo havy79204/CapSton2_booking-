@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import '../../styles/customers.css'
+import '../../styles/global-buttons.css'
 import {
   IconSearch,
 } from '../../components/Layout portal/PortalIcons.jsx'
@@ -67,6 +69,8 @@ export default function OwnerCustomersPage() {
   const [sortOrder, setSortOrder] = useState('asc')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [page, setPage] = useState(1)
+  const pageSize = 10
 
   useEffect(() => {
     loadCustomers()
@@ -122,8 +126,14 @@ export default function OwnerCustomersPage() {
         const putPayload = { ...payload }
         if (!putPayload.name) delete putPayload.name
         await api.put(`/api/owner/customers/${editing.id}`, putPayload)
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Customer updated successfully', title: 'Completed' } 
+        }));
       } else {
         await api.post('/api/owner/customers', payload)
+        window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+          detail: { message: 'Customer created successfully', title: 'Completed' } 
+        }));
       }
 
       setForm({ name: '', phone: '', email: '', status: 'Active' })
@@ -257,6 +267,17 @@ export default function OwnerCustomersPage() {
     return result
   }, [customers, query, sortBy, sortOrder, fromDate, toDate])
 
+  const pagedCustomers = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return filteredCustomers.slice(start, start + pageSize)
+  }, [filteredCustomers, page])
+
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(filteredCustomers.length / pageSize)), [filteredCustomers.length])
+
+  useEffect(() => {
+    setPage(1)
+  }, [query, sortBy, sortOrder, fromDate, toDate])
+
   return (
     <div className="customers-page">
       <div className="portal-pageHeader">
@@ -327,34 +348,15 @@ export default function OwnerCustomersPage() {
         </form>
       </PortalModal>
 
-      <PortalModal
+      <ConfirmDeleteModal
         open={deleteConfirmOpen}
-        title="Delete Customer"
+        title="Confirm delete"
+        message={`Are you sure you want to delete customer "${customerToDelete?.name || customerToDelete?.email || 'this customer'}"?`}
+        detail="This action cannot be undone."
         onClose={cancelDelete}
-        footer={
-          <>
-            <button type="button" className="portal-modalBtn" onClick={cancelDelete}>
-              Cancel
-            </button>
-            <button 
-              type="button" 
-              className="portal-modalBtn portal-modalBtnPrimary" 
-              onClick={confirmDelete}
-              disabled={deletingId === (customerToDelete?.id || customerToDelete?.email)}
-              style={{ backgroundColor: deletingId === (customerToDelete?.id || customerToDelete?.email) ? '#ccc' : '#e74c3c' }}
-            >
-              {deletingId === (customerToDelete?.id || customerToDelete?.email) ? 'Deleting...' : 'Delete'}
-            </button>
-          </>
-        }
-      >
-        <p style={{ fontSize: '15px', color: '#1f2937', marginBottom: '12px', lineHeight: '1.5', fontWeight: '500' }}>
-          Are you sure you want to delete <strong>{customerToDelete?.name}</strong>?
-        </p>
-        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '0' }}>
-          This action cannot be undone.
-        </p>
-      </PortalModal>
+        onConfirm={confirmDelete}
+        confirming={deletingId === (customerToDelete?.id || customerToDelete?.email)}
+      />
 
       <div className="portal-customer">
       <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', marginBottom: '12px', flexWrap: 'wrap' }}>
@@ -461,12 +463,12 @@ export default function OwnerCustomersPage() {
             </tr>
           </thead>
           <tbody>
-            {filteredCustomers.length === 0 ? (
+            {pagedCustomers.length === 0 ? (
               <tr>
                 <td colSpan={7}>No customers found.</td>
               </tr>
             ) : (
-              filteredCustomers.map((c) => (
+              pagedCustomers.map((c) => (
                 <tr key={c.id || c.email || c.name}>
                   <td>{c.name}</td>
                   <td>{c.phone}</td>
@@ -475,26 +477,50 @@ export default function OwnerCustomersPage() {
                   <td>{c.visits}</td>
                   <td>{c.last}</td>
                   <td>
-                    <button type="button" className="portal-ghostBtn" onClick={() => openEdit(c)}>
-                      Edit
-                    </button>
-                    <button type="button" className="portal-ghostBtn" onClick={() => navigate(`/portals/owner/customers/${c.id || c.email}`)}>
-                      View
-                    </button>
-                    <button 
-                      type="button" 
-                      className="portal-ghostBtn" 
-                      onClick={() => onDeleteCustomer(c)}
-                      disabled={deletingId === (c.id || c.email)}
-                    >
-                      {deletingId === (c.id || c.email) ? 'Deleting...' : 'Delete'}
-                    </button>
+                    <div className="portal-customerActions">
+                      <button type="button" className="portal-ghostBtn" onClick={() => openEdit(c)}>
+                        Edit
+                      </button>
+                      <button type="button" className="portal-ghostBtn" onClick={() => navigate(`/portals/owner/customers/${c.id || c.email}`)}>
+                        View
+                      </button>
+                      <button 
+                        type="button" 
+                        className="portal-ghostBtn" 
+                        onClick={() => onDeleteCustomer(c)}
+                        disabled={deletingId === (c.id || c.email)}
+                      >
+                        {deletingId === (c.id || c.email) ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="customers-pagination">
+        <button
+          type="button"
+          className="customers-paginationBtn"
+          disabled={page <= 1}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          aria-label="Previous page"
+        >
+          ‹
+        </button>
+        <span className="customers-paginationText">Page {page} / {totalPages}</span>
+        <button
+          type="button"
+          className="customers-paginationBtn"
+          disabled={page >= totalPages}
+          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          aria-label="Next page"
+        >
+          ›
+        </button>
       </div>
       </div>
     </div>

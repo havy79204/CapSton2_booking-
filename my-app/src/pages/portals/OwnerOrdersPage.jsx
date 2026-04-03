@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
+import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
 import { api } from '../../lib/api.js'
 import '../../styles/orders.css'
+import '../../styles/global-buttons.css'
 
 function formatVnd(value) {
   const n = Number(value || 0)
@@ -14,7 +16,7 @@ function defaultFilters() {
     status: '',
     keyword: '',
     page: 1,
-    pageSize: 20,
+    pageSize: 10,
     sortBy: 'createdAt',
     sortDir: 'desc',
   }
@@ -54,7 +56,6 @@ function defaultCreateOrderForm() {
 function normalizeDisplayStatus(status) {
   const raw = String(status || '').trim().toLowerCase()
   if (!raw) return '-'
-  if (raw === 'c') return 'Pending'
   return status
 }
 
@@ -64,7 +65,7 @@ export default function OwnerOrdersPage() {
   const [orderReport, setOrderReport] = useState({
     summary: { totalOrders: 0, totalRevenue: 0, totalDiscount: 0, totalQuantity: 0, fromDate: null, toDate: null },
     items: [],
-    pagination: { page: 1, pageSize: 20, totalRows: 0 },
+    pagination: { page: 1, pageSize: 10, totalRows: 0 },
   })
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState('')
@@ -80,6 +81,8 @@ export default function OwnerOrdersPage() {
   })
   const [orderSaving, setOrderSaving] = useState(false)
   const [deletingOrderId, setDeletingOrderId] = useState('')
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [orderToDelete, setOrderToDelete] = useState(null)
 
   // Editable items when updating an order
   const [editItems, setEditItems] = useState([])
@@ -99,7 +102,7 @@ export default function OwnerOrdersPage() {
       setOrderReport({
         summary: data?.summary || { totalOrders: 0, totalRevenue: 0, totalDiscount: 0, totalQuantity: 0, fromDate: null, toDate: null },
         items: Array.isArray(data?.items) ? data.items : [],
-        pagination: data?.pagination || { page: 1, pageSize: 20, totalRows: 0 },
+        pagination: data?.pagination || { page: 1, pageSize: 10, totalRows: 0 },
       })
     } catch (err) {
       console.error(err)
@@ -107,7 +110,7 @@ export default function OwnerOrdersPage() {
       setOrderReport({
         summary: { totalOrders: 0, totalRevenue: 0, totalDiscount: 0, totalQuantity: 0, fromDate: null, toDate: null },
         items: [],
-        pagination: { page: 1, pageSize: 20, totalRows: 0 },
+        pagination: { page: 1, pageSize: 10, totalRows: 0 },
       })
     } finally {
       setOrdersLoading(false)
@@ -123,6 +126,12 @@ export default function OwnerOrdersPage() {
       setProducts([])
     }
   }, [])
+
+  const refreshOrdersInBackground = useCallback((nextFilters) => {
+    Promise.resolve()
+      .then(() => loadOrders(nextFilters))
+      .catch(() => {})
+  }, [loadOrders])
 
   useEffect(() => {
     loadProducts()
@@ -242,8 +251,27 @@ export default function OwnerOrdersPage() {
         items: itemsPayload,
       })
 
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Order updated successfully', title: 'Completed' } 
+      }))
+
+      setOrderReport((prev) => ({
+        ...prev,
+        items: (prev.items || []).map((item) => {
+          const id = item?.Id || item?.id || item?.OrderId || item?.OrderCode
+          if (String(id || '') !== String(orderEditing.OrderId)) return item
+          return {
+            ...item,
+            CustomerName: orderForm.customerName,
+            CustomerPhone: orderForm.customerPhone,
+            CustomerAddress: orderForm.customerAddress,
+            PaymentMethod: orderForm.paymentMethod,
+            Status: orderForm.status,
+          }
+        }),
+      }))
       setOpenOrderModal(false)
-      await loadOrders(orderFilters)
+      refreshOrdersInBackground(orderFilters)
     } catch (err) {
       console.error(err)
       setOrdersError(err?.message || 'Unable to update order')
@@ -284,10 +312,14 @@ export default function OwnerOrdersPage() {
         items: lines,
       })
 
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Order created successfully', title: 'Completed' } 
+      }));
+
       setOpenCreateOrderModal(false)
       resetCreateOrder()
-      await loadOrders(orderFilters)
-      await loadProducts()
+      refreshOrdersInBackground(orderFilters)
+      Promise.resolve().then(loadProducts).catch(() => {})
     } catch (err) {
       console.error(err)
       setOrdersError(err?.message || 'Unable to create order')
@@ -296,26 +328,40 @@ export default function OwnerOrdersPage() {
     }
   }
 
+  function askDeleteOrder(order) {
+    if (!order) return
+    setOrderToDelete(order)
+    setDeleteConfirmOpen(true)
+  }
+
   async function onDeleteOrder(order) {
     const orderId = String(order?.OrderId || '').trim()
     if (!orderId) return
-    if (!window.confirm(`Delete order ${order.OrderCode || orderId}?`)) return
 
     try {
       setDeletingOrderId(orderId)
+      setDeleteConfirmOpen(false)
       setOrdersError('')
       await api.del(`/api/owner/retail/orders/${orderId}`)
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Order deleted successfully', title: 'Completed' } 
+      }));
+      setOrderReport((prev) => ({
+        ...prev,
+        items: (prev.items || []).filter((item) => String(item?.OrderId || item?.Id || item?.id || '') !== orderId),
+      }))
       if (orderEditing?.OrderId === orderId) {
         setOpenOrderModal(false)
         setOrderEditing(null)
       }
-      await loadOrders(orderFilters)
-      await loadProducts()
+      refreshOrdersInBackground(orderFilters)
+      Promise.resolve().then(loadProducts).catch(() => {})
     } catch (err) {
       console.error(err)
       setOrdersError(err?.message || 'Unable to delete order')
     } finally {
       setDeletingOrderId('')
+      setOrderToDelete(null)
     }
   }
 
@@ -450,47 +496,31 @@ export default function OwnerOrdersPage() {
             </tbody>
           </table>
         </div>
-        <div className="portal-pagination" style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button
-              type="button"
-              className="portal-ghostBtn"
-              disabled={orderReport.pagination.page <= 1 || ordersLoading}
-              onClick={() => setOrderFilters((p) => ({ ...p, page: 1 }))}
-            >
-              First
-            </button>
-            <button
-              type="button"
-              className="portal-ghostBtn"
-              disabled={orderReport.pagination.page <= 1 || ordersLoading}
-              onClick={() => setOrderFilters((p) => ({ ...p, page: Math.max(1, (p.page || 1) - 1) }))}
-            >
-              Previous
-            </button>
-            <span style={{ minWidth: 120, textAlign: 'center' }}>
-              Page {orderReport.pagination.page || 1} / {Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20)))}
-            </span>
-            <button
-              type="button"
-              className="portal-ghostBtn"
-              disabled={
-                ordersLoading ||
-                (orderReport.pagination.page || 1) >= Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20)))
-              }
-              onClick={() => setOrderFilters((p) => ({ ...p, page: (p.page || 1) + 1 }))}
-            >
-              Next
-            </button>
-            <button
-              type="button"
-              className="portal-ghostBtn"
-              disabled={ordersLoading || (orderReport.pagination.page || 1) >= Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20)))}
-              onClick={() => setOrderFilters((p) => ({ ...p, page: Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 20))) }))}
-            >
-              Last
-            </button>
-          </div>
+        <div className="orders-pagination">
+          <button
+            type="button"
+            className="orders-paginationBtn"
+            disabled={orderReport.pagination.page <= 1 || ordersLoading}
+            onClick={() => setOrderFilters((p) => ({ ...p, page: Math.max(1, (p.page || 1) - 1) }))}
+            aria-label="Previous page"
+          >
+            ‹
+          </button>
+          <span className="orders-paginationText">
+            Page {orderReport.pagination.page || 1} / {Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 10)))}
+          </span>
+          <button
+            type="button"
+            className="orders-paginationBtn"
+            disabled={
+              ordersLoading ||
+              (orderReport.pagination.page || 1) >= Math.max(1, Math.ceil((orderReport.pagination.totalRows || 0) / (orderReport.pagination.pageSize || 10)))
+            }
+            onClick={() => setOrderFilters((p) => ({ ...p, page: (p.page || 1) + 1 }))}
+            aria-label="Next page"
+          >
+            ›
+          </button>
         </div>
       </PortalCard>
       <PortalModal
@@ -502,7 +532,7 @@ export default function OwnerOrdersPage() {
            <button
               type="button"
               className="portal-modalBtn"
-              onClick={() => onDeleteOrder(orderEditing)}
+              onClick={() => askDeleteOrder(orderEditing)}
               disabled={!orderEditing?.OrderId || deletingOrderId === orderEditing?.OrderId || orderSaving}
             >
               {deletingOrderId === orderEditing?.OrderId ? 'Deleting...' : 'Delete'}
@@ -631,6 +661,20 @@ export default function OwnerOrdersPage() {
           </PortalCard>
         </form>
       </PortalModal>
+
+      <ConfirmDeleteModal
+        open={deleteConfirmOpen}
+        title="Confirm delete"
+        message={`Are you sure you want to delete order "${orderToDelete?.OrderCode || orderToDelete?.OrderId || 'this order'}"?`}
+        detail="This action cannot be undone."
+        onClose={() => {
+          if (deletingOrderId) return
+          setDeleteConfirmOpen(false)
+          setOrderToDelete(null)
+        }}
+        onConfirm={() => onDeleteOrder(orderToDelete)}
+        confirming={Boolean(deletingOrderId)}
+      />
 
       <PortalModal
         open={openCreateOrderModal}

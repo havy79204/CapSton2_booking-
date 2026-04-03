@@ -8,19 +8,23 @@ import '../styles/HistoryPage.css'
 
 function bookingStatusClass(status) {
   const value = String(status || '').trim().toLowerCase()
-  if (value === 'C') return 'C'
+  if (value === 'pending') return 'pending'
   if (value.includes('cancel')) return 'cancelled'
   if (value.includes('complete') || value.includes('confirm')) return 'success'
   return 'default'
 }
 
-function isC(status) {
-  return String(status || '').trim().toLowerCase() === 'C'
+function isPending(status) {
+  return String(status || '').trim().toLowerCase() === 'pending'
 }
 
 function isCompleted(status) {
   const value = String(status || '').trim().toLowerCase()
   return value.includes('complete') || value.includes('confirm') || value.includes('done')
+}
+
+function fmtMoney(value) {
+  return Number(value || 0).toFixed(2)
 }
 
 const BookingHistoryPage = () => {
@@ -39,11 +43,11 @@ const BookingHistoryPage = () => {
   const handleCancel = async (booking) => {
     const bookingId = booking?.BookingId
     if (!bookingId) return
-    if (!isC(booking.Status)) {
-      alert('Only C bookings can be cancelled')
+    if (!isPending(booking.Status)) {
+      alert('Only pending bookings can be cancelled')
       return
     }
-    if (!window.confirm('Cancel this C booking?')) return
+    if (!window.confirm('Cancel this pending booking?')) return
 
     try {
       setCancellingId(bookingId)
@@ -102,7 +106,7 @@ const BookingHistoryPage = () => {
         <div className="history-head">
           <div>
             <h2 className="history-title"><IoCalendarOutline /> Booking History</h2>
-            <p className="history-subtitle">Track all appointments and cancel C ones quickly.</p>
+            <p className="history-subtitle">Track all appointments and cancel pending ones quickly.</p>
           </div>
           <button className="history-link-btn" onClick={() => navigate('/booking')}>Book New Service</button>
         </div>
@@ -138,8 +142,12 @@ const BookingHistoryPage = () => {
                       <p className="history-kv-value">{Number(booking.TotalDuration || 0)} mins</p>
                     </div>
                     <div className="history-kv">
+                      <p className="history-kv-label">Discount</p>
+                      <p className="history-kv-value">-${fmtMoney(booking.DiscountAmount || 0)}</p>
+                    </div>
+                    <div className="history-kv">
                       <p className="history-kv-label">Total Price</p>
-                      <p className="history-kv-value">${Number(booking.TotalPrice || 0).toFixed(2)}</p>
+                      <p className="history-kv-value">${fmtMoney(booking.TotalPrice || 0)}</p>
                     </div>
                   </div>
 
@@ -150,27 +158,36 @@ const BookingHistoryPage = () => {
                           <th>Service</th>
                           <th>Duration</th>
                           <th>Price</th>
+                          <th>Discount</th>
                         </tr>
                       </thead>
                       <tbody>
                         {services.length === 0 ? (
                           <tr>
-                            <td colSpan={3}>No service detail</td>
+                            <td colSpan={4}>No service detail</td>
                           </tr>
                         ) : (
                           services.map((service) => (
                             <tr key={service.BookingServiceId || `${booking.BookingId}-${service.ServiceId}`}>
                               <td>{service.ServiceName || service.ServiceId}</td>
                               <td>{Number(service.DurationMinutes || 0)} mins</td>
-                              <td>${Number(service.Price || 0).toFixed(2)}</td>
+                              <td>${fmtMoney(service.Price || 0)}</td>
+                              <td>$0.00</td>
                             </tr>
                           ))
                         )}
                       </tbody>
+                      <tfoot>
+                        <tr>
+                          <td colSpan={2}><strong>Subtotal</strong></td>
+                          <td><strong>${fmtMoney(booking.Subtotal || booking.TotalPrice || 0)}</strong></td>
+                          <td><strong>-${fmtMoney(booking.DiscountAmount || 0)}</strong></td>
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
 
-                  {isC(booking.Status) ? (
+                  {isPending(booking.Status) ? (
                     <div className="history-actions">
                       <button
                         className="history-cancel-btn"

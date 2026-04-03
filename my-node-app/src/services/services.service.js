@@ -2,6 +2,7 @@ const { query, newId } = require('../config/query')
 const { toServiceListItem } = require('../models/service.model')
 const fs = require('fs/promises')
 const path = require('path')
+const { notifyAllCustomersEvent } = require('./notifications.service')
 
 const serviceSchemaState = {
   checked: false,
@@ -39,6 +40,8 @@ function normalizeImageUrls(input) {
 
 const ACTIVE_SERVICE_WHERE = `(s.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), s.Status)))) = 'active')`
 const NOT_DELETED_SERVICE_WHERE = `(s.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), s.Status)))) NOT IN ('deleted', 'delete'))`
+const _tableExistsCache = new Map()
+const _columnExistsCache = new Map()
 
 function isForeignKeyConstraintError(err) {
   if (!err) return false
@@ -53,23 +56,49 @@ function isForeignKeyConstraintError(err) {
 }
 
 async function columnExists(tableName, columnName) {
-  const res = await query(
-    `SELECT 1 AS ok
-     FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_NAME = @t AND COLUMN_NAME = @c`,
-    { t: tableName, c: columnName }
-  )
-  return Boolean(res.recordset?.length)
+  const cacheKey = `column:${tableName}:${columnName}`
+  if (_columnExistsCache.has(cacheKey)) {
+    return _columnExistsCache.get(cacheKey)
+  }
+
+  try {
+    const res = await query(
+      `SELECT 1 AS ok
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_NAME = @t AND COLUMN_NAME = @c`,
+      { t: tableName, c: columnName }
+    )
+    const exists = Boolean(res.recordset?.length)
+    _columnExistsCache.set(cacheKey, exists)
+    return exists
+  } catch {
+    const exists = false
+    _columnExistsCache.set(cacheKey, exists)
+    return exists
+  }
 }
 
 async function tableExists(tableName) {
-  const res = await query(
-    `SELECT 1 AS ok
-     FROM INFORMATION_SCHEMA.TABLES
-     WHERE TABLE_NAME = @t`,
-    { t: tableName }
-  )
-  return Boolean(res.recordset?.length)
+  const cacheKey = `table:${tableName}`
+  if (_tableExistsCache.has(cacheKey)) {
+    return _tableExistsCache.get(cacheKey)
+  }
+
+  try {
+    const res = await query(
+      `SELECT 1 AS ok
+       FROM INFORMATION_SCHEMA.TABLES
+       WHERE TABLE_NAME = @t`,
+      { t: tableName }
+    )
+    const exists = Boolean(res.recordset?.length)
+    _tableExistsCache.set(cacheKey, exists)
+    return exists
+  } catch {
+    const exists = false
+    _tableExistsCache.set(cacheKey, exists)
+    return exists
+  }
 }
 
 async function ensureServiceCategorySchema() {
@@ -282,6 +311,21 @@ async function createService(payload) {
 
   await replaceServiceImages(id, images)
 
+  if (String(status || 'active').trim().toLowerCase() === 'active') {
+    try {
+      await notifyAllCustomersEvent({
+        event: 'service_new',
+        payload: {
+          serviceId: id,
+          serviceName: String(name || '').trim() || 'New service',
+          body: `${String(name || 'A new service').trim()} is now available.`,
+        },
+      })
+    } catch (err) {
+      console.warn('[services] service_new notification failed:', err?.message || err)
+    }
+  }
+
   return { id }
 }
 
@@ -372,8 +416,14 @@ async function updateService(serviceId, payload) {
   const price = Number(priceVnd)
   const duration = durationMinutes === undefined || durationMinutes === null ? null : Number(durationMinutes)
 
-  const exists = await query('SELECT TOP 1 ServiceId FROM Services WHERE ServiceId = @serviceId', { serviceId })
-  if (!exists.recordset?.length) {
+  const existingRes = await query(
+    `SELECT TOP 1 ServiceId, Name, Price, Status
+     FROM Services
+     WHERE ServiceId = @serviceId`,
+    { serviceId },
+  )
+  const existing = existingRes.recordset?.[0]
+  if (!existing) {
     const err = new Error('Service not found')
     err.status = 404
     throw err
@@ -408,6 +458,38 @@ async function updateService(serviceId, payload) {
 
   if (images !== undefined) {
     await replaceServiceImages(serviceId, images)
+  }
+
+  const oldPrice = Number(existing.Price)
+  const newPrice = Number.isFinite(price) ? price : oldPrice
+  const nextStatus = String(status || existing.Status || '').trim().toLowerCase()
+  const prevStatus = String(existing.Status || '').trim().toLowerCase()
+  const nextName = String(name || existing.Name || '').trim() || 'Service'
+
+  try {
+    if (Number.isFinite(oldPrice) && Number.isFinite(newPrice) && newPrice < oldPrice) {
+      await notifyAllCustomersEvent({
+        event: 'service_discount',
+        payload: {
+          serviceId,
+          serviceName: nextName,
+          oldPrice,
+          newPrice,
+          body: `${nextName} is now discounted from ${oldPrice.toLocaleString('vi-VN')} to ${newPrice.toLocaleString('vi-VN')} VND.`,
+        },
+      })
+    } else if (prevStatus !== 'active' && nextStatus === 'active') {
+      await notifyAllCustomersEvent({
+        event: 'service_new',
+        payload: {
+          serviceId,
+          serviceName: nextName,
+          body: `${nextName} is now available.`,
+        },
+      })
+    }
+  } catch (err) {
+    console.warn('[services] service update notification failed:', err?.message || err)
   }
 
   return { id: serviceId }
