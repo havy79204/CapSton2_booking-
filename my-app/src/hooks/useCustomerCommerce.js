@@ -32,7 +32,7 @@ export function useCustomerContext() {
   return { context, loading, error, refresh }
 }
 
-export function useCustomerStaff(serviceIds = []) {
+export function useCustomerStaff(serviceIds = [], selectedDate = '') {
   const [staffs, setStaffs] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -43,14 +43,20 @@ export function useCustomerStaff(serviceIds = []) {
       : []
   }, [serviceIds])
 
-  const queryString = normalizedServiceIds.length
-    ? `?serviceIds=${encodeURIComponent(normalizedServiceIds.join(','))}`
-    : ''
-
   const refresh = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
+      
+      const queryParams = new URLSearchParams()
+      if (normalizedServiceIds.length) {
+        queryParams.append('serviceIds', normalizedServiceIds.join(','))
+      }
+      if (selectedDate) {
+        queryParams.append('date', selectedDate)
+      }
+      const queryString = queryParams.toString() ? `?${queryParams.toString()}` : ''
+      
       const data = await api.get(`/api/customer/staff${queryString}`)
       setStaffs(Array.isArray(data) ? data : [])
       return data
@@ -60,7 +66,7 @@ export function useCustomerStaff(serviceIds = []) {
     } finally {
       setLoading(false)
     }
-  }, [queryString])
+  }, [normalizedServiceIds, selectedDate])
 
   useEffect(() => {
     refresh().catch(() => {})

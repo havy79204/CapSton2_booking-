@@ -222,7 +222,7 @@
   border-left: 4px solid #e91e63;
 }
 
-.summary-card.C {
+.summary-card.pending {
   border-left: 4px solid #ff9800;
 }
 
@@ -246,7 +246,7 @@
   color: #e91e63;
 }
 
-.summary-card.C .summary-icon {
+.summary-card.pending .summary-icon {
   color: #ff9800;
 }
 
@@ -544,7 +544,7 @@
   color: #1976d2;
 }
 
-.status-C {
+.status-pending {
   background: #fff3e0;
   color: #f57c00;
 }

@@ -33,6 +33,7 @@ import '../styles/ProfilePage.css'
 function mapBookingStatusClass(status) {
   const s = String(status || '').toLowerCase()
   if (s.includes('confirm')) return 'status-confirmed'
+  if (s.includes('pending')) return 'status-pending'
   if (s.includes('complete')) return 'status-completed'
   if (s.includes('cancel')) return 'status-cancelled'
   return ''
@@ -70,7 +71,7 @@ const ProfileHeader = ({ user, bookings, orders, onEditProfile, onManageAddresse
     return (String(b.Status || '').toLowerCase().includes('confirm') || String(b.Status || '').toLowerCase().includes('pending')) && t > now
   }).length
 
-  const CCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('pending')).length
+  const pendingCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('pending')).length
   const inProgressCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('progress')).length
   const completedCount = bookings.filter((b) => String(b.Status || '').toLowerCase().includes('complete')).length
   // Use provided reviewsCount (from API) when available; otherwise fall back to completed bookings
@@ -96,9 +97,9 @@ const ProfileHeader = ({ user, bookings, orders, onEditProfile, onManageAddresse
               <div className="summary-icon"><IoCalendar /></div>
               <div className="summary-content"><h4>{upcomingCount}</h4><p>Upcoming Booking</p><span className="summary-subtitle">appointments</span></div>
             </div>
-            <div className="summary-card C">
+            <div className="summary-card pending">
               <div className="summary-icon"><IoTimeOutline /></div>
-              <div className="summary-content"><h4>{CCount}</h4><p>Pending</p><span className="summary-subtitle">Waiting for confirmation</span></div>
+              <div className="summary-content"><h4>{pendingCount}</h4><p>Pending</p><span className="summary-subtitle">Waiting for confirmation</span></div>
             </div>
             <div className="summary-card in-progress">
               <div className="summary-icon"><IoCheckmarkCircle /></div>

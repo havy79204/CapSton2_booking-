@@ -71,6 +71,38 @@ function buildTimeSlots({ openTime, closeTime, slotMinutes, breakStart, breakEnd
   return slots
 }
 
+function isTimeSlotPassed(slotTime, selectedDate) {
+  const today = new Date().toISOString().slice(0, 10)
+  const isToday = selectedDate === today
+  
+  if (!isToday) return false
+  
+  const now = new Date()
+  const currentHour = String(now.getHours()).padStart(2, '0')
+  const currentMinute = String(now.getMinutes()).padStart(2, '0')
+  const currentTime = `${currentHour}:${currentMinute}`
+  
+  const slotMin = parseTimeToMinutes(slotTime)
+  const currMin = parseTimeToMinutes(currentTime)
+  
+  return currMin >= slotMin
+}
+
+function isTimeSlotBooked(slotTime, totalDuration, bookedSlots = []) {
+  if (!Array.isArray(bookedSlots) || bookedSlots.length === 0) return false
+
+  const slotMin = parseTimeToMinutes(slotTime)
+  const slotEndMin = slotMin + totalDuration
+
+  return bookedSlots.some((booking) => {
+    const bookingStartMin = parseTimeToMinutes(booking.startTime)
+    const bookingEndMin = parseTimeToMinutes(booking.endTime)
+
+    // Check if there's any overlap between the selected time slot and the booked time
+    return bookingStartMin < slotEndMin && bookingEndMin > slotMin
+  })
+}
+
 const BookingPage = () => {
 
   const mapBookingStatus = (s) => {
@@ -109,9 +141,14 @@ const BookingPage = () => {
   const [resultModalOpen, setResultModalOpen] = useState(false)
   const [resultMessage, setResultMessage] = useState('')
   const [resultTitle, setResultTitle] = useState('')
+
+  // Test modal rendering - uncomment to debug
+  useEffect(() => {
+    // setCompletionModalOpen(true)
+    // setBookingToComplete({ BookingId: 'TEST-001', BookingTime: new Date().toISOString(), Status: 'Completed' })
+  }, [])
   const [promoMessage, setPromoMessage] = useState('')
   const [appliedPromotion, setAppliedPromotion] = useState(null)
-
   const selectedServiceIdsForStaff = useMemo(() => {
     return serviceSelections
       .filter((service) => Number(service.quantity || 0) > 0)
@@ -119,7 +156,7 @@ const BookingPage = () => {
       .filter(Boolean)
   }, [serviceSelections])
 
-  const { staffs, loading: staffLoading, error: staffError } = useCustomerStaff(selectedServiceIdsForStaff)
+  const { staffs, loading: staffLoading, error: staffError } = useCustomerStaff(selectedServiceIdsForStaff, selectedDate)
   const {
     bookings,
     loading: bookingsLoading,
@@ -211,10 +248,22 @@ const BookingPage = () => {
   const isReturningCustomer = Array.isArray(bookings) && bookings.length > 0
   const selectedStaff = (Array.isArray(staffs) ? staffs : []).find((staff) => String(staff.StaffId) === String(selectedStaffId)) || null
   const selectedTechnician = selectedServiceItems.length === 0
-    ? 'Our Specialist Team'
-    : (!isReturningCustomer
-      ? 'Assigned automatically for new customers'
-      : (selectedStaff?.Name || 'Please choose a specialist'))
+    ? 'Choose services first'
+    : (selectedStaff?.Name || 'Please choose a specialist')
+
+  useEffect(() => {
+    if (!selectedServiceItems.length) {
+      if (selectedStaffId) setSelectedStaffId('')
+      return
+    }
+
+    const hasSelectedStaffInList = (Array.isArray(staffs) ? staffs : [])
+      .some((staff) => String(staff.StaffId) === String(selectedStaffId))
+
+    if (selectedStaffId && !hasSelectedStaffInList) {
+      setSelectedStaffId('')
+    }
+  }, [selectedServiceItems, staffs, selectedStaffId])
 
   const subtotal = selectedServiceItems.reduce(
     (sum, service) => sum + Number(service.Price || 0) * Number(service.quantity || 0),
@@ -351,33 +400,50 @@ const BookingPage = () => {
       return
     }
 
-    if (isReturningCustomer && !selectedStaffId) {
+    if (!selectedServiceItems.length) {
+      alert('Please select at least one service.')
+      return
+    }
+
+    if (!selectedStaffId) {
       alert('Please choose a specialist before booking.')
       return
     }
 
-    // Prevent booking if there's a scheduling conflict
     const conflicts = checkBookingConflict()
     if (conflicts) {
-      alert('Selected time conflicts with existing bookings. Please choose another time or staff.')
+      setResultTitle('Time Conflict')
+      setResultMessage(`The selected specialist is not available at this time. Please choose another time or specialist.`)
+      setResultModalOpen(true)
+      return
+    }
+
+    if (!selectedTime) {
+      alert('Please choose an available booking time.')
       return
     }
 
     try {
       setSubmitting(true)
-      await createBooking({
+      const result = await createBooking({
         date: selectedDate,
         time: selectedTime,
         notes,
         paymentMethod,
         giftCode: allowCustomerApply ? giftCode : '',
-        staffId: isReturningCustomer ? selectedStaffId : null,
+        staffId: selectedStaffId || null,
         serviceItems: selectedServiceItems.map((service) => ({
           serviceId: service.ServiceId,
           quantity: Number(service.quantity || 1),
-          staffId: isReturningCustomer ? selectedStaffId : null,
+          staffId: selectedStaffId || null,
         })),
       })
+
+      if (paymentMethod === 'online' && result?.PaymentUrl) {
+        window.location.href = result.PaymentUrl
+        return
+      }
+
       setResultTitle('Successfully!')
       setResultMessage('Your booking request has been submitted. We will contact you soon!')
       setResultModalOpen(true)
@@ -385,7 +451,7 @@ const BookingPage = () => {
       setGiftCode('')
       setAppliedPromotion(null)
       setPromoMessage('')
-      if (!isReturningCustomer) setSelectedStaffId('')
+      setSelectedStaffId('')
       setServiceSelections((prev) => prev.map((service) => ({ ...service, quantity: 0 })))
     } catch (err) {
       setResultTitle('Error')
@@ -463,16 +529,12 @@ const BookingPage = () => {
                   {selectedServiceItems.length === 0 ? (
                     <div>
                       <strong>Our Specialist Team</strong>
-                      <p>Coose services first to continue</p>
-                    </div>
-                  ) : !isReturningCustomer ? (
-                    <div>
-                      <strong>Auto assignment for new customers</strong>
-                      <p>System will assign available specialist automatically</p>
+                      <p>Choose services first to continue</p>
                     </div>
                   ) : (
                     <div className="staff-picker-block">
-                      <strong>Coose your specialist</strong>
+                      <strong>Choose your specialist</strong>
+                      <p>Only specialists matching selected services are shown.</p>
                       <select
                         className="staff-select"
                         value={selectedStaffId}
@@ -545,15 +607,31 @@ const BookingPage = () => {
                   </p>
                 ) : null}
                 <div className="time-grid">
-                  {availableTimeSlots.map((slot) => (
-                    <button
-                      key={slot}
-                      className={`time-btn ${selectedTime === slot ? 'active' : ''}`}
-                      onClick={() => setSelectedTime(slot)}
-                    >
-                      {slot}
-                    </button>
-                  ))}
+                  {availableTimeSlots.map((slot) => {
+                    const isPassed = isTimeSlotPassed(slot, selectedDate)
+                    const isBooked = isReturningCustomer && selectedStaff 
+                      ? isTimeSlotBooked(slot, totalDuration, selectedStaff?.BookedSlots || [])
+                      : false
+                    const isDisabled = isPassed || isBooked
+                    
+                    return (
+                      <button
+                        key={slot}
+                        className={`time-btn ${selectedTime === slot ? 'active' : ''} ${isDisabled ? 'disabled' : ''} ${isBooked ? 'booked' : ''}`}
+                        onClick={() => !isDisabled && setSelectedTime(slot)}
+                        disabled={isDisabled}
+                        title={
+                          isPassed 
+                            ? 'This time has already passed' 
+                            : isBooked 
+                            ? 'This specialist is not available at this time'
+                            : ''
+                        }
+                      >
+                        {slot}
+                      </button>
+                    )
+                  })}
                 </div>
 
                 <textarea
@@ -823,5 +901,4 @@ const BookingPage = () => {
     </section>
   )
 }
-
 export default BookingPage

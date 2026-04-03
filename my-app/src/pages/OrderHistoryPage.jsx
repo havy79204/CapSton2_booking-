@@ -6,14 +6,14 @@ import '../styles/HistoryPage.css'
 
 function statusClass(status) {
   const value = String(status || '').toLowerCase()
-  if (value === 'C') return 'C'
+  if (value === 'pending') return 'pending'
   if (value.includes('cancel') || value.includes('failed')) return 'cancelled'
   if (value.includes('paid') || value.includes('deliver') || value.includes('complete')) return 'success'
   return 'default'
 }
 
-function isC(status) {
-  return String(status || '').trim().toLowerCase() === 'C'
+function isPending(status) {
+  return String(status || '').trim().toLowerCase() === 'pending'
 }
 
 function fmtMoney(value) {
@@ -28,11 +28,11 @@ const OrderHistoryPage = () => {
   const handleCancel = async (order) => {
     const orderId = order?.OrderId
     if (!orderId) return
-    if (!isC(order.Status)) {
-      alert('Only C orders can be cancelled')
+    if (!isPending(order.Status)) {
+      alert('Only pending orders can be cancelled')
       return
     }
-    if (!window.confirm('Cancel this C order?')) return
+    if (!window.confirm('Cancel this pending order?')) return
 
     try {
       setCancellingId(orderId)
@@ -102,23 +102,42 @@ const OrderHistoryPage = () => {
                         <th>Product</th>
                         <th>Qty</th>
                         <th>Price</th>
+                        <th>Discount</th>
                         <th>Total</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(Array.isArray(order.Items) ? order.Items : []).map((item) => (
-                        <tr key={item.OrderItemId}>
-                          <td>{item.ProductName}</td>
-                          <td>{Number(item.Quantity || 0)}</td>
-                          <td>${fmtMoney(item.Price || 0)}</td>
-                          <td>${fmtMoney(item.LineTotal || 0)}</td>
+                      {(Array.isArray(order.Items) ? order.Items : []).length === 0 ? (
+                        <tr>
+                          <td colSpan={5}>No product details found for this order.</td>
                         </tr>
-                      ))}
+                      ) : (
+                        (Array.isArray(order.Items) ? order.Items : []).map((item) => (
+                          <tr key={item.OrderItemId}>
+                            <td>{item.ProductName}</td>
+                            <td>{Number(item.Quantity || 0)}</td>
+                            <td>${fmtMoney(item.Price || 0)}</td>
+                            <td>$0.00</td>
+                            <td>${fmtMoney(item.LineTotal || 0)}</td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={3}><strong>Subtotal</strong></td>
+                        <td><strong>-${fmtMoney(order.DiscountAmount || 0)}</strong></td>
+                        <td><strong>${fmtMoney(order.Subtotal || 0)}</strong></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4}><strong>Total</strong></td>
+                        <td><strong>${fmtMoney(order.Total || 0)}</strong></td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
 
-                {isC(order.Status) ? (
+                {isPending(order.Status) ? (
                   <div className="history-actions">
                     <button
                       className="history-cancel-btn"

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import '../../styles/dashboard.css'
+import '../../styles/global-buttons.css'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import {
   IconAlertTriangle,
@@ -686,7 +687,6 @@ export default function OwnerDashboardPage() {
   const services = dashboard?.revenueByService || []
   const products = dashboard?.productPerformance || []
   const heatmap = dashboard?.bookingHeatmap || []
-  const insights = dashboard?.insights || []
   const actions = dashboard?.actions || []
 
   const revenuePeak = chartRows.reduce((best, row) => {
@@ -723,31 +723,6 @@ export default function OwnerDashboardPage() {
 
   return (
     <div className="dashboard-page">
-      <div className="dashboard-actionsRow">
-        <div className="dashboard-headLeft">
-          <div className="dashboard-actionsTitle">Business Dashboard</div>
-          <div className="dashboard-summary">{dashboard?.summary || 'Analyzing current performance...'}</div>
-        </div>
-        <div className="dashboard-actions">
-          {actions.map((a) => (
-            <a key={a.label} href={a.href} className="dashboard-actionBtn">{a.label}</a>
-          ))}
-        </div>
-      </div>
-
-      <div className="dashboard-filterRow">
-        <GlobalPeriodFilter value={period} onChange={setPeriod} />
-        <TimeReferencePicker
-          period={period}
-          refDate={refDate}
-          refMonth={refMonth}
-          refYear={refYear}
-          onRefDate={setRefDate}
-          onRefMonth={setRefMonth}
-          onRefYear={setRefYear}
-        />
-      </div>
-
       <div className="portal-grid4 dashboard-kpiGrid">
         {cards.map((card) => (
           <PortalCard
@@ -768,16 +743,25 @@ export default function OwnerDashboardPage() {
         ))}
       </div>
 
-      <PortalCard title="Insights">
-        <div className="dashboard-insights">
-          {insights.map((ins, i) => (
-            <div key={i} className={`dashboard-insight ${toneClass(ins.level === 'warning' ? 'warning' : ins.level === 'good' ? 'good' : 'neutral')}`.trim()}>
-              <div className="dashboard-insightText">{ins.text}</div>
-              {ins.actionLabel ? <a href={ins.actionHref || '#'} className="dashboard-insightAction">{ins.actionLabel}</a> : null}
-            </div>
-          ))}
+      <div className="dashboard-filterRow">
+        <div className="dashboard-filtersCombined">
+          <div className="dashboard-actions">
+            {actions.map((a) => (
+              <a key={a.label} href={a.href} className="dashboard-actionBtn">{a.label}</a>
+            ))}
+          </div>
+          <GlobalPeriodFilter value={period} onChange={setPeriod} />
+          <TimeReferencePicker
+            period={period}
+            refDate={refDate}
+            refMonth={refMonth}
+            refYear={refYear}
+            onRefDate={setRefDate}
+            onRefMonth={setRefMonth}
+            onRefYear={setRefYear}
+          />
         </div>
-      </PortalCard>
+      </div>
 
       <div className="portal-grid2 dashboard-sectionGrid">
         <PortalCard title="Revenue Trend">

@@ -75,11 +75,18 @@
   color: #e8d5c4;
   font-weight: 500;
   transition: all 0.3s;
+  font-size: 1.1rem;
 }
 
 .social-icon:hover {
   background-color: #3a3a3a;
   transform: translateY(-3px);
+}
+
+.social-icon.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .footer-bottom {

@@ -8,6 +8,14 @@ function userRoom(userId) {
   return `user:${String(userId || '').trim()}`
 }
 
+function roleRoom(roleKey) {
+  const raw = String(roleKey || '').trim().toLowerCase()
+  if (!raw) return ''
+  if (raw === '1' || raw === 'owner' || raw === 'admin') return 'role:owner'
+  if (raw === '2' || raw === 'staff') return 'role:staff'
+  return 'role:customer'
+}
+
 function extractToken(socket) {
   const authToken = String(socket?.handshake?.auth?.token || '').trim()
   if (authToken) return authToken
@@ -37,6 +45,7 @@ function initSocketServer(httpServer) {
       if (!userId) return next(new Error('Invalid token subject'))
 
       socket.data.userId = userId
+      socket.data.roleKey = payload?.roleKey
       return next()
     } catch {
       return next(new Error('Unauthorized'))
@@ -45,8 +54,12 @@ function initSocketServer(httpServer) {
 
   io.on('connection', (socket) => {
     const userId = String(socket.data?.userId || '').trim()
+    const role = roleRoom(socket.data?.roleKey)
     if (userId) {
       socket.join(userRoom(userId))
+    }
+    if (role) {
+      socket.join(role)
     }
   })
 
@@ -68,8 +81,14 @@ function emitCatMessageToUsers(userIds, payload) {
   }
 }
 
+function emitOwnerNotification(payload) {
+  if (!ioInstance) return
+  ioInstance.to('role:owner').emit('owner:notification', payload)
+}
+
 module.exports = {
   initSocketServer,
   emitCatMessageToUser,
   emitCatMessageToUsers,
+  emitOwnerNotification,
 }

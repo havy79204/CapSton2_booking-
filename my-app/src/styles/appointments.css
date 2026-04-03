@@ -1,386 +1,303 @@
-/* appointments.css */
-
+/* ===== ROOT ===== */
 .calendar-page {
-    padding: 20px;
-    background-color: #f9fbfd;
-    min-height: 100vh;
-    background: rgba(255,255,255,0.08);
-  backdrop-filter: blur(30px);
-
-  border: 1px solid rgba(255,255,255,0.15);
-  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
-
-
-  /* viền mờ */
-  border: 1px solid rgba(255, 255, 255, 0.15);
-
-  /* soft shadowềm */
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
-
-  /* màu chữ */
-  color: rgb(0, 0, 0);
-  padding: 18px;
+  padding: 20px;
+  background: var(--bg);
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-/* HEADER */
+/* ===== HEADER ===== */
 .calendar-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
 }
 
 .calendar-title {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #333;
-    display: flex;
-    align-items: center;
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .nav-month-btn {
-    display: inline-flex;
-  align-items: center;    
-  justify-content: center; 
-  gap: 10px;
-  padding: 5px 12px;
-  border-radius: 999px;
-
-  /* lớp kính nhiều tầng */
-  background: linear-gradient(
-    195deg,
-    rgba(75, 66, 46, 0.816),
-    rgba(80, 35, 3, 0.13)
-  );
-
-  backdrop-filter: blur(14px) saturate(220%);
-  -webkit-backdrop-filter: blur(14px) saturate(220%);
-
-  border: 1px solid rgba(255, 235, 153, 0);
-
-  color: #fff;
-  font-weight: 800;
-  letter-spacing: 0.3px;
-
-  box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.4),
-    inset 0 -2px 6px rgba(0,0,0,0.2),
-    0 10px 30px rgba(0,0,0,0.35);
-
+  border: none;
+  background: var(--surface);
+  padding: 12px 16px;
+  border-radius: 10px;
   cursor: pointer;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  color: var(--text);
+  font-weight: 500;
 }
 
 .nav-month-btn:hover {
-    background: #f0f0f0;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+  background: var(--surface-hover);
 }
 
-/* DATE STRIP */
+.nav-month-btn:hover {
+  background: #f97316;
+  color: #fff;
+}
+
+/* ===== ACTIONS ===== */
+.calendar-actions .btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  transition: 0.2s;
+}
+
+.btn.primary {
+  background: #fff8f0;
+  color: #ff8c00;
+  border: 1px solid #ff8c00;
+}
+
+.btn.primary:hover {
+  background: #ff8c00;
+  color: #fff;
+}
+
+.btn.secondary {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+}
+
+.btn.secondary:hover {
+  background: #f1f5f9;
+}
+
+.btn.danger {
+  background: #ff8c00;
+  color: #fff;
+}
+
+.btn.danger:hover {
+  background: #f97316;
+}
+
+/* ===== SELECT ===== */
+.staff-filter-select {
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+/* ===== DATE STRIP ===== */
 .date-strip {
-    display: flex;
-    gap: 10px;
-    overflow-x: auto;
-    padding-bottom: 15px;
-    margin-bottom: 20px;
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  margin-bottom: 20px;
+  padding-bottom: 8px;
 }
 
 .date-item {
-    min-width: 60px;
-    height: 80px;
-    border-radius: 12px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s;
-  /* lớp kính nhiều tầng */
-  background: linear-gradient(
-    195deg,
-    rgba(75, 66, 46, 0.816),
-    rgba(80, 35, 3, 0.13)
-  );
-
-  backdrop-filter: blur(14px) saturate(220%);
-  -webkit-backdrop-filter: blur(14px) saturate(220%);
-
-  border: 1px solid rgba(255, 235, 153, 0);
-
-  color: #fff;
-  font-weight: 800;
-  letter-spacing: 0.3px;
-
-  box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.4),
-    inset 0 -2px 6px rgba(0,0,0,0.2),
-    0 10px 30px rgba(0,0,0,0.35);
-
+  min-width: 80px;
+  text-align: center;
+  padding: 12px 8px;
+  border-radius: 10px;
+  background: #fff;
   cursor: pointer;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
+  transition: 0.2s;
+  border: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.date-item:hover {
+  background: #fff7ed;
 }
 
 .date-item.active {
-    background: #462102b2;
-    color: #fff;
-    border-color: #422103;
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  background: #f97316;
+  color: #fff;
+  border: none;
 }
 
-.date-item span {
-    font-size: 0.8rem;
-    text-transform: uppercase;
+.date-weekday {
+  font-size: 11px;
+  font-weight: 500;
+  color: #6b7280;
 }
 
-.date-item strong {
-    font-size: 1.2rem;
+.date-item.active .date-weekday {
+  color: rgba(255, 255, 255, 0.9);
 }
 
-/* MAIN CONTAINER */
+.date-number {
+  font-size: 16px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.date-item.active .date-number {
+  color: #fff;
+}
+
+/* ===== CALENDAR ===== */
 .calendar-container {
-    display: flex;
-    background: #fff;
-    border-radius: 16px;
-    border: 1px solid #e2e8f0;
-    overflow: hidden;
-    position: relative;
+  display: flex;
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
 }
 
 /* TIME COLUMN */
 .time-column {
-    width: 80px;
-    border-right: 1px solid #edf2f7;
-    background: #f8fafc;
+  width: 70px;
+  background: #f9fafb;
+  border-right: 1px solid #e5e7eb;
 }
 
 .time-cell {
-    height: 64px; /* Phải khớp với biến trong file React */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.75rem;
-    color: #718096;
-    border-bottom: 1px solid #f1f5f9;
+  height: 64px;
+  font-size: 12px;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid transparent;
 }
 
-/* STAFF COLUMNS */
+/* STAFF */
 .staff-columns {
-    display: flex;
-    flex: 1;
-    overflow-x: auto;
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
 }
 
 .staff-column {
-    flex: 1;
-    min-width: 200px;
-    border-right: 1px solid #edf2f7;
+  flex: 1;
+  min-width: 200px;
+  border-right: 1px solid #f1f5f9;
 }
 
 .staff-header {
-    height: 50px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-    background: #fff;
-    border-bottom: 2px solid #edf2f7;
-    position: sticky;
-    top: 0;
-    z-index: 10;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  padding: 10px;
+  text-align: center;
+  font-weight: 600;
+  border-bottom: 1px solid #e5e7eb;
+  z-index: 10;
 }
 
-/* STAFF BODY - KHUNG TRẮNG CHÍNH */
+/* GRID */
 .staff-body {
-    position: relative; /* Bắt buộc để thẻ con dùng absolute */
-    background-color: #ffffff;
-    /* Chiều cao sẽ được set inline từ React hoặc dùng min-height */
-    min-height: 800px; 
+  position: relative;
 }
 
 .grid-cell {
-    height: 64px;
-    border-bottom: 1px dashed #f1f5f9;
-    box-sizing: border-box;
+  width: 100%;
 }
 
-/* APPOINTMENT CARD */
+/* ===== APPOINTMENT CARD ===== */
 .appt-card {
-    position: absolute;
-    border-radius: 8px;
-    padding: 8px;
-    color: #fff;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-    overflow: hidden;
-    transition: transform 0.1s;
-    border-left: 4px solid rgba(0,0,0,0.2);
-    box-sizing: border-box;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: 0.2s;
 }
 
 .appt-card:hover {
-    transform: scale(1.02);
-    z-index: 20 !important;
+  transform: scale(1.02);
+  filter: brightness(1.05);
 }
 
-.appt-card strong {
-    display: block;
-    font-size: 0.85rem;
-    margin-bottom: 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+/* ===== LIST VIEW ===== */
+.list-view table {
+  background: #fff;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
-.appt-card p {
-    font-size: 0.75rem;
-    margin: 0;
-    opacity: 0.9;
+.list-view th {
+  background: #f9fafb;
+  font-weight: 600;
 }
 
-/* MINI EDIT BUTTON */
-.edit-mini-btn {
-    background: rgba(255, 255, 255, 0.2);
-    border: none;
-    color: #fff;
-    border-radius: 4px;
-    padding: 2px 5px;
-    cursor: pointer;
-    font-size: 10px;
+.list-view td, 
+.list-view th {
+  padding: 10px;
+  font-size: 14px;
+  vertical-align: middle;
 }
 
-.edit-mini-btn:hover {
-    background: rgba(255, 255, 255, 0.4);
+.list-view tr:hover {
+  background: #fff7ed;
 }
 
-/* FORM STYLES */
+/* ===== FORM ===== */
 .appt-form {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-    padding: 10px;
-}
-
-.form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .form-group label {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: #4a5568;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  display: block;
 }
 
-.form-group select, 
-.form-group input, 
+.form-group input,
+.form-group select,
 .form-group textarea {
-    padding: 10px;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    font-size: 0.95rem;
-    outline: none;
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
 }
 
-.form-group select:focus, 
-.form-group input:focus {
-    border-color: #6366f1;
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #f97316;
+  box-shadow: 0 0 0 2px rgba(249,115,22,0.2);
 }
 
+/* ===== SERVICE CHIP ===== */
+.service-chip {
+  transition: 0.2s;
+}
+
+.service-chip:hover {
+  transform: scale(1.05);
+}
+
+/* ===== FORM ACTION ===== */
 .form-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    margin-top: 10px;
-}
-
-.btn {
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-    transition: all 0.2s;
-}
-
-.btn.primary {
-  display: inline-flex;
-  align-items: center;    
-  justify-content: center; 
+  display: flex;
+  justify-content: flex-end;
   gap: 10px;
-  padding: 11px 22px;
-  border-radius: 999px;
-
-  /* lớp kính nhiều tầng */
-  background: linear-gradient(
-    195deg,
-    rgba(75, 66, 46, 0.816),
-    rgba(80, 35, 3, 0.13)
-  );
-
-  backdrop-filter: blur(14px) saturate(220%);
-  -webkit-backdrop-filter: blur(14px) saturate(220%);
-
-  border: 1px solid rgba(255, 235, 153, 0);
-
-  color: #fff;
-  font-weight: 800;
-  letter-spacing: 0.3px;
-
-  box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.4),
-    inset 0 -2px 6px rgba(0,0,0,0.2),
-    0 10px 30px rgba(0,0,0,0.35);
-
-  cursor: pointer;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
+  margin-top: 10px;
 }
 
-.btn.secondary {
-    background: #edf2f7;
-    color: #4a5568;
+/* ===== SCROLL ===== */
+::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
 }
 
-.btn:hover {
-    filter: brightness(0.9);
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
 }
 
-.staff-filter-select {
-  display: inline-flex;
-  align-items: center;    
-  justify-content: center; 
-  gap: 10px;
-  padding: 11px 22px;
-  border-radius: 999px;
-
-  /* lớp kính nhiều tầng */
-  background: linear-gradient(
-    195deg,
-    rgba(75, 66, 46, 0.816),
-    rgba(80, 35, 3, 0.13)
-  );
-
-  backdrop-filter: blur(14px) saturate(220%);
-  -webkit-backdrop-filter: blur(14px) saturate(220%);
-
-  border: 1px solid rgba(255, 235, 153, 0);
-
-  color: #231100;
-  font-weight: 800;
-  letter-spacing: 0.3px;
-
-  box-shadow:
-    inset 0 1px 1px rgba(255,255,255,0.4),
-    inset 0 -2px 6px rgba(0,0,0,0.2),
-    0 10px 30px rgba(0,0,0,0.35);
-
-  cursor: pointer;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }

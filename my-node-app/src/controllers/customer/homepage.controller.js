@@ -6,7 +6,9 @@ const homepageService = require('../../services/homepage.service')
  * Get all homepage data (services, products, reviews, stats, features)
  */
 const getHomepage = asyncHandler(async (req, res) => {
-  const data = await homepageService.getHomepageData()
+  const opts = { ...(req.query || {}) }
+  if (req.user && req.user.sub) opts.userId = String(req.user.sub)
+  const data = await homepageService.getHomepageData(opts)
   res.json({ ok: true, data })
 })
 
@@ -15,7 +17,9 @@ const getHomepage = asyncHandler(async (req, res) => {
  * Get services list
  */
 const getServices = asyncHandler(async (req, res) => {
-  const data = await homepageService.getServices()
+  const opts = { ...(req.query || {}) }
+  if (req.user && req.user.sub) opts.userId = String(req.user.sub)
+  const data = await homepageService.getServices(opts)
   res.json({ ok: true, data })
 })
 
@@ -24,7 +28,10 @@ const getServices = asyncHandler(async (req, res) => {
  * Get products list
  */
 const getProducts = asyncHandler(async (req, res) => {
-  const data = await homepageService.getProducts()
+  const opts = { ...(req.query || {}) }
+  // include authenticated user id for personalization when available
+  if (req.user && req.user.sub) opts.userId = String(req.user.sub)
+  const data = await homepageService.getProducts(opts)
   res.json({ ok: true, data })
 })
 
@@ -132,6 +139,25 @@ const getStats = asyncHandler(async (req, res) => {
   res.json({ ok: true, data })
 })
 
+const getSalonContact = asyncHandler(async (req, res) => {
+  const data = await homepageService.getSalonContactInfo()
+  res.json({ ok: true, data })
+})
+
+/**
+ * GET /api/homepage/recommendations
+ * Query params: type=products|services, limit
+ */
+const getRecommendations = asyncHandler(async (req, res) => {
+  const opts = { ...(req.query || {}) }
+  if (req.user && req.user.sub) opts.userId = String(req.user.sub)
+  const limit = Math.min(parseInt(req.query.limit) || 10, 100)
+  opts.limit = limit
+
+  const data = await homepageService.getRecommendations(opts)
+  res.json({ ok: true, data })
+})
+
 module.exports = {
   getHomepage,
   getServices,
@@ -144,4 +170,6 @@ module.exports = {
   getReviews,
   getMyReviews,
   getStats
+  , getRecommendations,
+  getSalonContact,
 }

@@ -86,22 +86,31 @@ async function columnExists(tableName, columnName) {
   }
 }
 
+let _staffRoleSqlPartsCache = null
+
 async function getStaffRoleSqlParts() {
+  // Return cached result if available (schema doesn't change at runtime)
+  if (_staffRoleSqlPartsCache) {
+    return _staffRoleSqlPartsCache
+  }
+
   try {
     const hasStaffSkills = await tableExists('StaffSkills')
     if (!hasStaffSkills) {
-      return {
+      _staffRoleSqlPartsCache = {
         selectSql: `CAST('' AS NVARCHAR(255)) AS Role`,
         joinSql: '',
       }
+      return _staffRoleSqlPartsCache
     }
 
     const hasCategoryId = await columnExists('StaffSkills', 'CategoryId')
     if (!hasCategoryId) {
-      return {
+      _staffRoleSqlPartsCache = {
         selectSql: `CAST('' AS NVARCHAR(255)) AS Role`,
         joinSql: '',
       }
+      return _staffRoleSqlPartsCache
     }
 
     const hasServiceCategories = await tableExists('ServiceCategories')
@@ -111,7 +120,7 @@ async function getStaffRoleSqlParts() {
       const categoryNameColumn = hasCategoryName ? 'CategoryName' : (hasName ? 'Name' : null)
 
       if (categoryNameColumn) {
-        return {
+        _staffRoleSqlPartsCache = {
           selectSql: `ISNULL(sp.Role, '') AS Role`,
           joinSql: `
             OUTER APPLY (
@@ -124,10 +133,11 @@ async function getStaffRoleSqlParts() {
               ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS Role
             ) sp`,
         }
+        return _staffRoleSqlPartsCache
       }
     }
 
-    return {
+    _staffRoleSqlPartsCache = {
       selectSql: `ISNULL(sp.Role, '') AS Role`,
       joinSql: `
         OUTER APPLY (
@@ -139,17 +149,20 @@ async function getStaffRoleSqlParts() {
           ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS Role
         ) sp`,
     }
+    return _staffRoleSqlPartsCache
   } catch (err) {
     console.error('Error in getStaffRoleSqlParts:', err.message)
     // Return safe default if something goes wrong
-    return {
+    _staffRoleSqlPartsCache = {
       selectSql: `CAST('' AS NVARCHAR(255)) AS Role`,
       joinSql: '',
     }
+    return _staffRoleSqlPartsCache
   }
 }
 
-async function getSchedule(weekStartQuery) {
+async function getSchedule(weekStartQuery, options = {}) {
+  const { staffId } = options || {}
   const base = weekStartQuery ? new Date(weekStartQuery) : new Date()
   const weekStart = mondayOf(base)
   if (!weekStart) {
@@ -165,12 +178,15 @@ async function getSchedule(weekStartQuery) {
   const columns = buildWeekColumns(weekStart)
 
   const roleSql = await getStaffRoleSqlParts()
+  const staffFilter = staffId ? 'WHERE s.StaffId = @staffId' : ''
   const staffRes = await query(
     `SELECT s.StaffId, ${roleSql.selectSql}, u.Name, u.AvatarUrl
      FROM Staff s
      LEFT JOIN Users u ON u.UserId = s.UserId
      ${roleSql.joinSql}
-     ORDER BY u.Name`
+     ${staffFilter}
+     ORDER BY u.Name`,
+    staffId ? { staffId } : {}
   )
 
   const staffList = (staffRes.recordset || []).map((r) => ({
@@ -180,12 +196,18 @@ async function getSchedule(weekStartQuery) {
     avatarUrl: r.AvatarUrl || '',
   }))
 
+  const availFilter = staffId ? 'AND StaffId = @staffId' : ''
   const availRes = await query(
     `SELECT StaffId, WeekStartDate, StartHour, EndHour
      FROM StaffAvailability
      WHERE WeekStartDate >= @weekStart
-       AND WeekStartDate <= @weekEnd`,
-    { weekStart: weekStartIso, weekEnd: weekEndIso }
+       AND WeekStartDate <= @weekEnd
+       ${availFilter}`,
+    { 
+      weekStart: weekStartIso, 
+      weekEnd: weekEndIso,
+      ...(staffId ? { staffId } : {})
+    }
   )
 
   const availMap = new Map()
@@ -314,11 +336,11 @@ async function addShift(payload) {
        AND StaffId = @staffId
        AND StartHour = @startHour
        AND EndHour = @endHour
-       AND (
-         @isEditing = 0
-         OR WeekStartDate <> @oldShiftDate
-         OR StartHour <> @oldStartHour
-         OR EndHour <> @oldEndHour
+       AND NOT (
+         @isEditing = 1
+         AND WeekStartDate = @oldShiftDate
+         AND StartHour = @oldStartHour
+         AND EndHour = @oldEndHour
        )`,
     {
       shiftDate: shiftDateIso,
@@ -344,11 +366,11 @@ async function addShift(payload) {
      WHERE WeekStartDate = @shiftDate
        AND StaffId = @staffId
        AND NOT (EndHour <= @startHour OR StartHour >= @endHour)
-       AND (
-         @isEditing = 0
-         OR WeekStartDate <> @oldShiftDate
-         OR StartHour <> @oldStartHour
-         OR EndHour <> @oldEndHour
+       AND NOT (
+         @isEditing = 1
+         AND WeekStartDate = @oldShiftDate
+         AND StartHour = @oldStartHour
+         AND EndHour = @oldEndHour
        )`,
     {
       shiftDate: shiftDateIso,

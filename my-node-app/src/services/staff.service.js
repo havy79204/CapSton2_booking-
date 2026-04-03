@@ -17,6 +17,10 @@ const STAFF_PHONE_REGEX = /^0(3|5|7|8|9)\d{8}$/
 const STAFF_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 let _staffSearchIndexesEnsured = false
 
+// Cache cho tableExists/columnExists
+const _tableExistsCache = new Map()
+const _columnExistsCache = new Map()
+
 function buildValidationError(message) {
   const err = new Error(message)
   err.status = 400
@@ -217,45 +221,55 @@ function sortStaffItems(items, sortBy) {
   return sorted
 }
 
-async function ensureStaffSearchIndexes() {
+// Chạy background, không block
+function ensureStaffSearchIndexesAsync() {
   if (_staffSearchIndexesEnsured) return
   _staffSearchIndexesEnsured = true
 
-  try {
-    await query(
-      `IF NOT EXISTS (
-         SELECT 1
-         FROM sys.indexes
-         WHERE name = 'IX_Users_Status_Name_Email_Phone'
-           AND object_id = OBJECT_ID('Users')
-       )
-       BEGIN
-         CREATE INDEX IX_Users_Status_Name_Email_Phone ON Users(Status, Name, Email, Phone)
-       END;
+  // Chạy background không await
+  setImmediate(async () => {
+    try {
+      await query(
+        `IF NOT EXISTS (
+           SELECT 1
+           FROM sys.indexes
+           WHERE name = 'IX_Users_Status_Name_Email_Phone'
+             AND object_id = OBJECT_ID('Users')
+         )
+         BEGIN
+           CREATE INDEX IX_Users_Status_Name_Email_Phone ON Users(Status, Name, Email, Phone)
+         END;
 
-       IF NOT EXISTS (
-         SELECT 1
-         FROM sys.indexes
-         WHERE name = 'IX_Staff_Status_UserId'
-           AND object_id = OBJECT_ID('Staff')
-       )
-       BEGIN
-         CREATE INDEX IX_Staff_Status_UserId ON Staff(Status, UserId)
-       END;
+         IF NOT EXISTS (
+           SELECT 1
+           FROM sys.indexes
+           WHERE name = 'IX_Staff_Status_UserId'
+             AND object_id = OBJECT_ID('Staff')
+         )
+         BEGIN
+           CREATE INDEX IX_Staff_Status_UserId ON Staff(Status, UserId)
+         END;
 
-       IF OBJECT_ID('StaffSkills', 'U') IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1
-            FROM sys.indexes
-            WHERE name = 'IX_StaffSkills_StaffId_CategoryId'
-              AND object_id = OBJECT_ID('StaffSkills')
-          )
-       BEGIN
-         CREATE INDEX IX_StaffSkills_StaffId_CategoryId ON StaffSkills(StaffId, CategoryId)
-       END;`
-    )
-  } catch {
-  }
+         IF OBJECT_ID('StaffSkills', 'U') IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM sys.indexes
+              WHERE name = 'IX_StaffSkills_StaffId_CategoryId'
+                AND object_id = OBJECT_ID('StaffSkills')
+            )
+         BEGIN
+           CREATE INDEX IX_StaffSkills_StaffId_CategoryId ON StaffSkills(StaffId, CategoryId)
+         END;`
+      )
+      console.log('[INDEX] Staff search indexes created/verified')
+    } catch (err) {
+      console.error('[INDEX] Error creating staff indexes:', err.message)
+    }
+  })
+}
+
+async function ensureStaffSearchIndexes() {
+  ensureStaffSearchIndexesAsync()
 }
 
 function buildStaffTimeRange(options = {}) {
@@ -304,6 +318,11 @@ function buildStaffTimeRange(options = {}) {
 }
 
 async function tableExists(tableName) {
+  const cacheKey = `table:${tableName}`
+  if (_tableExistsCache.has(cacheKey)) {
+    return _tableExistsCache.get(cacheKey)
+  }
+
   try {
     const res = await query(
       `SELECT 1 AS ok
@@ -311,14 +330,23 @@ async function tableExists(tableName) {
        WHERE TABLE_NAME = @tableName`,
       { tableName }
     )
-    return Boolean(res.recordset?.length)
+    const exists = Boolean(res.recordset?.length)
+    _tableExistsCache.set(cacheKey, exists)
+    return exists
   } catch (err) {
     console.error(`[tableExists] Error checking table ${tableName}:`, err.message)
-    return false
+    const exists = false
+    _tableExistsCache.set(cacheKey, exists)
+    return exists
   }
 }
 
 async function columnExists(tableName, columnName) {
+  const cacheKey = `column:${tableName}:${columnName}`
+  if (_columnExistsCache.has(cacheKey)) {
+    return _columnExistsCache.get(cacheKey)
+  }
+
   try {
     const res = await query(
       `SELECT 1 AS ok
@@ -327,10 +355,14 @@ async function columnExists(tableName, columnName) {
          AND COLUMN_NAME = @columnName`,
       { tableName, columnName }
     )
-    return Boolean(res.recordset?.length)
+    const exists = Boolean(res.recordset?.length)
+    _columnExistsCache.set(cacheKey, exists)
+    return exists
   } catch (err) {
     console.error(`[columnExists] Error checking column ${tableName}.${columnName}:`, err.message)
-    return false
+    const exists = false
+    _columnExistsCache.set(cacheKey, exists)
+    return exists
   }
 }
 
@@ -540,17 +572,25 @@ async function buildCommissionAggregationSql(period) {
     ) commAgg ON commAgg.StaffId = s.StaffId`
 }
 
+let _staffSkillSchemaCache = null
+
 async function getStaffSkillSchema() {
+  // Return cached result if available (schema doesn't change at runtime)
+  if (_staffSkillSchemaCache) {
+    return _staffSkillSchemaCache
+  }
+
   try {
     const hasStaffSkills = await tableExists('StaffSkills')
     if (!hasStaffSkills) {
-      return {
+      _staffSkillSchemaCache = {
         enabled: false,
         hasIdStaffSkill: false,
         canWriteIdStaffSkill: false,
         categoryTable: null,
         categoryNameColumn: null,
       }
+      return _staffSkillSchemaCache
     }
 
     const [hasStaffId, hasCategoryId, hasIdStaffSkill] = await Promise.all([
@@ -564,13 +604,14 @@ async function getStaffSkillSchema() {
       : false
 
     if (!hasStaffId || !hasCategoryId) {
-      return {
+      _staffSkillSchemaCache = {
         enabled: false,
         hasIdStaffSkill,
         canWriteIdStaffSkill,
         categoryTable: null,
         categoryNameColumn: null,
       }
+      return _staffSkillSchemaCache
     }
 
     for (const tableName of STAFF_SKILL_CATEGORY_TABLES) {
@@ -582,43 +623,47 @@ async function getStaffSkillSchema() {
 
       const hasName = await columnExists(tableName, 'Name')
       if (hasName) {
-        return {
+        _staffSkillSchemaCache = {
           enabled: true,
           hasIdStaffSkill,
           canWriteIdStaffSkill,
           categoryTable: tableName,
           categoryNameColumn: 'Name',
         }
+        return _staffSkillSchemaCache
       }
 
       const hasCategoryName = await columnExists(tableName, 'CategoryName')
       if (hasCategoryName) {
-        return {
+        _staffSkillSchemaCache = {
           enabled: true,
           hasIdStaffSkill,
           canWriteIdStaffSkill,
           categoryTable: tableName,
           categoryNameColumn: 'CategoryName',
         }
+        return _staffSkillSchemaCache
       }
     }
 
-    return {
+    _staffSkillSchemaCache = {
       enabled: true,
       hasIdStaffSkill,
       canWriteIdStaffSkill,
       categoryTable: null,
       categoryNameColumn: null,
     }
+    return _staffSkillSchemaCache
   } catch (err) {
     console.error('[getStaffSkillSchema] Error:', err.message)
-    return {
+    _staffSkillSchemaCache = {
       enabled: false,
       hasIdStaffSkill: false,
       canWriteIdStaffSkill: false,
       categoryTable: null,
       categoryNameColumn: null,
     }
+    return _staffSkillSchemaCache
   }
 }
 
@@ -781,7 +826,7 @@ async function listStaff(options = {}) {
   const { period, startAt, endAt } = buildStaffTimeRange(options)
   const keyword = normalizeStaffKeyword(options.keyword || options.q || '')
   const page = Math.max(1, Math.trunc(Number(options.page || 1) || 1))
-  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(options.pageSize || 8) || 8)))
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(options.pageSize || 10) || 10)))
   const sortBy = normalizeStaffSort(options.sortBy, options.sortDir)
 
   const bind = period === 'all'

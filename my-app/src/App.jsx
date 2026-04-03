@@ -1,4 +1,4 @@
-import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import LoginPage from './pages/LoginPage.jsx'
 import OwnerPortalLayout from './components/Layout portal/OwnerPortalLayout.jsx'
 import OwnerDashboardPage from './pages/portals/OwnerDashboardPage.jsx'
@@ -15,6 +15,16 @@ import OwnerSettingsPage from './pages/portals/OwnerSettingsPage.jsx'
 import OwnerNotificationsPage from './pages/portals/OwnerNotificationsPage.jsx'
 import OwnerChatPage from './pages/portals/OwnerChatPage.jsx'
 import OwnerCustomerDetailPage from './pages/portals/OwnerCustomerDetailPage.jsx'
+import StaffPortalLayout from './components/Layout portal/StaffPortalLayout.jsx'
+import StaffAppointmentsPage from './pages/portals/staff/StaffAppointmentsPage.jsx'
+import StaffSchedulePage from './pages/portals/staff/StaffSchedulePage.jsx'
+import StaffStaffPage from './pages/portals/staff/StaffStaffPage.jsx'
+import StaffServicesPage from './pages/portals/staff/StaffServicesPage.jsx'
+import StaffInventoryPage from './pages/portals/staff/StaffInventoryPage.jsx'
+import StaffProductsPage from './pages/portals/staff/StaffProductsPage.jsx'
+import StaffOrdersPage from './pages/portals/staff/StaffOrdersPage.jsx'
+import StaffNotificationsPage from './pages/portals/staff/StaffNotificationsPage.jsx'
+import StaffChatPage from './pages/portals/staff/StaffChatPage.jsx'
 import Header from './components/Header.jsx'
 import Footer from './components/Footer.jsx'
 import AIChatbox from './components/AIChatbox.jsx'
@@ -29,6 +39,7 @@ import NotificationPage from './pages/NotificationPage.jsx'
 import OrderHistoryPage from './pages/OrderHistoryPage.jsx'
 import ServiceCatalogPage from './pages/ServiceCatalogPage.jsx'
 import ProductCatalogPage from './pages/ProductCatalogPage.jsx'
+import PaymentVnpayReturnPage from './pages/PaymentVnpayReturnPage.jsx'
 import './App.css'
 
 import { getToken } from './lib/auth.js'
@@ -51,10 +62,17 @@ function CustomerLayout() {
   )
 }
 
+function LegacyVnpayReturnRedirect() {
+  const { search } = useLocation()
+  return <Navigate to={`/payment/vnpay-return${search || ''}`} replace />
+}
+
 function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/payment/vnpay-return" element={<PaymentVnpayReturnPage />} />
+      <Route path="/api/payments/vnpay-return" element={<LegacyVnpayReturnRedirect />} />
 
       <Route
         path="/portals/owner/services/:id"
@@ -121,6 +139,26 @@ function App() {
         <Route path="notifications" element={<OwnerNotificationsPage />} />
         <Route path="chat" element={<OwnerChatPage />} />
         <Route index element={<Navigate to="/portals/owner/dashboard" replace />} />
+      </Route>
+
+      <Route
+        path="/portals/staff"
+        element={
+          <RequireAuth>
+            <StaffPortalLayout />
+          </RequireAuth>
+        }
+      >
+        <Route path="appointments" element={<StaffAppointmentsPage />} />
+        <Route path="schedule" element={<StaffSchedulePage />} />
+        <Route path="staff" element={<StaffStaffPage />} />
+        <Route path="services" element={<StaffServicesPage />} />
+        <Route path="inventory" element={<StaffInventoryPage />} />
+        <Route path="products" element={<StaffProductsPage />} />
+        <Route path="orders" element={<StaffOrdersPage />} />
+        <Route path="notifications" element={<StaffNotificationsPage />} />
+        <Route path="chat" element={<StaffChatPage />} />
+        <Route index element={<Navigate to="/portals/staff/schedule" replace />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/login" replace />} />

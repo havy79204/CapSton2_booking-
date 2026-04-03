@@ -4,6 +4,7 @@ const {
   getHomepage,
   getServices,
   getProducts,
+  getRecommendations,
   getServiceReviews,
   createServiceReview,
   getProductRating,
@@ -11,7 +12,8 @@ const {
   createProductReview,
   getReviews,
   getMyReviews,
-  getStats
+  getStats,
+  getSalonContact,
 } = require('../../controllers/customer/homepage.controller')
 
 const router = express.Router()
@@ -28,6 +30,9 @@ router.get('/services', getServices)
 
 // GET /api/homepage/products - Get products list
 router.get('/products', getProducts)
+
+// GET /api/homepage/recommendations - Get personalized recommendations
+router.get('/recommendations', getRecommendations)
 
 // GET /api/homepage/services/:serviceId/reviews - Get rating + reviews by service
 router.get('/services/:serviceId/reviews', getServiceReviews)
@@ -52,5 +57,8 @@ router.get('/reviews/me', requireAuth, getMyReviews)
 
 // GET /api/homepage/stats - Get salon statistics
 router.get('/stats', getStats)
+
+// GET /api/homepage/contact - Get salon contact info from settings
+router.get('/contact', getSalonContact)
 
 module.exports = { homepageRoutes: router }

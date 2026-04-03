@@ -32,15 +32,17 @@ export default function LoginPage() {
   const [error, setError] = React.useState('')
 
   const quickLogin = React.useCallback(
-    async (roleId) => {
+    async (roleId, email) => {
       setError('')
       setLoadingRole(roleId)
       try {
-        const data = await api.post('/api/auth/quick-login', { roleId })
+        const data = await api.post('/api/auth/quick-login', { roleId, email })
         setToken(data?.token || '')
         const rk = normalizeRoleKey(data?.user?.roleKey ?? data?.user?.role ?? roleId)
         if (rk === 1) {
           navigate('/portals/owner', { replace: true })
+        } else if (rk === 2) {
+          navigate('/portals/staff', { replace: true })
         } else {
           navigate('/', { replace: true })
         }
@@ -78,18 +80,61 @@ export default function LoginPage() {
             </div>
 
             <div style={{ display: 'grid', gap: 10 }}>
-              {[1, 2, 3].map((roleId) => (
+              {/* Admin/Owner button */}
+              <button
+                type="button"
+                className="portal-primaryBtn"
+                disabled={loadingRole !== null}
+                onClick={() => quickLogin(1)}
+                style={{ justifyContent: 'center' }}
+              >
+                {loadingRole === 1 ? 'Signing in...' : `Quick login: ${roleLabel(1)}`}
+              </button>
+              
+              {/* Staff buttons */}
+              <div style={{ display: 'grid', gap: 8, padding: '8px 0' }}>
+                <div style={{ fontSize: 14, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                  Staff Accounts:
+                </div>
                 <button
-                  key={roleId}
                   type="button"
-                  className="portal-primaryBtn"
+                  className="portal-outlineBtn"
                   disabled={loadingRole !== null}
-                  onClick={() => quickLogin(roleId)}
+                  onClick={() => quickLogin(2, 'anna@gmail.com')}
                   style={{ justifyContent: 'center' }}
                 >
-                  {loadingRole === roleId ? 'Signing in...' : `Quick login: ${roleLabel(roleId)}`}
+                  {loadingRole === 2 ? 'Signing in...' : 'Anna Nguyen'}
                 </button>
-              ))}
+                <button
+                  type="button"
+                  className="portal-outlineBtn"
+                  disabled={loadingRole !== null}
+                  onClick={() => quickLogin(2, 'lisa@gmail.com')}
+                  style={{ justifyContent: 'center' }}
+                >
+                  {loadingRole === 2 ? 'Signing in...' : 'Lisa Tran'}
+                </button>
+                <button
+                  type="button"
+                  className="portal-outlineBtn"
+                  disabled={loadingRole !== null}
+                  onClick={() => quickLogin(2, 'nini@gmail.com')}
+                  style={{ justifyContent: 'center' }}
+                >
+                  {loadingRole === 2 ? 'Signing in...' : 'ni'}
+                </button>
+              </div>
+              
+              {/* Customer button */}
+              <button
+                type="button"
+                className="portal-primaryBtn"
+                disabled={loadingRole !== null}
+                onClick={() => quickLogin(3)}
+                style={{ justifyContent: 'center' }}
+              >
+                {loadingRole === 3 ? 'Signing in...' : `Quick login: ${roleLabel(3)}`}
+              </button>
             </div>
 
             {error ? (

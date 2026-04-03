@@ -5,6 +5,9 @@ let poolPromise = null
 
 function getPool() {
   if (!poolPromise) {
+    const parsedPort = Number(env.db.port)
+    const hasExplicitPort = Number.isInteger(parsedPort) && parsedPort > 0
+
     const config = {
       server: env.db.server,
       database: env.db.database,
@@ -21,14 +24,13 @@ function getPool() {
 
         enableArithAbort: true,
 
-        // use instance if available
-        ...(env.db.instanceName && {
+        // Prefer explicit TCP port when provided to avoid SQL Browser dependency.
+        ...(!hasExplicitPort && env.db.instanceName && {
           instanceName: env.db.instanceName,
         }),
       },
 
-      // use port only when no instance is configured
-      ...(!env.db.instanceName && env.db.port && { port: Number(env.db.port) }),
+      ...(hasExplicitPort && { port: parsedPort }),
     }
 
     // advanced TLS options (if any)

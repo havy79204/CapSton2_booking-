@@ -1,4 +1,10 @@
 const { query, newId } = require('../config/query')
+const {
+  notifyCustomerEvent,
+  notifyAllCustomersEvent,
+  notifyOwnerEvent,
+  notifyWishlistDiscountByProduct,
+} = require('./notifications.service')
 const fs = require('fs/promises')
 const path = require('path')
 
@@ -829,8 +835,14 @@ async function updateRetailProduct(productId, payload) {
     throw err
   }
 
-  const exists = await query('SELECT TOP 1 ProductId FROM Products WHERE ProductId = @id', { id: productId })
-  if (!exists.recordset?.length) {
+  const existingRes = await query(
+    `SELECT TOP 1 ProductId, Name, Price, Status
+     FROM Products
+     WHERE ProductId = @id`,
+    { id: productId },
+  )
+  const existing = existingRes.recordset?.[0]
+  if (!existing) {
     const err = new Error('Product not found')
     err.status = 404
     throw err
@@ -896,6 +908,45 @@ async function updateRetailProduct(productId, payload) {
       price: sellPrice !== undefined ? sellPrice : null,
     }
   )
+
+  const oldPrice = Number(existing.Price)
+  const updatedPrice = sellPrice !== undefined ? Number(sellPrice) : oldPrice
+  const updatedName = String(name || existing.Name || '').trim() || 'Product'
+  const previousStatus = String(existing.Status || '').trim().toLowerCase()
+  const currentStatus = String(status || existing.Status || '').trim().toLowerCase()
+
+  try {
+    if (Number.isFinite(oldPrice) && Number.isFinite(updatedPrice) && updatedPrice < oldPrice) {
+      await notifyAllCustomersEvent({
+        event: 'product_discount',
+        payload: {
+          productId,
+          productName: updatedName,
+          oldPrice,
+          newPrice: updatedPrice,
+          body: `${updatedName} is now discounted from ${oldPrice.toLocaleString('vi-VN')} to ${updatedPrice.toLocaleString('vi-VN')} VND.`,
+        },
+      })
+
+      await notifyWishlistDiscountByProduct({
+        productId,
+        oldPrice,
+        newPrice: updatedPrice,
+        productName: updatedName,
+      })
+    } else if (previousStatus !== 'active' && currentStatus === 'active') {
+      await notifyAllCustomersEvent({
+        event: 'product_new',
+        payload: {
+          productId,
+          productName: updatedName,
+          body: `${updatedName} is now available in our catalog.`,
+        },
+      })
+    }
+  } catch (err) {
+    console.warn('[retail] update product notification failed:', err?.message || err)
+  }
 
   if (nextImages) {
     await replaceProductImages(productId, nextImages)
@@ -1126,6 +1177,21 @@ async function createRetailProduct(payload) {
     }
   )
 
+  try {
+    if (String(status || '').trim().toLowerCase() === 'active') {
+      await notifyAllCustomersEvent({
+        event: 'product_new',
+        payload: {
+          productId: id,
+          productName: String(name || '').trim() || 'New product',
+          body: `${String(name || 'A new product').trim()} is now available in our catalog.`,
+        },
+      })
+    }
+  } catch (err) {
+    console.warn('[retail] create product notification failed:', err?.message || err)
+  }
+
   await replaceProductImages(id, nextImages)
 
   // Create / update retail shadow row for category + import price.
@@ -1196,12 +1262,18 @@ function normalizeOrderStatusInput(value) {
   const raw = String(value || '').trim().toLowerCase()
   if (!raw) return null
   if (raw === 'c' || raw === 'pending') return 'Pending'
+  if (raw === 'confirmed' || raw === 'confirm') return 'Confirmed'
   if (raw === 'processing') return 'Processing'
   if (raw === 'shipping' || raw === 'shipped' || raw === 'delivering' || raw === 'in transit' || raw === 'dang giao hang') return 'Shipping'
   if (raw === 'completed' || raw === 'complete' || raw === 'delivered') return 'Completed'
   if (raw === 'cancelled' || raw === 'canceled') return 'Cancelled'
   if (raw === 'failed') return 'Failed'
   return null
+}
+
+function hasStockDeductedForStatus(statusInput) {
+  const normalized = normalizeOrderStatusInput(statusInput)
+  return normalized === 'Processing' || normalized === 'Shipping' || normalized === 'Completed'
 }
 
 function parseDateOnly(value) {
@@ -1415,8 +1487,12 @@ async function syncRetailInventoryByProducts(productIds) {
   }
 }
 
-async function decreaseStockForOrder(orderId) {
+async function decreaseStockForOrder(orderId, options = {}) {
   const items = await getOrderItems(orderId)
+  const schema = await getSchemaInfo()
+
+  const orderRefRaw = String(options?.referenceId || orderId || '').trim()
+  const orderRef = orderRefRaw ? `CustomerOrder:${orderRefRaw}` : null
   for (const item of items) {
     const stockRes = await query(
       'SELECT TOP 1 Stock FROM Products WHERE ProductId = @productId',
@@ -1431,15 +1507,62 @@ async function decreaseStockForOrder(orderId) {
   }
 
   for (const item of items) {
+    const productId = String(item.ProductId || '').trim()
+    const quantity = Number(item.Quantity || 0)
     await query(
       `UPDATE Products
        SET Stock = CASE WHEN ISNULL(Stock, 0) >= @quantity THEN ISNULL(Stock, 0) - @quantity ELSE 0 END
        WHERE ProductId = @productId`,
       {
-        productId: item.ProductId,
-        quantity: Number(item.Quantity || 0),
+        productId,
+        quantity,
       }
     )
+
+    if (schema.inventoryHasCategoryId && productId && quantity > 0) {
+      const shadowId = retailShadowId(productId)
+      try {
+        await query(
+          `IF NOT EXISTS (SELECT 1 FROM InventoryItems WHERE InventoryItemId = @shadowId)
+           BEGIN
+             INSERT INTO InventoryItems (InventoryItemId, ProductId, CategoryId, Name, Unit, ConversionRate, Quantity, ReorderLevel, PriceVnd, ItemGroup)
+             SELECT @shadowId, p.ProductId, p.CategoryId, p.Name, 'sp', 1, COALESCE(p.Stock, 0), 0, NULL, 'retail'
+             FROM Products p
+             WHERE p.ProductId = @productId;
+           END
+
+           UPDATE InventoryItems
+           SET
+             ProductId = COALESCE(@productId, ProductId),
+             CategoryId = COALESCE((SELECT TOP 1 CategoryId FROM Products WHERE ProductId = @productId), CategoryId),
+             Quantity = (SELECT COALESCE(Stock, 0) FROM Products WHERE ProductId = @productId),
+             ItemGroup = 'retail'
+           WHERE InventoryItemId = @shadowId;
+
+           INSERT INTO InventoryTransactions (
+             TransactionId, InventoryItemId, Type, Quantity, ReferenceId, CreatedAt,
+             PerformedByRole, PerformedById, PerformedByName, PerformedByEmail
+           )
+           VALUES (
+             @txId, @shadowId, 'OUT', @quantity, @referenceId, GETDATE(),
+             @performedByRole, @performedById, @performedByName, @performedByEmail
+           );`,
+          {
+            shadowId,
+            productId,
+            txId: newId(),
+            quantity,
+            referenceId: orderRef,
+            performedByRole: options?.actor?.roleKey ?? null,
+            performedById: options?.actor?.userId ?? null,
+            performedByName: options?.actor?.name ?? null,
+            performedByEmail: options?.actor?.email ?? null,
+          }
+        )
+      } catch (err) {
+        console.warn('[retail] Unable to write inventory transaction for order stock-out:', err?.message || err)
+      }
+    }
   }
 
   await syncRetailInventoryByProducts(items.map((x) => x.ProductId))
@@ -1465,10 +1588,14 @@ async function restoreStockForOrder(orderId) {
 async function listRetailOrders(filters = {}) {
   const schema = await getSchemaInfo()
   const page = Math.max(1, Math.trunc(Number(filters.page || 1) || 1))
-  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(filters.pageSize || 20) || 20)))
+  const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(filters.pageSize || 10) || 10)))
   const offset = (page - 1) * pageSize
 
   const built = buildOrderFilters(filters, 'o')
+  // By default, do not show orders in 'awaiting' state in the retail management listing
+  if (!filters || (filters.status === undefined || filters.status === null || String(filters.status || '').trim() === '')) {
+    built.whereSql = `${built.whereSql} AND LOWER(LTRIM(RTRIM(ISNULL(o.Status, 'pending')))) <> 'awaiting'`
+  }
   const orderBy = resolveOrderSort(filters.sortBy, filters.sortDir, 'o')
   const channelSelectFromOrders = schema.ordersHasChannel
     ? 'o.Channel AS Cannel'
@@ -1787,23 +1914,34 @@ async function createRetailOrder(payload = {}, { actor } = {}) {
         productName: item.productName,
       }
     )
-
-    await query(
-      `UPDATE Products
-       SET Stock = CASE WHEN ISNULL(Stock, 0) >= @quantity THEN ISNULL(Stock, 0) - @quantity ELSE 0 END
-       WHERE ProductId = @productId`,
-      {
-        productId: item.productId,
-        quantity: item.quantity,
-      }
-    )
   }
 
-  await syncRetailInventoryByProducts(resolvedItems.map((item) => item.productId))
+  if (hasStockDeductedForStatus(status)) {
+    await decreaseStockForOrder(orderId, { actor, referenceId: orderId })
+  }
+
+  if (actor?.userId) {
+    try {
+      await notifyCustomerEvent({
+        userId: actor.userId,
+        event: 'order_created',
+        orderId,
+        payload: { orderId },
+      })
+
+      await notifyOwnerEvent({
+        event: 'order_new',
+        orderId,
+      })
+    } catch (err) {
+      console.warn('[retail] Create order notify/email failed:', err?.message || err)
+    }
+  }
+
   return getRetailOrder(orderId)
 }
 
-async function updateRetailOrder(orderIdInput, payload = {}) {
+async function updateRetailOrder(orderIdInput, payload = {}, { actor } = {}) {
   const orderId = String(orderIdInput || '').trim()
   if (!orderId) {
     const err = new Error('Missing orderId')
@@ -1812,7 +1950,7 @@ async function updateRetailOrder(orderIdInput, payload = {}) {
   }
 
   const found = await query(
-    `SELECT TOP 1 OrderId, Status
+    `SELECT TOP 1 OrderId, Status, UserId
      FROM Orders
      WHERE OrderId = @orderId`,
     { orderId }
@@ -1833,12 +1971,15 @@ async function updateRetailOrder(orderIdInput, payload = {}) {
   }
 
   if (nextStatus && nextStatus !== current.Status) {
-    if (nextStatus === 'Cancelled' && current.Status !== 'Cancelled') {
-      await restoreStockForOrder(orderId)
+    const hadStockDeducted = hasStockDeductedForStatus(current.Status)
+    const shouldDeductStock = hasStockDeductedForStatus(nextStatus)
+
+    if (!hadStockDeducted && shouldDeductStock) {
+      await decreaseStockForOrder(orderId, { actor, referenceId: orderId })
     }
 
-    if (current.Status === 'Cancelled' && nextStatus !== 'Cancelled') {
-      await decreaseStockForOrder(orderId)
+    if (hadStockDeducted && !shouldDeductStock) {
+      await restoreStockForOrder(orderId)
     }
 
     if (nextStatus === 'Completed') {
@@ -1871,6 +2012,57 @@ async function updateRetailOrder(orderIdInput, payload = {}) {
     }
   )
 
+  const userId = String(current.UserId || '').trim()
+  if (userId && nextStatus && nextStatus !== current.Status) {
+    const statusMap = {
+      Pending: 'order_processing',
+      Processing: 'order_processing',
+      Shipping: 'order_shipping',
+      Completed: 'order_delivered',
+      Cancelled: 'order_cancelled',
+      Failed: 'order_failed',
+    }
+
+    const event = statusMap[nextStatus] || 'order_processing'
+    try {
+      await notifyCustomerEvent({
+        userId,
+        event,
+        orderId,
+        payload: { orderId },
+      })
+
+      await notifyOwnerEvent({
+        event,
+        orderId,
+      })
+    } catch (err) {
+      console.warn('[retail] Update order status notify/email failed:', err?.message || err)
+    }
+  }
+
+  if (userId && paymentMethod !== undefined) {
+    // Do not emit payment_success from order update. Payment success must come from gateway callback only.
+    const paymentEvent = 'payment_pending'
+    if (paymentEvent) {
+      try {
+        await notifyCustomerEvent({
+          userId,
+          event: paymentEvent,
+          orderId,
+          payload: { orderId },
+        })
+
+        await notifyOwnerEvent({
+          event: paymentEvent,
+          orderId,
+        })
+      } catch (err) {
+        console.warn('[retail] Update payment notify/email failed:', err?.message || err)
+      }
+    }
+  }
+
   return getRetailOrder(orderId)
 }
 
@@ -1897,7 +2089,7 @@ async function deleteRetailOrder(orderIdInput) {
   }
 
   const normalizedStatus = normalizeOrderStatusInput(current.Status) || 'Pending'
-  if (normalizedStatus !== 'Cancelled') {
+  if (hasStockDeductedForStatus(normalizedStatus)) {
     await restoreStockForOrder(orderId)
   }
 
