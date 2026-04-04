@@ -2,7 +2,12 @@ const { query } = require('../config/query')
 const { pad2, formatHm } = require('../utils/format')
 
 function toIsoDate(d) {
-  return d.toISOString().slice(0, 10)
+  const x = d instanceof Date ? d : new Date(d)
+  if (Number.isNaN(x.getTime())) return ''
+  const y = x.getFullYear()
+  const m = String(x.getMonth() + 1).padStart(2, '0')
+  const day = String(x.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 function toSqlDateKey(v) {
@@ -41,6 +46,27 @@ function toMoney(value) {
   return Number(value || 0)
 }
 
+const BOOKING_PENDING = new Set(['pending', 'p', 'c'])
+const BOOKING_BOOKED = new Set(['booked', 'confirmed', 'confirm'])
+const BOOKING_COMPLETED = new Set(['completed', 'complete', 'done'])
+const BOOKING_CANCELED = new Set(['cancelled', 'canceled', 'cancel', 'no_show', 'noshow', 'no-show', 'no show'])
+
+function normalizeBookingStatus(raw) {
+  const text = String(raw || '').trim().toLowerCase()
+  if (BOOKING_PENDING.has(text)) return 'pending'
+  if (BOOKING_BOOKED.has(text)) return 'booked'
+  if (BOOKING_COMPLETED.has(text)) return 'completed'
+  if (BOOKING_CANCELED.has(text)) return 'canceled'
+  return 'pending'
+}
+
+function bookingStatusLabel(status) {
+  if (status === 'booked') return 'Booked'
+  if (status === 'completed') return 'Completed'
+  if (status === 'canceled') return 'Canceled'
+  return 'Pending'
+}
+
 function parseDateOnly(raw) {
   if (!raw) return null
   const s = String(raw).trim()
@@ -65,6 +91,34 @@ function parseYearOnly(raw) {
   const year = Number(String(raw).trim())
   if (!Number.isInteger(year) || year < 2000 || year > 2100) return null
   return year
+}
+
+function monthShortLabel(monthIndexZeroBased) {
+  const labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return labels[monthIndexZeroBased] || ''
+}
+
+function formatDateLabelDdMm(date) {
+  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}`
+}
+
+function startOfWeekMonday(date) {
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : (1 - day)
+  d.setDate(d.getDate() + diff)
+  return d
+}
+
+async function tableExists(tableName) {
+  const res = await query(
+    `SELECT 1 AS ok
+     FROM INFORMATION_SCHEMA.TABLES
+     WHERE TABLE_NAME = @tableName`,
+    { tableName }
+  ).catch(() => ({ recordset: [] }))
+  return Boolean(res.recordset?.length)
 }
 
 function getPeriodMeta(periodRaw, refs = {}) {
@@ -114,6 +168,66 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
   const currentEndIso = toIsoDate(meta.currentEnd)
   const prevStartIso = toIsoDate(meta.prevStart)
   const prevEndIso = toIsoDate(meta.prevEnd)
+  const hasBookingReviews = await tableExists('BookingReviews')
+
+  const todayScheduleSql = hasBookingReviews
+    ? `SELECT
+          b.BookingId,
+          b.BookingTime,
+          b.Status AS BookingStatus,
+          cu.Name AS CustomerName,
+          sv.Name AS ServiceName,
+          su.Name AS StaffName,
+          st.StaffId,
+          br.ReviewRating,
+          br.ReviewComment,
+          br.ReviewCreatedAt
+       FROM Bookings b
+       LEFT JOIN Users cu ON cu.UserId = b.CustomerUserId
+       OUTER APPLY (
+         SELECT TOP 1 *
+         FROM BookingServices x
+         WHERE x.BookingId = b.BookingId
+         ORDER BY x.BookingServiceId
+       ) bs
+       LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+       LEFT JOIN Staff st ON st.StaffId = bs.StaffId
+       LEFT JOIN Users su ON su.UserId = st.UserId
+       OUTER APPLY (
+         SELECT TOP 1
+           CAST(br.Rating AS FLOAT) AS ReviewRating,
+           br.Comment AS ReviewComment,
+           br.CreatedAt AS ReviewCreatedAt
+         FROM BookingReviews br
+         WHERE br.BookingId = b.BookingId
+         ORDER BY br.CreatedAt DESC
+       ) br
+       WHERE CAST(b.BookingTime AS date) = @d
+       ORDER BY b.BookingTime ASC`
+    : `SELECT
+          b.BookingId,
+          b.BookingTime,
+          b.Status AS BookingStatus,
+          cu.Name AS CustomerName,
+          sv.Name AS ServiceName,
+          su.Name AS StaffName,
+          st.StaffId,
+          CAST(NULL AS FLOAT) AS ReviewRating,
+          CAST(NULL AS NVARCHAR(1000)) AS ReviewComment,
+          CAST(NULL AS DATETIME2) AS ReviewCreatedAt
+       FROM Bookings b
+       LEFT JOIN Users cu ON cu.UserId = b.CustomerUserId
+       OUTER APPLY (
+         SELECT TOP 1 *
+         FROM BookingServices x
+         WHERE x.BookingId = b.BookingId
+         ORDER BY x.BookingServiceId
+       ) bs
+       LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+       LEFT JOIN Staff st ON st.StaffId = bs.StaffId
+       LEFT JOIN Users su ON su.UserId = st.UserId
+       WHERE CAST(b.BookingTime AS date) = @d
+       ORDER BY b.BookingTime ASC`
 
   const [
     revRes,
@@ -333,200 +447,345 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
 
   const lowStockCritical = Number(lowCriticalRes.recordset?.[0]?.Cnt || 0)
 
+  const today = new Date()
+  const todayIso = toIsoDate(today)
+  const last30StartIso = toIsoDate(addDays(today, -29))
+
+  const [
+    bookingStatusPeriodRes,
+    todayOrdersSnapshotRes,
+    activeCustomers30Res,
+    allCustomersRes,
+    visits30Res,
+    inventoryValueRes,
+    todayScheduleRawRes,
+  ] = await Promise.all([
+    query(
+      `SELECT COALESCE(Status, 'Unknown') AS StatusName, COUNT(1) AS Cnt
+       FROM Bookings
+       WHERE BookingTime IS NOT NULL
+         AND CAST(BookingTime AS date) BETWEEN @s AND @e
+       GROUP BY COALESCE(Status, 'Unknown')`,
+      { s: currentStartIso, e: currentEndIso }
+    ).catch(() => ({ recordset: [] })),
+    query(
+      `SELECT
+         COUNT(1) AS TotalOrders,
+         SUM(CASE WHEN LOWER(LTRIM(RTRIM(COALESCE(Status, '')))) IN ('completed', 'complete', 'done') THEN COALESCE(Total, 0) ELSE 0 END) AS ProductRevenue
+       FROM Orders
+       WHERE CreatedAt IS NOT NULL AND CAST(CreatedAt AS date) = @d`,
+      { d: todayIso }
+    ).catch(() => ({ recordset: [{ TotalOrders: 0, ProductRevenue: 0 }] })),
+    query(
+      `SELECT COUNT(DISTINCT CustomerUserId) AS Cnt
+       FROM Bookings
+       WHERE CustomerUserId IS NOT NULL
+         AND CAST(BookingTime AS date) BETWEEN @s AND @e`,
+      { s: last30StartIso, e: todayIso }
+    ).catch(() => ({ recordset: [{ Cnt: 0 }] })),
+    query(
+      `SELECT COUNT(DISTINCT CustomerUserId) AS Cnt
+       FROM Bookings
+       WHERE CustomerUserId IS NOT NULL`
+    ).catch(() => ({ recordset: [{ Cnt: 0 }] })),
+    query(
+      `SELECT COUNT(1) AS Cnt
+       FROM Bookings
+       WHERE CustomerUserId IS NOT NULL
+         AND CAST(BookingTime AS date) BETWEEN @s AND @e`,
+      { s: last30StartIso, e: todayIso }
+    ).catch(() => ({ recordset: [{ Cnt: 0 }] })),
+    query(
+      `SELECT SUM(COALESCE(TRY_CONVERT(DECIMAL(19,2), Quantity), 0) * COALESCE(TRY_CONVERT(DECIMAL(19,2), PriceVnd), 0)) AS TotalValue
+       FROM InventoryItems`
+    ).catch(() => ({ recordset: [{ TotalValue: 0 }] })),
+    query(todayScheduleSql, { d: todayIso }).catch(() => ({ recordset: [] })),
+  ])
+
+  const todayStatusBreakdown = { pending: 0, booked: 0, completed: 0, canceled: 0, total: 0 }
+  for (const row of bookingStatusPeriodRes.recordset || []) {
+    const key = normalizeBookingStatus(row.StatusName)
+    const count = Number(row.Cnt || 0)
+    if (key === 'completed') todayStatusBreakdown.completed += count
+    else if (key === 'booked') todayStatusBreakdown.booked += count
+    else if (key === 'canceled') todayStatusBreakdown.canceled += count
+    else todayStatusBreakdown.pending += count
+    todayStatusBreakdown.total += count
+  }
+
+  const activeCustomers30 = Number(activeCustomers30Res.recordset?.[0]?.Cnt || 0)
+  const allCustomersEver = Number(allCustomersRes.recordset?.[0]?.Cnt || 0)
+  const inactiveCustomers = Math.max(0, allCustomersEver - activeCustomers30)
+  const visits30 = Number(visits30Res.recordset?.[0]?.Cnt || 0)
+  const avgVisitsPerCustomerPerMonth = activeCustomers30 > 0 ? Number((visits30 / activeCustomers30).toFixed(2)) : 0
+  const inventoryTotalValue = Number(inventoryValueRes.recordset?.[0]?.TotalValue || 0)
+
+  const todayOrders = Number(todayOrdersSnapshotRes.recordset?.[0]?.TotalOrders || 0)
+  const todayProductRevenue = Number(todayOrdersSnapshotRes.recordset?.[0]?.ProductRevenue || 0)
+
+  const nowMinutes = today.getHours() * 60 + today.getMinutes()
+  const staffAvailabilityMap = new Map()
+  const todaySchedule = (todayScheduleRawRes.recordset || []).map((r) => {
+    const d = new Date(r.BookingTime)
+    const startMinutes = Number.isNaN(d.getTime()) ? null : d.getHours() * 60 + d.getMinutes()
+    const normalizedStatus = normalizeBookingStatus(r.BookingStatus)
+    const isActiveNow = startMinutes !== null
+      && startMinutes <= nowMinutes
+      && nowMinutes < startMinutes + 60
+      && normalizedStatus !== 'completed'
+      && normalizedStatus !== 'canceled'
+
+    const staffId = r.StaffId ? String(r.StaffId) : ''
+    if (staffId) {
+      const current = staffAvailabilityMap.get(staffId) || { name: r.StaffName || `Staff ${staffId}`, busy: false }
+      current.busy = current.busy || isActiveNow
+      staffAvailabilityMap.set(staffId, current)
+    }
+
+    return {
+      bookingId: r.BookingId,
+      time: formatHm(r.BookingTime),
+      customer: r.CustomerName || 'Walk-in',
+      staff: r.StaffName || 'Unassigned',
+      service: r.ServiceName || 'Service pending',
+      status: normalizedStatus,
+      statusLabel: bookingStatusLabel(normalizedStatus),
+      isActiveNow,
+      reviewRating: Number(r.ReviewRating || 0),
+      reviewComment: String(r.ReviewComment || ''),
+      reviewAt: toSqlDateKey(r.ReviewCreatedAt),
+    }
+  })
+
+  const staffAvailability = Array.from(staffAvailabilityMap.values()).map((s) => ({
+    name: s.name,
+    status: s.busy ? 'busy' : 'available',
+  }))
+
+  const completedBookingStatusSql = "('completed', 'complete', 'done')"
+  const completedOrderStatusSql = "('paid', 'completed', 'complete', 'done')"
+
+  async function getRevenueByDateMap(startIso, endIso) {
+    const [serviceRevRes, productRevRes, completedBookingsRes] = await Promise.all([
+      query(
+        `SELECT CAST(b.BookingTime AS date) AS D, SUM(ISNULL(sv.Price, 0)) AS Revenue
+         FROM BookingServices bs
+         LEFT JOIN Bookings b ON b.BookingId = bs.BookingId
+         LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+         WHERE b.BookingTime IS NOT NULL
+           AND CAST(b.BookingTime AS date) BETWEEN @s AND @e
+           AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ${completedBookingStatusSql}
+         GROUP BY CAST(b.BookingTime AS date)
+         ORDER BY D`,
+        { s: startIso, e: endIso }
+      ).catch(() => ({ recordset: [] })),
+      query(
+        `SELECT CAST(CreatedAt AS date) AS D, SUM(Total) AS Revenue
+         FROM Orders
+         WHERE CreatedAt IS NOT NULL
+           AND CAST(CreatedAt AS date) BETWEEN @s AND @e
+           AND LOWER(LTRIM(RTRIM(COALESCE(Status, '')))) IN ${completedOrderStatusSql}
+         GROUP BY CAST(CreatedAt AS date)
+         ORDER BY D`,
+        { s: startIso, e: endIso }
+      ).catch(() => ({ recordset: [] })),
+      query(
+        `SELECT CAST(BookingTime AS date) AS D, COUNT(1) AS Cnt
+         FROM Bookings
+         WHERE BookingTime IS NOT NULL
+           AND CAST(BookingTime AS date) BETWEEN @s AND @e
+           AND LOWER(LTRIM(RTRIM(COALESCE(Status, '')))) IN ${completedBookingStatusSql}
+         GROUP BY CAST(BookingTime AS date)
+         ORDER BY D`,
+        { s: startIso, e: endIso }
+      ).catch(() => ({ recordset: [] })),
+    ])
+
+    return {
+      service: new Map((serviceRevRes.recordset || []).map((r) => [toSqlDateKey(r.D), Number(r.Revenue || 0)])),
+      product: new Map((productRevRes.recordset || []).map((r) => [toSqlDateKey(r.D), Number(r.Revenue || 0)])),
+      bookings: new Map((completedBookingsRes.recordset || []).map((r) => [toSqlDateKey(r.D), Number(r.Cnt || 0)])),
+    }
+  }
+
+  function pushTrendRow(rows, label, serviceRevenue, productRevenue, completedBookings) {
+    const revenueTotal = Number(serviceRevenue || 0) + Number(productRevenue || 0)
+    rows.push({
+      label,
+      revenue: revenueTotal,
+      revenueTotal,
+      revenueBooking: Number(serviceRevenue || 0),
+      revenueOrder: Number(productRevenue || 0),
+      bookingCount: Number(completedBookings || 0),
+      appts: Number(completedBookings || 0),
+    })
+  }
+
   let trendRows = []
   let revenuePrevRows = []
   let ordersTrendRows = []
+
   if (meta.period === 'day') {
-    const [revByHourRes, orderRevByHourRes, revByHourPrevRes, orderRevByHourPrevRes, apptByHourRes, orderByHourRes] = await Promise.all([
-      query(
-        `SELECT DATEPART(HOUR, b.BookingTime) AS H, SUM(ISNULL(sv.Price, 0)) AS Revenue
-         FROM BookingServices bs
-         LEFT JOIN Bookings b ON b.BookingId = bs.BookingId
-         LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
-         WHERE CAST(b.BookingTime AS date) = @d
-           AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')
-         GROUP BY DATEPART(HOUR, b.BookingTime)
-         ORDER BY H`,
-        { d: currentEndIso }
-      ).catch(() => ({ recordset: [] })),
-      query(
-        `SELECT DATEPART(HOUR, CreatedAt) AS H, SUM(Total) AS Revenue
-         FROM Orders
-         WHERE CreatedAt IS NOT NULL 
-           AND CAST(CreatedAt AS date) = @d
-           AND LOWER(LTRIM(RTRIM(COALESCE(Status, '')))) IN ('completed', 'complete', 'done')
-         GROUP BY DATEPART(HOUR, CreatedAt)
-         ORDER BY H`,
-        { d: currentEndIso }
-      ).catch(() => ({ recordset: [] })),
-      query(
-        `SELECT DATEPART(HOUR, b.BookingTime) AS H, SUM(ISNULL(sv.Price, 0)) AS Revenue
-         FROM BookingServices bs
-         LEFT JOIN Bookings b ON b.BookingId = bs.BookingId
-         LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
-         WHERE CAST(b.BookingTime AS date) = @d
-           AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')
-         GROUP BY DATEPART(HOUR, b.BookingTime)
-         ORDER BY H`,
-        { d: prevEndIso }
-      ).catch(() => ({ recordset: [] })),
-      query(
-        `SELECT DATEPART(HOUR, CreatedAt) AS H, SUM(Total) AS Revenue
-         FROM Orders
-         WHERE CreatedAt IS NOT NULL 
-           AND CAST(CreatedAt AS date) = @d
-           AND LOWER(LTRIM(RTRIM(COALESCE(Status, '')))) IN ('completed', 'complete', 'done')
-         GROUP BY DATEPART(HOUR, CreatedAt)
-         ORDER BY H`,
-        { d: prevEndIso }
-      ).catch(() => ({ recordset: [] })),
-      query(
-        `SELECT DATEPART(HOUR, BookingTime) AS H, COUNT(1) AS Appts
-         FROM Bookings
-         WHERE CAST(BookingTime AS date) = @d
-         GROUP BY DATEPART(HOUR, BookingTime)
-         ORDER BY H`,
-        { d: currentEndIso }
-      ).catch(() => ({ recordset: [] })),
-      query(
-        `SELECT DATEPART(HOUR, CreatedAt) AS H, COUNT(1) AS OrdersCnt
-         FROM Orders
-         WHERE CreatedAt IS NOT NULL AND CAST(CreatedAt AS date) = @d
-         GROUP BY DATEPART(HOUR, CreatedAt)
-         ORDER BY H`,
-        { d: currentEndIso }
-      ).catch(() => ({ recordset: [] })),
+    const endDate = parseDateOnly(refs.refDate) || new Date()
+    const startDate = addDays(endDate, -6)
+    const prevEndDate = addDays(startDate, -1)
+    const prevStartDate = addDays(prevEndDate, -6)
+
+    const [currentMaps, prevMaps] = await Promise.all([
+      getRevenueByDateMap(toIsoDate(startDate), toIsoDate(endDate)),
+      getRevenueByDateMap(toIsoDate(prevStartDate), toIsoDate(prevEndDate)),
     ])
 
-    const rMap = new Map((revByHourRes.recordset || []).map((r) => [Number(r.H), Number(r.Revenue || 0)]))
-    const roMap = new Map((orderRevByHourRes.recordset || []).map((r) => [Number(r.H), Number(r.Revenue || 0)]))
-  const rPrevMap = new Map((revByHourPrevRes.recordset || []).map((r) => [Number(r.H), Number(r.Revenue || 0)]))
-  const roPrevMap = new Map((orderRevByHourPrevRes.recordset || []).map((r) => [Number(r.H), Number(r.Revenue || 0)]))
-    const aMap = new Map((apptByHourRes.recordset || []).map((r) => [Number(r.H), Number(r.Appts || 0)]))
-    const oMap = new Map((orderByHourRes.recordset || []).map((r) => [Number(r.H), Number(r.OrdersCnt || 0)]))
+    for (let i = 0; i < 7; i++) {
+      const currentDate = addDays(startDate, i)
+      const prevDate = addDays(prevStartDate, i)
+      const ck = toIsoDate(currentDate)
+      const pk = toIsoDate(prevDate)
 
-    for (let h = 8; h <= 20; h++) {
-      const bookingRevenue = rMap.get(h) || 0
-      const orderRevenue = roMap.get(h) || 0
-      const totalRevenue = bookingRevenue + orderRevenue
-      trendRows.push({
-        label: `${pad2(h)}:00`,
-        revenue: totalRevenue,
-        revenueTotal: totalRevenue,
-        revenueBooking: bookingRevenue,
-        revenueOrder: orderRevenue,
-        appts: aMap.get(h) || 0,
-      })
-      const bookingRevenuePrev = rPrevMap.get(h) || 0
-      const orderRevenuePrev = roPrevMap.get(h) || 0
-      const totalRevenuePrev = bookingRevenuePrev + orderRevenuePrev
-      revenuePrevRows.push({
-        label: `${pad2(h)}:00`,
-        revenue: totalRevenuePrev,
-        revenueTotal: totalRevenuePrev,
-        revenueBooking: bookingRevenuePrev,
-        revenueOrder: orderRevenuePrev,
-      })
-      ordersTrendRows.push({ label: `${pad2(h)}:00`, orders: oMap.get(h) || 0, orderRevenue })
+      pushTrendRow(
+        trendRows,
+        formatDateLabelDdMm(currentDate),
+        currentMaps.service.get(ck) || 0,
+        currentMaps.product.get(ck) || 0,
+        currentMaps.bookings.get(ck) || 0
+      )
+      pushTrendRow(
+        revenuePrevRows,
+        formatDateLabelDdMm(prevDate),
+        prevMaps.service.get(pk) || 0,
+        prevMaps.product.get(pk) || 0,
+        prevMaps.bookings.get(pk) || 0
+      )
+    }
+  } else if (meta.period === 'week') {
+    const endRefDate = parseDateOnly(refs.refDate) || new Date()
+    const currentWeekEnd = addDays(startOfWeekMonday(endRefDate), 6)
+    const currentWeekStart = addDays(currentWeekEnd, -55) // 8 weeks window
+    const prevWeekEnd = addDays(currentWeekStart, -1)
+    const prevWeekStart = addDays(prevWeekEnd, -55)
+
+    const [currentMaps, prevMaps] = await Promise.all([
+      getRevenueByDateMap(toIsoDate(currentWeekStart), toIsoDate(currentWeekEnd)),
+      getRevenueByDateMap(toIsoDate(prevWeekStart), toIsoDate(prevWeekEnd)),
+    ])
+
+    for (let w = 0; w < 8; w++) {
+      const weekStart = addDays(currentWeekStart, w * 7)
+      const weekEnd = addDays(weekStart, 6)
+      const prevWeekStartCursor = addDays(prevWeekStart, w * 7)
+      const prevWeekEndCursor = addDays(prevWeekStartCursor, 6)
+
+      let serviceRevenue = 0
+      let productRevenue = 0
+      let bookingCount = 0
+      let prevServiceRevenue = 0
+      let prevProductRevenue = 0
+      let prevBookingCount = 0
+
+      for (let d = 0; d < 7; d++) {
+        const currentKey = toIsoDate(addDays(weekStart, d))
+        const prevKey = toIsoDate(addDays(prevWeekStartCursor, d))
+        serviceRevenue += currentMaps.service.get(currentKey) || 0
+        productRevenue += currentMaps.product.get(currentKey) || 0
+        bookingCount += currentMaps.bookings.get(currentKey) || 0
+        prevServiceRevenue += prevMaps.service.get(prevKey) || 0
+        prevProductRevenue += prevMaps.product.get(prevKey) || 0
+        prevBookingCount += prevMaps.bookings.get(prevKey) || 0
+      }
+
+      const label = `${formatDateLabelDdMm(weekStart)}-${formatDateLabelDdMm(weekEnd)}`
+      const prevLabel = `${formatDateLabelDdMm(prevWeekStartCursor)}-${formatDateLabelDdMm(prevWeekEndCursor)}`
+      pushTrendRow(trendRows, label, serviceRevenue, productRevenue, bookingCount)
+      pushTrendRow(revenuePrevRows, prevLabel, prevServiceRevenue, prevProductRevenue, prevBookingCount)
+    }
+  } else if (meta.period === 'month') {
+    const selectedMonth = parseMonthOnly(refs.refMonth)
+    const monthYear = selectedMonth?.year || new Date().getFullYear()
+    const monthNumber = selectedMonth?.month || (new Date().getMonth() + 1)
+    const monthStart = new Date(monthYear, monthNumber - 1, 1)
+    const monthEnd = new Date(monthYear, monthNumber, 0)
+
+    const prevMonthStart = new Date(monthYear, monthNumber - 2, 1)
+    const prevMonthEnd = new Date(monthYear, monthNumber - 1, 0)
+    const prevMonthDays = prevMonthEnd.getDate()
+
+    const [currentMaps, prevMaps] = await Promise.all([
+      getRevenueByDateMap(toIsoDate(monthStart), toIsoDate(monthEnd)),
+      getRevenueByDateMap(toIsoDate(prevMonthStart), toIsoDate(prevMonthEnd)),
+    ])
+
+    const dayCount = monthEnd.getDate()
+    for (let day = 1; day <= dayCount; day++) {
+      const currentDate = new Date(monthYear, monthNumber - 1, day)
+      const currentKey = toIsoDate(currentDate)
+      const prevDay = Math.min(day, prevMonthDays)
+      const prevDate = new Date(prevMonthStart.getFullYear(), prevMonthStart.getMonth(), prevDay)
+      const prevKey = toIsoDate(prevDate)
+
+      pushTrendRow(
+        trendRows,
+        String(day),
+        currentMaps.service.get(currentKey) || 0,
+        currentMaps.product.get(currentKey) || 0,
+        currentMaps.bookings.get(currentKey) || 0
+      )
+      pushTrendRow(
+        revenuePrevRows,
+        String(prevDay),
+        prevMaps.service.get(prevKey) || 0,
+        prevMaps.product.get(prevKey) || 0,
+        prevMaps.bookings.get(prevKey) || 0
+      )
     }
   } else {
-    const [trendRevRes, trendOrderRevRes, trendRevPrevRes, trendOrderRevPrevRes, trendApptRes, trendOrderRes] = await Promise.all([
-      query(
-        `SELECT CAST(p.PaidAt AS date) AS D, SUM(p.Amount) AS Revenue
-         FROM Payments p
-         LEFT JOIN Bookings b ON b.BookingId = p.BookingId
-         WHERE p.PaidAt IS NOT NULL 
-           AND CAST(p.PaidAt AS date) BETWEEN @s AND @e
-           AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')
-         GROUP BY CAST(p.PaidAt AS date)
-         ORDER BY D`,
-        { s: currentStartIso, e: currentEndIso }
-      ).catch(() => ({ recordset: [] })),
-      query(
-        `SELECT CAST(CreatedAt AS date) AS D, SUM(Total) AS Revenue
-         FROM Orders
-         WHERE CreatedAt IS NOT NULL 
-           AND CAST(CreatedAt AS date) BETWEEN @s AND @e
-           AND LOWER(LTRIM(RTRIM(COALESCE(Status, '')))) IN ('completed', 'complete', 'done')
-         GROUP BY CAST(CreatedAt AS date)
-         ORDER BY D`,
-        { s: currentStartIso, e: currentEndIso }
-      ).catch(() => ({ recordset: [] })),
-      query(
-        `SELECT CAST(p.PaidAt AS date) AS D, SUM(p.Amount) AS Revenue
-         FROM Payments p
-         LEFT JOIN Bookings b ON b.BookingId = p.BookingId
-         WHERE p.PaidAt IS NOT NULL 
-           AND CAST(p.PaidAt AS date) BETWEEN @s AND @e
-           AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')
-         GROUP BY CAST(p.PaidAt AS date)
-         ORDER BY D`,
-        { s: prevStartIso, e: prevEndIso }
-      ).catch(() => ({ recordset: [] })),
-      query(
-        `SELECT CAST(CreatedAt AS date) AS D, SUM(Total) AS Revenue
-         FROM Orders
-         WHERE CreatedAt IS NOT NULL 
-           AND CAST(CreatedAt AS date) BETWEEN @s AND @e
-           AND LOWER(LTRIM(RTRIM(COALESCE(Status, '')))) IN ('completed', 'complete', 'done')
-         GROUP BY CAST(CreatedAt AS date)
-         ORDER BY D`,
-        { s: prevStartIso, e: prevEndIso }
-      ).catch(() => ({ recordset: [] })),
-      query(
-        `SELECT CAST(BookingTime AS date) AS D, COUNT(1) AS Appts
-         FROM Bookings
-         WHERE CAST(BookingTime AS date) BETWEEN @s AND @e
-         GROUP BY CAST(BookingTime AS date)
-         ORDER BY D`,
-        { s: currentStartIso, e: currentEndIso }
-      ).catch(() => ({ recordset: [] })),
-      query(
-        `SELECT CAST(CreatedAt AS date) AS D, COUNT(1) AS OrdersCnt
-         FROM Orders
-         WHERE CreatedAt IS NOT NULL AND CAST(CreatedAt AS date) BETWEEN @s AND @e
-         GROUP BY CAST(CreatedAt AS date)
-         ORDER BY D`,
-        { s: currentStartIso, e: currentEndIso }
-      ).catch(() => ({ recordset: [] })),
+    const selectedYear = parseYearOnly(refs.refYear) || new Date().getFullYear()
+    const yearStart = new Date(selectedYear, 0, 1)
+    const yearEnd = new Date(selectedYear, 11, 31)
+    const prevYearStart = new Date(selectedYear - 1, 0, 1)
+    const prevYearEnd = new Date(selectedYear - 1, 11, 31)
+
+    const [currentMaps, prevMaps] = await Promise.all([
+      getRevenueByDateMap(toIsoDate(yearStart), toIsoDate(yearEnd)),
+      getRevenueByDateMap(toIsoDate(prevYearStart), toIsoDate(prevYearEnd)),
     ])
 
-    const rMap = new Map((trendRevRes.recordset || []).map((r) => [toSqlDateKey(r.D), Number(r.Revenue || 0)]))
-    const roMap = new Map((trendOrderRevRes.recordset || []).map((r) => [toSqlDateKey(r.D), Number(r.Revenue || 0)]))
-  const rPrevMap = new Map((trendRevPrevRes.recordset || []).map((r) => [toSqlDateKey(r.D), Number(r.Revenue || 0)]))
-  const roPrevMap = new Map((trendOrderRevPrevRes.recordset || []).map((r) => [toSqlDateKey(r.D), Number(r.Revenue || 0)]))
-    const aMap = new Map((trendApptRes.recordset || []).map((r) => [toSqlDateKey(r.D), Number(r.Appts || 0)]))
-    const oMap = new Map((trendOrderRes.recordset || []).map((r) => [toSqlDateKey(r.D), Number(r.OrdersCnt || 0)]))
+    for (let month = 0; month < 12; month++) {
+      let serviceRevenue = 0
+      let productRevenue = 0
+      let bookingCount = 0
+      let prevServiceRevenue = 0
+      let prevProductRevenue = 0
+      let prevBookingCount = 0
 
-    for (let i = 0; i < meta.days; i++) {
-      const d = addDays(meta.currentStart, i)
-      const k = toIsoDate(d)
-      const bookingRevenue = rMap.get(k) || 0
-      const orderRevenue = roMap.get(k) || 0
-      const totalRevenue = bookingRevenue + orderRevenue
-      trendRows.push({
-        label: k.slice(5),
-        revenue: totalRevenue,
-        revenueTotal: totalRevenue,
-        revenueBooking: bookingRevenue,
-        revenueOrder: orderRevenue,
-        appts: aMap.get(k) || 0,
-      })
-      const prevDate = addDays(meta.prevStart, i)
-      const pk = toIsoDate(prevDate)
-      const bookingRevenuePrev = rPrevMap.get(pk) || 0
-      const orderRevenuePrev = roPrevMap.get(pk) || 0
-      const totalRevenuePrev = bookingRevenuePrev + orderRevenuePrev
-      revenuePrevRows.push({
-        label: pk.slice(5),
-        revenue: totalRevenuePrev,
-        revenueTotal: totalRevenuePrev,
-        revenueBooking: bookingRevenuePrev,
-        revenueOrder: orderRevenuePrev,
-      })
-      ordersTrendRows.push({ label: k.slice(5), orders: oMap.get(k) || 0, orderRevenue })
+      const currentMonthStart = new Date(selectedYear, month, 1)
+      const currentMonthEnd = new Date(selectedYear, month + 1, 0)
+      const prevMonthStart = new Date(selectedYear - 1, month, 1)
+      const prevMonthEnd = new Date(selectedYear - 1, month + 1, 0)
+
+      for (let d = new Date(currentMonthStart); d <= currentMonthEnd; d = addDays(d, 1)) {
+        const key = toIsoDate(d)
+        serviceRevenue += currentMaps.service.get(key) || 0
+        productRevenue += currentMaps.product.get(key) || 0
+        bookingCount += currentMaps.bookings.get(key) || 0
+      }
+      for (let d = new Date(prevMonthStart); d <= prevMonthEnd; d = addDays(d, 1)) {
+        const key = toIsoDate(d)
+        prevServiceRevenue += prevMaps.service.get(key) || 0
+        prevProductRevenue += prevMaps.product.get(key) || 0
+        prevBookingCount += prevMaps.bookings.get(key) || 0
+      }
+
+      const label = monthShortLabel(month)
+      pushTrendRow(trendRows, label, serviceRevenue, productRevenue, bookingCount)
+      pushTrendRow(revenuePrevRows, label, prevServiceRevenue, prevProductRevenue, prevBookingCount)
     }
   }
+
+  ordersTrendRows = trendRows.map((x) => ({
+    label: x.label,
+    orders: Number(x.bookingCount || 0),
+    orderRevenue: Number(x.revenueOrder || 0),
+  }))
 
   const ordersByStatusRes = await query(
     `SELECT COALESCE(Status, 'Unknown') AS StatusName, COUNT(1) AS Cnt
@@ -585,6 +844,7 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
 
   const staffPerfRes = await query(
     `SELECT TOP 5
+        st.StaffId,
         su.Name AS StaffName,
         su.AvatarUrl AS StaffAvatarUrl,
         COUNT(bs.BookingServiceId) AS Appts,
@@ -597,12 +857,47 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
       LEFT JOIN Staff st ON st.StaffId = bs.StaffId
       LEFT JOIN Users su ON su.UserId = st.UserId
       WHERE CAST(b.BookingTime AS date) BETWEEN @s AND @e
-      GROUP BY su.Name, su.AvatarUrl
+      GROUP BY st.StaffId, su.Name, su.AvatarUrl
       ORDER BY Revenue DESC`,
     { s: currentStartIso, e: currentEndIso }
   ).catch(() => ({ recordset: [] }))
 
+  const staffReviewFeatureRes = hasBookingReviews
+    ? await query(
+      `WITH StaffReview AS (
+         SELECT
+           sbs.StaffId,
+           CAST(br.Rating AS FLOAT) AS Rating,
+           COALESCE(br.Comment, '') AS Comment,
+           br.CreatedAt,
+           ROW_NUMBER() OVER (
+             PARTITION BY sbs.StaffId
+             ORDER BY CASE WHEN CAST(br.Rating AS FLOAT) <= 2 THEN 0 ELSE 1 END, br.CreatedAt DESC
+           ) AS Rn,
+           AVG(CAST(br.Rating AS FLOAT)) OVER (PARTITION BY sbs.StaffId) AS AvgRating
+         FROM BookingReviews br
+         INNER JOIN Bookings b ON b.BookingId = br.BookingId
+         INNER JOIN (
+           SELECT DISTINCT BookingId, StaffId
+           FROM BookingServices
+           WHERE StaffId IS NOT NULL
+         ) sbs ON sbs.BookingId = b.BookingId
+         WHERE br.Rating IS NOT NULL
+       )
+       SELECT StaffId, AvgRating, Rating AS FeaturedRating, Comment AS FeaturedComment
+       FROM StaffReview
+       WHERE Rn = 1`
+    ).catch(() => ({ recordset: [] }))
+    : { recordset: [] }
+
+  const staffReviewMap = new Map((staffReviewFeatureRes.recordset || []).map((r) => [String(r.StaffId || ''), {
+    avgRating: Number(Number(r.AvgRating || 0).toFixed(1)),
+    featuredReviewRating: Number(r.FeaturedRating || 0),
+    featuredReview: String(r.FeaturedComment || ''),
+  }]))
+
   const staffPerformance = (staffPerfRes.recordset || []).map((r, idx) => ({
+    staffId: r.StaffId,
     rank: idx + 1,
     name: r.StaffName || '',
     avatarUrl: r.StaffAvatarUrl || '',
@@ -611,6 +906,9 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
     revenue: toMoney(r.Revenue),
     utilizationPct: Math.min(100, Math.round((Number(r.Appts || 0) / Math.max(1, meta.days * 8)) * 100)),
     efficiencyPct: Math.min(100, Math.round((Number(r.Appts || 0) / Math.max(1, Number(r.ActiveDays || 0) * 8)) * 100)),
+    avgRating: Number(staffReviewMap.get(String(r.StaffId || ''))?.avgRating || 0),
+    featuredReviewRating: Number(staffReviewMap.get(String(r.StaffId || ''))?.featuredReviewRating || 0),
+    featuredReview: String(staffReviewMap.get(String(r.StaffId || ''))?.featuredReview || ''),
   }))
 
   const invAlertRes = await query(
@@ -631,6 +929,7 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
 
   const topCustomersRes = await query(
     `SELECT TOP 5
+        b.CustomerUserId,
         cu.Name AS CustomerName,
         COUNT(DISTINCT b.BookingId) AS Visits,
         SUM(COALESCE(bs.Price, sv.Price)) AS Spending,
@@ -640,10 +939,40 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
       LEFT JOIN BookingServices bs ON bs.BookingId = b.BookingId
       LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
       WHERE b.CustomerUserId IS NOT NULL AND CAST(b.BookingTime AS date) BETWEEN @s AND @e
-      GROUP BY cu.Name
+      GROUP BY b.CustomerUserId, cu.Name
       ORDER BY Spending DESC`,
     { s: currentStartIso, e: currentEndIso }
   ).catch(() => ({ recordset: [] }))
+
+  const customerReviewFeatureRes = hasBookingReviews
+    ? await query(
+      `WITH CustomerReview AS (
+         SELECT
+           b.CustomerUserId,
+           CAST(br.Rating AS FLOAT) AS Rating,
+           COALESCE(br.Comment, '') AS Comment,
+           br.CreatedAt,
+           ROW_NUMBER() OVER (
+             PARTITION BY b.CustomerUserId
+             ORDER BY CASE WHEN CAST(br.Rating AS FLOAT) <= 2 THEN 0 ELSE 1 END, br.CreatedAt DESC
+           ) AS Rn,
+           AVG(CAST(br.Rating AS FLOAT)) OVER (PARTITION BY b.CustomerUserId) AS AvgRating
+         FROM BookingReviews br
+         INNER JOIN Bookings b ON b.BookingId = br.BookingId
+         WHERE b.CustomerUserId IS NOT NULL
+           AND br.Rating IS NOT NULL
+       )
+       SELECT CustomerUserId, AvgRating, Rating AS FeaturedRating, Comment AS FeaturedComment
+       FROM CustomerReview
+       WHERE Rn = 1`
+    ).catch(() => ({ recordset: [] }))
+    : { recordset: [] }
+
+  const customerReviewMap = new Map((customerReviewFeatureRes.recordset || []).map((r) => [String(r.CustomerUserId || ''), {
+    avgRating: Number(Number(r.AvgRating || 0).toFixed(1)),
+    featuredReviewRating: Number(r.FeaturedRating || 0),
+    featuredReview: String(r.FeaturedComment || ''),
+  }]))
 
   const now = new Date()
   const topCustomers = (topCustomersRes.recordset || []).map((r) => {
@@ -651,7 +980,9 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
     const visits = Number(r.Visits || 0)
     const lastVisitDate = String(r.LastVisit || '').slice(0, 10)
     const diffDays = lastVisitDate ? Math.floor((now - new Date(lastVisitDate)) / (24 * 60 * 60 * 1000)) : null
+    const reviewMeta = customerReviewMap.get(String(r.CustomerUserId || '')) || {}
     return {
+      customerUserId: String(r.CustomerUserId || ''),
       name: r.CustomerName || 'Unknown',
       spending,
       visits,
@@ -660,12 +991,16 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
       lastVisitDaysAgo: diffDays,
       vip: spending >= 5_000_000,
       atRisk: diffDays !== null && diffDays > 14,
+      avgRating: Number(reviewMeta.avgRating || 0),
+      featuredReviewRating: Number(reviewMeta.featuredReviewRating || 0),
+      featuredReview: String(reviewMeta.featuredReview || ''),
     }
   })
 
   const revenueByServiceRes = await query(
     `SELECT TOP 6
         sv.Name AS ServiceName,
+        COUNT(1) AS BookingCount,
         SUM(COALESCE(bs.Price, sv.Price)) AS Revenue
       FROM BookingServices bs
       LEFT JOIN Bookings b ON b.BookingId = bs.BookingId
@@ -678,6 +1013,7 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
 
   const revenueByService = (revenueByServiceRes.recordset || []).map((r) => ({
     name: r.ServiceName || 'Unknown',
+    bookings: Number(r.BookingCount || 0),
     revenue: toMoney(r.Revenue),
   }))
 
@@ -700,6 +1036,62 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
     sold: Number(r.QtySold || 0),
     revenue: toMoney(r.Revenue),
   }))
+
+  const productReviewSummaryRes = await query(
+    `SELECT
+        SUM(CASE WHEN CAST(Rating AS INT) >= 4 THEN 1 ELSE 0 END) AS PositiveCnt,
+        SUM(CASE WHEN CAST(Rating AS INT) = 3 THEN 1 ELSE 0 END) AS NeutralCnt,
+        SUM(CASE WHEN CAST(Rating AS INT) <= 2 THEN 1 ELSE 0 END) AS NegativeCnt,
+        COUNT(1) AS TotalCnt,
+        AVG(CAST(Rating AS FLOAT)) AS AvgRating
+      FROM SalonReviews
+      WHERE ProductId IS NOT NULL
+        AND Rating IS NOT NULL
+        AND CAST(CreatedAt AS date) BETWEEN @s AND @e`,
+    { s: currentStartIso, e: currentEndIso }
+  ).catch(() => ({ recordset: [{ PositiveCnt: 0, NeutralCnt: 0, NegativeCnt: 0, TotalCnt: 0, AvgRating: 0 }] }))
+
+  const productReviewListRes = await query(
+    `SELECT TOP 16
+        sr.ReviewId,
+        sr.Rating,
+        sr.Comment,
+        sr.CreatedAt,
+        COALESCE(u.Name, 'Unknown User') AS CustomerName,
+        COALESCE(p.Name, 'Unknown Product') AS ProductName
+      FROM SalonReviews sr
+      LEFT JOIN Users u ON u.UserId = sr.UserId
+      LEFT JOIN Products p ON p.ProductId = sr.ProductId
+      WHERE sr.ProductId IS NOT NULL
+        AND sr.Rating IS NOT NULL
+        AND sr.Comment IS NOT NULL
+        AND LTRIM(RTRIM(sr.Comment)) <> ''
+        AND CAST(sr.CreatedAt AS date) BETWEEN @s AND @e
+      ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC`,
+    { s: currentStartIso, e: currentEndIso }
+  ).catch(() => ({ recordset: [] }))
+
+  const productReviewSummary = {
+    positive: Number(productReviewSummaryRes.recordset?.[0]?.PositiveCnt || 0),
+    neutral: Number(productReviewSummaryRes.recordset?.[0]?.NeutralCnt || 0),
+    negative: Number(productReviewSummaryRes.recordset?.[0]?.NegativeCnt || 0),
+    total: Number(productReviewSummaryRes.recordset?.[0]?.TotalCnt || 0),
+    avgRating: Number(Number(productReviewSummaryRes.recordset?.[0]?.AvgRating || 0).toFixed(1)),
+  }
+
+  const productReviewItems = (productReviewListRes.recordset || []).map((r) => {
+    const rating = Number(r.Rating || 0)
+    const sentiment = rating >= 4 ? 'positive' : rating <= 2 ? 'negative' : 'neutral'
+    return {
+      reviewId: String(r.ReviewId || ''),
+      rating,
+      sentiment,
+      comment: String(r.Comment || ''),
+      customerName: String(r.CustomerName || 'Unknown User'),
+      productName: String(r.ProductName || 'Unknown Product'),
+      createdAt: toSqlDateKey(r.CreatedAt),
+    }
+  })
 
   const peakHoursRes = await query(
     `SELECT DATEPART(HOUR, BookingTime) AS H, COUNT(1) AS Cnt
@@ -732,6 +1124,7 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
   const appointmentsProgress = Math.min(100, Math.round((apptsCurrent / Math.max(1, targetSet.appointments)) * 100))
   const utilizationProgress = Math.min(100, Math.round((utilizationPct / Math.max(1, targetSet.utilization)) * 100))
   const avgRevProgress = Math.min(100, Math.round((avgRevenuePerCustomer / Math.max(1, targetSet.avgRevenuePerCustomer)) * 100))
+  const avgRevenuePerBooking = apptsCurrent > 0 ? Math.round(bookingRevenueCurrent / apptsCurrent) : 0
 
   const insights = []
   if (revenueDeltaPct > 0) {
@@ -742,6 +1135,12 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
   }
   if (revenueDeltaPct < 0) {
     insights.push({ level: 'warning', text: `Revenue dropped by ${Math.abs(revenueDeltaPct)}% in ${meta.label}.`, actionLabel: 'Start a recovery campaign', actionHref: '/portals/owner/appointments' })
+  }
+  if (revenueDeltaPct !== 0) {
+    const driver = Math.abs(apptsDeltaPct) >= Math.abs(ordersDeltaPct)
+      ? `${apptsDeltaPct >= 0 ? 'more' : 'fewer'} bookings (${apptsDeltaPct}%)`
+      : `${ordersDeltaPct >= 0 ? 'more' : 'fewer'} product orders (${ordersDeltaPct}%)`
+    insights.push({ level: 'neutral', text: `Primary revenue driver: ${driver}.`, actionLabel: 'Open revenue breakdown', actionHref: '/portals/owner/reports' })
   }
   if (utilizationPct < 60) {
     insights.push({ level: 'warning', text: `Schedule utilization is low (${utilizationPct}%).`, actionLabel: 'Fill off-peak slots', actionHref: '/portals/owner/schedule' })
@@ -773,11 +1172,23 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
     insights.push({ level: 'neutral', text: `Returning customer rate is low (${returningPct}%).`, actionLabel: 'Launch a retention campaign', actionHref: '/portals/owner/customers' })
   }
 
+  if (productReviewSummary.negative > 0) {
+    insights.push({
+      level: 'warning',
+      text: `${productReviewSummary.negative} negative product review(s) need attention.`,
+      actionLabel: 'Review customer feedback',
+      actionHref: '/portals/owner/products',
+    })
+  }
+
   let summary = ''
 
   const kpis = {
     revenue: {
       value: revenueCurrent,
+      bookingRevenue: bookingRevenueCurrent,
+      productRevenue: orderRevenueCurrent,
+      avgRevenuePerBooking,
       target: targetSet.revenue,
       progressPct: revenueProgress,
       deltaPct: revenueDeltaPct,
@@ -785,15 +1196,6 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
       context: 'vs previous period',
       status: statusFromTrend(trendFromDelta(revenueDeltaPct)),
       prominent: true,
-    },
-    orders: {
-      value: ordersCurrent,
-      target: targetSet.orders,
-      progressPct: ordersProgress,
-      deltaPct: ordersDeltaPct,
-      trend: trendFromDelta(ordersDeltaPct),
-      context: 'vs previous period',
-      status: statusFromTrend(trendFromDelta(ordersDeltaPct)),
     },
     appointments: {
       value: apptsCurrent,
@@ -806,14 +1208,33 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
     },
     customers: {
       value: customersCurrent,
+      active30Days: activeCustomers30,
+      inactive: inactiveCustomers,
+      newCustomers: newCnt,
       deltaPct: 0,
       trend: 'flat',
       context: 'customers in selected period',
       status: 'neutral',
     },
+    bookings: {
+      value: todayStatusBreakdown.total,
+      pending: todayStatusBreakdown.pending,
+      booked: todayStatusBreakdown.booked,
+      completed: todayStatusBreakdown.completed,
+      canceled: todayStatusBreakdown.canceled,
+      context: 'today booking status mix',
+      status: todayStatusBreakdown.canceled > 0 ? 'warning' : 'good',
+    },
+    retention: {
+      returningRatePct: returningPct,
+      avgVisitsPerCustomerPerMonth,
+      context: 'last 30 days',
+      status: returningPct >= 60 ? 'good' : returningPct >= 40 ? 'neutral' : 'warning',
+    },
     lowStock: {
       value: lowStock,
       critical: lowStockCritical,
+      totalValue: inventoryTotalValue,
       deltaPct: 0,
       trend: lowStock > 0 ? 'down' : 'flat',
       context: 'needs restock',
@@ -840,6 +1261,8 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
     },
     pendingOrders: {
       value: pendingOrders,
+      todayTotalOrders: todayOrders,
+      todayProductRevenue,
       deltaPct: pendingOrdersDeltaPct,
       trend: trendFromDelta(pendingOrdersDeltaPct, true),
       context: `vs previous period (${pendingOrdersPrev})`,
@@ -861,23 +1284,66 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
       context: 'average salon rating vs previous period',
       status: ratingCurrent >= 4.5 ? 'good' : ratingCurrent >= 3.5 ? 'neutral' : ratingCurrent > 0 ? 'warning' : 'neutral',
     },
+    inventory: {
+      lowStockCount: lowStock,
+      criticalCount: lowStockCritical,
+      totalValue: inventoryTotalValue,
+      status: lowStockCritical > 0 ? 'critical' : lowStock > 0 ? 'warning' : 'good',
+      context: 'current stock health',
+    },
+    orders: {
+      value: ordersCurrent,
+      todayTotalOrders: todayOrders,
+      productRevenue: todayProductRevenue,
+      deltaPct: ordersDeltaPct,
+      trend: trendFromDelta(ordersDeltaPct),
+      context: 'orders in selected period',
+      status: statusFromTrend(trendFromDelta(ordersDeltaPct)),
+    },
   }
 
   return {
     period: meta.period,
+    revenueMeta: {
+      chartType: 'stacked-bar',
+      groupBy: meta.period === 'week' ? 'week' : meta.period === 'year' ? 'month' : 'day',
+      bucketCount: trendRows.length,
+    },
     summary,
     kpis,
     revenueData: { day: trendRows, week: trendRows, month: trendRows, year: trendRows },
     revenuePreviousData: { day: revenuePrevRows, week: revenuePrevRows, month: revenuePrevRows, year: revenuePrevRows },
     appointmentsTrend: { day: trendRows, week: trendRows, month: trendRows, year: trendRows },
     ordersTrend: { day: ordersTrendRows, week: ordersTrendRows, month: ordersTrendRows, year: ordersTrendRows },
+    revenueBreakdown: {
+      services: bookingRevenueCurrent,
+      products: orderRevenueCurrent,
+    },
+    bookingStatus: {
+      pending: todayStatusBreakdown.pending,
+      booked: todayStatusBreakdown.booked,
+      completed: todayStatusBreakdown.completed,
+      canceled: todayStatusBreakdown.canceled,
+    },
     ordersByStatus,
     recentAppointments,
+    todaySchedule,
+    staffAvailability,
     staffPerformance,
     inventoryAlerts,
+    topServices: revenueByService,
+    topProducts: productPerformance,
+    customerOverview: {
+      newCustomers: newCnt,
+      returningCustomers: returningCnt,
+    },
     topCustomers,
     revenueByService,
     productPerformance,
+    productReviewInsights: {
+      summary: productReviewSummary,
+      reviews: productReviewItems,
+    },
     bookingHeatmap,
     insights,
     actions: [
