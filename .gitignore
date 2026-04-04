@@ -1,8 +1,36 @@
-# Ignore environment files and local config
+# Node modules
+node_modules/
+my-node-app/node_modules/
+my-app/node_modules/
+
+# Env files
 *.env
 my-node-app/.env
 my-app/.env
 .env
+.env.local
+.env.*.local
+
+# Uploads / user content
+uploads/
+my-node-app/uploads/
+my-app/uploads/
+
+# Builds
+dist/
+build/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+
+# Editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Ignore local config variants
 **/config/local*

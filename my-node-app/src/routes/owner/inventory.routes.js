@@ -10,5 +10,10 @@ router.put('/inventory/items/:id', requireAuth, controller.putInventoryItem)
 router.delete('/inventory/items/:id', requireAuth, controller.deleteInventoryItem)
 router.post('/inventory/stock', requireAuth, controller.postInventoryStockIn)
 router.post('/inventory/stock-out', requireAuth, controller.postInventoryStockOut)
+router.post('/inventory/fifo-preview', requireAuth, controller.postInventoryFifoPreview)
+router.put('/inventory/lots/:lotId', requireAuth, controller.putInventoryLot)
+router.delete('/inventory/lots/:lotId', requireAuth, controller.deleteInventoryLot)
+router.get('/inventory/import-template', requireAuth, controller.getInventoryImportTemplate)
+router.post('/inventory/import-excel', requireAuth, controller.postInventoryImportExcel)
 
 module.exports = router
