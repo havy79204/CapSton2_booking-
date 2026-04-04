@@ -1729,10 +1729,11 @@ async function dispatchOwnerInsights(options = {}) {
            bs.StaffId,
            AVG(CAST(br.Rating AS FLOAT)) AS AvgRating,
            COUNT(1) AS ReviewCount
-         FROM BookingReviews br
+         FROM SalonReviews br
          INNER JOIN BookingServices bs ON bs.BookingId = br.BookingId
          INNER JOIN Bookings b ON b.BookingId = br.BookingId
          WHERE bs.StaffId IS NOT NULL
+           AND br.BookingId IS NOT NULL
            AND br.Rating IS NOT NULL
            AND b.BookingTime >= DATEADD(DAY, -30, SYSUTCDATETIME())
          GROUP BY bs.StaffId

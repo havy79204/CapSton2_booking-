@@ -9,6 +9,7 @@ import {
 } from 'react-icons/io5'
 import { useCustomerCart } from '../hooks/useCustomerCommerce'
 import { useCustomerContext } from '../hooks/useCustomerCommerce'
+import { formatVnd } from '../lib/currency'
 import '../styles/CartPage.css'
 
 const CartPage = () => {
@@ -82,7 +83,7 @@ const CartPage = () => {
   }, [appliedPromotion, subtotal])
 
   const tax = (subtotal - discount) * 0.1
-  const shipping = selectedCount > 0 ? 3 : 0
+  const shipping = selectedCount > 0 ? 30000 : 0
   const total = subtotal - discount + tax + shipping
 
   const applyPromotionCode = () => {
@@ -282,7 +283,7 @@ const CartPage = () => {
                       <div className="cart-item-info">
                         <h4>{item.Name}</h4>
                         <p>{item.Description}</p>
-                        <strong>${Number(item.Price || 0).toFixed(2)} USD</strong>
+                        <strong>{formatVnd(item.Price || 0)}</strong>
                       </div>
 
                       <div className="cart-item-actions">
@@ -307,7 +308,7 @@ const CartPage = () => {
 
               <div className="cart-total-footer">
                 <span>Total({selectedCount}) :</span>
-                <strong>${subtotal.toFixed(2)}</strong>
+                <strong>{formatVnd(subtotal)}</strong>
               </div>
             </div>
           </div>
@@ -316,15 +317,15 @@ const CartPage = () => {
             <h3>Order Summary</h3>
 
             <div className="summary-rows">
-              <div className="summary-row"><span>Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
-              <div className="summary-row discount"><span>Discount</span><span>-${discount.toFixed(2)}</span></div>
-              <div className="summary-row discount"><span>Tax (10%)</span><span>${tax.toFixed(2)}</span></div>
-              <div className="summary-row"><span>Shipping</span><span>${shipping.toFixed(2)}</span></div>
+              <div className="summary-row"><span>Subtotal</span><span>{formatVnd(subtotal)}</span></div>
+              <div className="summary-row discount"><span>Discount</span><span>- {formatVnd(discount)}</span></div>
+              <div className="summary-row discount"><span>Tax (10%)</span><span>{formatVnd(tax)}</span></div>
+              <div className="summary-row"><span>Shipping</span><span>{formatVnd(shipping)}</span></div>
             </div>
 
             <div className="summary-total-row">
               <span>Total</span>
-              <strong>${total.toFixed(2)}</strong>
+              <strong>{formatVnd(total)}</strong>
             </div>
 
             <div className="gift-code-box">
@@ -345,7 +346,7 @@ const CartPage = () => {
               <div className="sale-row">
                 <IoPricetagOutline />
                 <span>Sale</span>
-                <span>${discount.toFixed(2)}</span>
+                <span>{formatVnd(discount)}</span>
               </div>
             </div>
 

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { IoArrowBack, IoSearchOutline } from 'react-icons/io5';
 import { useProducts } from '../hooks/useHomepage';
+import { formatVnd } from '../lib/currency';
 import '../styles/CatalogPage.css';
 
 const ProductCatalogPage = () => {
@@ -101,7 +102,7 @@ const ProductCatalogPage = () => {
                 <h3>{product.Name}</h3>
                 <p>{product.Description}</p>
                 <div className="catalog-meta">
-                  <span className="catalog-price">${Number(product.Price || 0).toFixed(2)}</span>
+                  <span className="catalog-price">{formatVnd(product.Price || 0)}</span>
                   <span className="catalog-stock">{product.Stock} in stock</span>
                 </div>
               </div>
