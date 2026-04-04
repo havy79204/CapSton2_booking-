@@ -15,6 +15,7 @@ import {
 } from '../hooks/useCustomerCommerce'
 import PortalModal from '../components/Layout portal/PortalModal.jsx'
 import { api } from '../lib/api'
+import { formatVnd } from '../lib/currency'
 import '../styles/BookingPage.css'
 
 function parseTimeToMinutes(value) {
@@ -43,7 +44,7 @@ function formatPromotionType(promotion) {
   const type = String(promotion?.discountType || '').toLowerCase()
   const value = Number(promotion?.value || 0)
   if (type === 'percentage') return `${value}% off`
-  if (type === 'fixed') return `$${value.toFixed(2)} off`
+  if (type === 'fixed') return `${formatVnd(value)} off`
   return 'Promotion'
 }
 
@@ -581,7 +582,7 @@ const BookingPage = () => {
                           <span>{service.quantity}</span>
                           <button onClick={() => changeServiceQuantity(service.ServiceId, 1)}>+</button>
                         </div>
-                        <span className="service-price-chip">From ${Number(service.Price || 0).toFixed(2)}</span>
+                        <span className="service-price-chip">From {formatVnd(service.Price || 0)}</span>
                       </div>
                     </div>
                   ))}
@@ -691,14 +692,14 @@ const BookingPage = () => {
                       <div className="summary-service-row" key={service.ServiceId}>
                         <span>{service.Name}{service.quantity > 1 ? ` x${service.quantity}` : ''}</span>
                         <span>{Number(service.DurationMinutes || 0) * Number(service.quantity || 0)} min</span>
-                        <span>${(Number(service.Price || 0) * Number(service.quantity || 0)).toFixed(2)}</span>
+                        <span>{formatVnd((Number(service.Price || 0) * Number(service.quantity || 0)))}</span>
                       </div>
                     ))
                   )}
                 </div>
 
                 <div className="total-lines">
-                  <div><span>Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
+                  <div><span>Subtotal</span><span>{formatVnd(subtotal)}</span></div>
                   <div><span>Duration</span><span>{totalDuration} min</span></div>
                 </div>
 
@@ -752,7 +753,7 @@ const BookingPage = () => {
 
                 <div className="discount-row">
                   <span><IoTicketOutline /> Sale</span>
-                  <span>-${discount.toFixed(2)}</span>
+                  <span>- {formatVnd(discount)}</span>
                 </div>
 
                 {appliedPromotion ? (
@@ -768,7 +769,7 @@ const BookingPage = () => {
 
                 <div className="booking-total-row">
                   <strong>Total</strong>
-                  <strong>${total.toFixed(2)}</strong>
+                  <strong>{formatVnd(total)}</strong>
                 </div>
               </div>
 

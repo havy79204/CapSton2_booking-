@@ -1,8 +1,12 @@
 const { getPool, sql } = require('./db')
 
-async function query(text, bind = {}) {
+async function query(text, bind = {}, options = {}) {
   const pool = await getPool()
   const req = pool.request()
+  const timeoutMs = Number(options.timeoutMs || 0)
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    req.timeout = timeoutMs
+  }
   for (const [key, value] of Object.entries(bind || {})) {
     req.input(key, value)
   }

@@ -535,10 +535,39 @@ async function getProduct(productId) {
           : 'CAST(0 AS INT)'} AS SoldCount,
         ${schema.hasSalonReviews && schema.salonReviewsHasProductId && schema.salonReviewsHasRating
           ? `(
-              SELECT AVG(CAST(sr.Rating AS FLOAT))
-              FROM SalonReviews sr
-              WHERE sr.ProductId = p.ProductId
-                AND sr.Rating IS NOT NULL
+              SELECT AVG(CAST(src.Rating AS FLOAT))
+              FROM (
+                SELECT COALESCE(pr.Rating, orr.Rating) AS Rating
+                FROM OrderItems oi
+                OUTER APPLY (
+                  SELECT TOP 1 sr.Rating
+                  FROM SalonReviews sr
+                  WHERE sr.ProductId = oi.ProductId
+                    AND sr.OrderItemId = oi.OrderItemId
+                    AND sr.Rating IS NOT NULL
+                  ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC
+                ) pr
+                OUTER APPLY (
+                  SELECT TOP 1 sr.Rating
+                  FROM SalonReviews sr
+                  WHERE sr.OrderId = oi.OrderId
+                    AND sr.OrderItemId IS NULL
+                    AND sr.ServiceId IS NULL
+                    AND sr.Rating IS NOT NULL
+                  ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC
+                ) orr
+                WHERE oi.ProductId = p.ProductId
+
+                UNION ALL
+
+                SELECT sr.Rating
+                FROM SalonReviews sr
+                WHERE sr.ProductId = p.ProductId
+                  AND sr.OrderItemId IS NULL
+                  AND sr.OrderId IS NULL
+                  AND sr.Rating IS NOT NULL
+              ) src
+              WHERE src.Rating IS NOT NULL
             )`
           : 'CAST(NULL AS FLOAT)'} AS AverageRating,
         p.CategoryId,
@@ -1047,10 +1076,39 @@ async function listRetailProducts() {
           : 'CAST(0 AS INT)'} AS SoldCount,
         ${schema.hasSalonReviews && schema.salonReviewsHasProductId && schema.salonReviewsHasRating
           ? `(
-              SELECT AVG(CAST(sr.Rating AS FLOAT))
-              FROM SalonReviews sr
-              WHERE sr.ProductId = p.ProductId
-                AND sr.Rating IS NOT NULL
+              SELECT AVG(CAST(src.Rating AS FLOAT))
+              FROM (
+                SELECT COALESCE(pr.Rating, orr.Rating) AS Rating
+                FROM OrderItems oi
+                OUTER APPLY (
+                  SELECT TOP 1 sr.Rating
+                  FROM SalonReviews sr
+                  WHERE sr.ProductId = oi.ProductId
+                    AND sr.OrderItemId = oi.OrderItemId
+                    AND sr.Rating IS NOT NULL
+                  ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC
+                ) pr
+                OUTER APPLY (
+                  SELECT TOP 1 sr.Rating
+                  FROM SalonReviews sr
+                  WHERE sr.OrderId = oi.OrderId
+                    AND sr.OrderItemId IS NULL
+                    AND sr.ServiceId IS NULL
+                    AND sr.Rating IS NOT NULL
+                  ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC
+                ) orr
+                WHERE oi.ProductId = p.ProductId
+
+                UNION ALL
+
+                SELECT sr.Rating
+                FROM SalonReviews sr
+                WHERE sr.ProductId = p.ProductId
+                  AND sr.OrderItemId IS NULL
+                  AND sr.OrderId IS NULL
+                  AND sr.Rating IS NOT NULL
+              ) src
+              WHERE src.Rating IS NOT NULL
             )`
           : 'CAST(NULL AS FLOAT)'} AS AverageRating,
         p.CategoryId,

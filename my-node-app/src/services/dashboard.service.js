@@ -168,7 +168,7 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
   const currentEndIso = toIsoDate(meta.currentEnd)
   const prevStartIso = toIsoDate(meta.prevStart)
   const prevEndIso = toIsoDate(meta.prevEnd)
-  const hasBookingReviews = await tableExists('BookingReviews')
+  const hasBookingReviews = await tableExists('SalonReviews')
 
   const todayScheduleSql = hasBookingReviews
     ? `SELECT
@@ -198,8 +198,9 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
            CAST(br.Rating AS FLOAT) AS ReviewRating,
            br.Comment AS ReviewComment,
            br.CreatedAt AS ReviewCreatedAt
-         FROM BookingReviews br
+         FROM SalonReviews br
          WHERE br.BookingId = b.BookingId
+           AND br.Rating IS NOT NULL
          ORDER BY br.CreatedAt DESC
        ) br
        WHERE CAST(b.BookingTime AS date) = @d
@@ -875,7 +876,7 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
              ORDER BY CASE WHEN CAST(br.Rating AS FLOAT) <= 2 THEN 0 ELSE 1 END, br.CreatedAt DESC
            ) AS Rn,
            AVG(CAST(br.Rating AS FLOAT)) OVER (PARTITION BY sbs.StaffId) AS AvgRating
-         FROM BookingReviews br
+         FROM SalonReviews br
          INNER JOIN Bookings b ON b.BookingId = br.BookingId
          INNER JOIN (
            SELECT DISTINCT BookingId, StaffId
@@ -957,7 +958,7 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
              ORDER BY CASE WHEN CAST(br.Rating AS FLOAT) <= 2 THEN 0 ELSE 1 END, br.CreatedAt DESC
            ) AS Rn,
            AVG(CAST(br.Rating AS FLOAT)) OVER (PARTITION BY b.CustomerUserId) AS AvgRating
-         FROM BookingReviews br
+         FROM SalonReviews br
          INNER JOIN Bookings b ON b.BookingId = br.BookingId
          WHERE b.CustomerUserId IS NOT NULL
            AND br.Rating IS NOT NULL
@@ -1038,36 +1039,111 @@ async function getDashboard(periodRaw = 'day', refs = {}) {
   }))
 
   const productReviewSummaryRes = await query(
-    `SELECT
-        SUM(CASE WHEN CAST(Rating AS INT) >= 4 THEN 1 ELSE 0 END) AS PositiveCnt,
-        SUM(CASE WHEN CAST(Rating AS INT) = 3 THEN 1 ELSE 0 END) AS NeutralCnt,
-        SUM(CASE WHEN CAST(Rating AS INT) <= 2 THEN 1 ELSE 0 END) AS NegativeCnt,
-        COUNT(1) AS TotalCnt,
-        AVG(CAST(Rating AS FLOAT)) AS AvgRating
-      FROM SalonReviews
-      WHERE ProductId IS NOT NULL
-        AND Rating IS NOT NULL
-        AND CAST(CreatedAt AS date) BETWEEN @s AND @e`,
+    `;WITH ItemEffective AS (
+       SELECT
+         oi.ProductId,
+         COALESCE(pr.Rating, orr.Rating) AS Rating,
+         COALESCE(pr.CreatedAt, orr.CreatedAt) AS CreatedAt
+       FROM OrderItems oi
+       OUTER APPLY (
+         SELECT TOP 1 sr.Rating, sr.CreatedAt
+         FROM SalonReviews sr
+         WHERE sr.ProductId = oi.ProductId
+           AND sr.OrderItemId = oi.OrderItemId
+           AND sr.Rating IS NOT NULL
+         ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC
+       ) pr
+       OUTER APPLY (
+         SELECT TOP 1 sr.Rating, sr.CreatedAt
+         FROM SalonReviews sr
+         WHERE sr.OrderId = oi.OrderId
+           AND sr.OrderItemId IS NULL
+           AND sr.ServiceId IS NULL
+           AND sr.Rating IS NOT NULL
+         ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC
+       ) orr
+       WHERE COALESCE(pr.Rating, orr.Rating) IS NOT NULL
+     ),
+     StandaloneProductReview AS (
+       SELECT sr.ProductId, sr.Rating, sr.CreatedAt
+       FROM SalonReviews sr
+       WHERE sr.ProductId IS NOT NULL
+         AND sr.OrderItemId IS NULL
+         AND sr.OrderId IS NULL
+         AND sr.Rating IS NOT NULL
+     ),
+     Effective AS (
+       SELECT ProductId, Rating, CreatedAt FROM ItemEffective
+       UNION ALL
+       SELECT ProductId, Rating, CreatedAt FROM StandaloneProductReview
+     )
+     SELECT
+       SUM(CASE WHEN CAST(Rating AS INT) >= 4 THEN 1 ELSE 0 END) AS PositiveCnt,
+       SUM(CASE WHEN CAST(Rating AS INT) = 3 THEN 1 ELSE 0 END) AS NeutralCnt,
+       SUM(CASE WHEN CAST(Rating AS INT) <= 2 THEN 1 ELSE 0 END) AS NegativeCnt,
+       COUNT(1) AS TotalCnt,
+       AVG(CAST(Rating AS FLOAT)) AS AvgRating
+     FROM Effective
+     WHERE CAST(CreatedAt AS date) BETWEEN @s AND @e`,
     { s: currentStartIso, e: currentEndIso }
   ).catch(() => ({ recordset: [{ PositiveCnt: 0, NeutralCnt: 0, NegativeCnt: 0, TotalCnt: 0, AvgRating: 0 }] }))
 
   const productReviewListRes = await query(
-    `SELECT TOP 16
-        sr.ReviewId,
-        sr.Rating,
-        sr.Comment,
-        sr.CreatedAt,
-        COALESCE(u.Name, 'Unknown User') AS CustomerName,
-        COALESCE(p.Name, 'Unknown Product') AS ProductName
-      FROM SalonReviews sr
-      LEFT JOIN Users u ON u.UserId = sr.UserId
-      LEFT JOIN Products p ON p.ProductId = sr.ProductId
-      WHERE sr.ProductId IS NOT NULL
-        AND sr.Rating IS NOT NULL
-        AND sr.Comment IS NOT NULL
-        AND LTRIM(RTRIM(sr.Comment)) <> ''
-        AND CAST(sr.CreatedAt AS date) BETWEEN @s AND @e
-      ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC`,
+    `;WITH ItemEffective AS (
+       SELECT
+         COALESCE(pr.ReviewId, orr.ReviewId) AS ReviewId,
+         COALESCE(pr.UserId, orr.UserId) AS UserId,
+         oi.ProductId,
+         COALESCE(pr.Rating, orr.Rating) AS Rating,
+         COALESCE(pr.Comment, orr.Comment) AS Comment,
+         COALESCE(pr.CreatedAt, orr.CreatedAt) AS CreatedAt
+       FROM OrderItems oi
+       OUTER APPLY (
+         SELECT TOP 1 sr.ReviewId, sr.UserId, sr.Rating, sr.Comment, sr.CreatedAt
+         FROM SalonReviews sr
+         WHERE sr.ProductId = oi.ProductId
+           AND sr.OrderItemId = oi.OrderItemId
+           AND sr.Rating IS NOT NULL
+         ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC
+       ) pr
+       OUTER APPLY (
+         SELECT TOP 1 sr.ReviewId, sr.UserId, sr.Rating, sr.Comment, sr.CreatedAt
+         FROM SalonReviews sr
+         WHERE sr.OrderId = oi.OrderId
+           AND sr.OrderItemId IS NULL
+           AND sr.ServiceId IS NULL
+           AND sr.Rating IS NOT NULL
+         ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC
+       ) orr
+       WHERE COALESCE(pr.Rating, orr.Rating) IS NOT NULL
+     ),
+     StandaloneProductReview AS (
+       SELECT sr.ReviewId, sr.UserId, sr.ProductId, sr.Rating, sr.Comment, sr.CreatedAt
+       FROM SalonReviews sr
+       WHERE sr.ProductId IS NOT NULL
+         AND sr.OrderItemId IS NULL
+         AND sr.OrderId IS NULL
+         AND sr.Rating IS NOT NULL
+     ),
+     Effective AS (
+       SELECT ReviewId, UserId, ProductId, Rating, Comment, CreatedAt FROM ItemEffective
+       UNION ALL
+       SELECT ReviewId, UserId, ProductId, Rating, Comment, CreatedAt FROM StandaloneProductReview
+     )
+     SELECT TOP 16
+       ef.ReviewId,
+       ef.Rating,
+       ef.Comment,
+       ef.CreatedAt,
+       COALESCE(u.Name, 'Unknown User') AS CustomerName,
+       COALESCE(p.Name, 'Unknown Product') AS ProductName
+     FROM Effective ef
+     LEFT JOIN Users u ON u.UserId = ef.UserId
+     LEFT JOIN Products p ON p.ProductId = ef.ProductId
+     WHERE ef.Comment IS NOT NULL
+       AND LTRIM(RTRIM(ef.Comment)) <> ''
+       AND CAST(ef.CreatedAt AS date) BETWEEN @s AND @e
+     ORDER BY ef.CreatedAt DESC, ef.ReviewId DESC`,
     { s: currentStartIso, e: currentEndIso }
   ).catch(() => ({ recordset: [] }))
 
