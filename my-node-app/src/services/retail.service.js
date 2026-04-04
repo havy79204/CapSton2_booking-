@@ -65,6 +65,7 @@ async function getSchemaInfo() {
       productsHasCategoryId,
       inventoryHasCategoryId,
       hasProductCategories,
+      hasProductVariants,
       ordersHasChannel,
       ordersHasCannel,
       hasOrderItems,
@@ -77,6 +78,7 @@ async function getSchemaInfo() {
       columnExists('Products', 'CategoryId'),
       columnExists('InventoryItems', 'CategoryId'),
       tableExists('ProductCategories'),
+      tableExists('ProductVariants'),
       columnExists('Orders', 'Channel'),
       columnExists('Orders', 'Cannel'),
       tableExists('OrderItems'),
@@ -93,6 +95,7 @@ async function getSchemaInfo() {
       productsHasCategoryId,
       inventoryHasCategoryId,
       hasProductCategories,
+      hasProductVariants,
       hasProductImages,
       ordersHasChannel,
       ordersHasCannel,
@@ -208,6 +211,78 @@ async function resolveCategoryIdFromPayload(payload) {
 
 function retailShadowId(productId) {
   return `retail_${String(productId ?? '').trim()}`
+}
+
+function retailVariantShadowId(variantId) {
+  return `retail_variant_${String(variantId ?? '').trim()}`
+}
+
+const DEFAULT_RETAIL_VARIANT_NAME = 'Default'
+
+async function syncVariantShadowFromVariant(variantId, { priceVndHint = null } = {}) {
+  const id = String(variantId || '').trim()
+  if (!id) return
+
+  const schema = await getSchemaInfo()
+  if (!schema.inventoryHasCategoryId) return
+
+  const variant = await query(
+    `SELECT TOP 1
+       pv.VariantId,
+       pv.VariantName,
+       COALESCE(pv.Stock, 0) AS VariantStock,
+       p.ProductId,
+       p.Name AS ProductName,
+       p.CategoryId,
+       COALESCE(p.Stock, 0) AS ProductStock
+     FROM ProductVariants pv
+     INNER JOIN Products p ON p.ProductId = pv.ProductId
+     WHERE pv.VariantId = @id`,
+    { id }
+  )
+  const row = variant.recordset?.[0]
+  if (!row) return
+
+  const variantShadowId = retailVariantShadowId(row.VariantId)
+
+  await query(
+    `IF NOT EXISTS (SELECT 1 FROM InventoryItems WHERE InventoryItemId = @variantShadowId)
+     BEGIN
+       INSERT INTO InventoryItems (InventoryItemId, ProductId, CategoryId, Name, Unit, ConversionRate, Quantity, ReorderLevel, PriceVnd, ItemGroup)
+       VALUES (
+         @variantShadowId,
+         NULL,
+         @categoryId,
+         @variantDisplayName,
+         'sp',
+         1,
+         @variantQty,
+         0,
+         @priceVndHint,
+         'service'
+       )
+     END
+     ELSE
+     BEGIN
+       UPDATE InventoryItems
+       SET
+        ProductId = NULL,
+         CategoryId = COALESCE(@categoryId, CategoryId),
+         Name = COALESCE(@variantDisplayName, Name),
+         Quantity = @variantQty,
+         PriceVnd = COALESCE(@priceVndHint, PriceVnd),
+         ItemGroup = 'service'
+       WHERE InventoryItemId = @variantShadowId
+     END`,
+    {
+      variantShadowId,
+      productId: row.ProductId,
+      categoryId: row.CategoryId ?? null,
+      variantDisplayName: `${String(row.ProductName || '').trim()} - ${String(row.VariantName || '').trim()}`.trim(),
+      variantQty: Number(row.VariantStock || 0),
+      priceVndHint: Number.isFinite(Number(priceVndHint)) ? Number(priceVndHint) : null,
+    }
+  )
 }
 
 function parseMoneyVnd(value) {
@@ -412,6 +487,9 @@ async function uploadProductImageFromDataUrl({ dataUrl } = {}) {
 }
 
 async function listVariants(productId) {
+  const schema = await getSchemaInfo()
+  if (!schema.hasProductVariants) return []
+
   const res = await query(
     `SELECT VariantId, ProductId, VariantName, Stock
      FROM ProductVariants
@@ -532,6 +610,9 @@ async function getProductStock(productId) {
 }
 
 async function getVariantsTotalStock(productId, excludeVariantId) {
+  const schema = await getSchemaInfo()
+  if (!schema.hasProductVariants) return 0
+
   const whereExclude = excludeVariantId ? ' AND VariantId <> @excludeId' : ''
   const res = await query(
     `SELECT COALESCE(SUM(COALESCE(Stock, 0)), 0) AS Total
@@ -549,6 +630,13 @@ function throwInsufficientStock() {
 }
 
 async function createVariant(productId, payload) {
+  const schema = await getSchemaInfo()
+  if (!schema.hasProductVariants) {
+    const err = new Error('ProductVariants table not found')
+    err.status = 400
+    throw err
+  }
+
   if (!productId) {
     const err = new Error('Missing productId')
     err.status = 400
@@ -557,6 +645,21 @@ async function createVariant(productId, payload) {
 
   const { name, stock } = payload || {}
   const variantName = normalizeRequiredSafeText(name, 'variant name')
+
+  const existing = await query(
+    `SELECT TOP 1 VariantId
+     FROM ProductVariants
+     WHERE ProductId = @productId
+       AND LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), VariantName)))) = @name`,
+    {
+      productId,
+      name: variantName.toLowerCase(),
+    }
+  )
+  const existingVariantId = String(existing.recordset?.[0]?.VariantId || '').trim()
+  if (existingVariantId) {
+    return { id: existingVariantId }
+  }
 
   const st = parseOptionalInt(stock)
   const stValue = st === null ? 0 : st
@@ -585,10 +688,27 @@ async function createVariant(productId, payload) {
     }
   )
 
+  try {
+    await syncVariantShadowFromVariant(id)
+  } catch (err) {
+    console.warn('[retail.createVariant] variant created but shadow sync failed', {
+      variantId: id,
+      productId,
+      error: err?.message || err,
+    })
+  }
+
   return { id }
 }
 
 async function updateVariant(variantId, payload) {
+  const schema = await getSchemaInfo()
+  if (!schema.hasProductVariants) {
+    const err = new Error('ProductVariants table not found')
+    err.status = 400
+    throw err
+  }
+
   if (!variantId) {
     const err = new Error('Missing variantId')
     err.status = 400
@@ -641,10 +761,26 @@ async function updateVariant(variantId, payload) {
     }
   )
 
+  try {
+    await syncVariantShadowFromVariant(variantId)
+  } catch (err) {
+    console.warn('[retail.updateVariant] variant updated but shadow sync failed', {
+      variantId,
+      error: err?.message || err,
+    })
+  }
+
   return { id: variantId }
 }
 
 async function deleteVariant(variantId) {
+  const schema = await getSchemaInfo()
+  if (!schema.hasProductVariants) {
+    const err = new Error('ProductVariants table not found')
+    err.status = 400
+    throw err
+  }
+
   if (!variantId) {
     const err = new Error('Missing variantId')
     err.status = 400
@@ -652,7 +788,7 @@ async function deleteVariant(variantId) {
   }
 
   const current = await query(
-    `SELECT TOP 1 VariantId, ProductId
+    `SELECT TOP 1 VariantId, ProductId, COALESCE(Stock, 0) AS Stock
      FROM ProductVariants
      WHERE VariantId = @id`,
     { id: variantId }
@@ -664,6 +800,29 @@ async function deleteVariant(variantId) {
     throw err
   }
 
+  if (Number(row.Stock || 0) > 0) {
+    const err = new Error('Cannot delete variant with remaining stock')
+    err.status = 409
+    throw err
+  }
+
+  const shadowId = retailVariantShadowId(variantId)
+  const lotUsage = await query(
+    `SELECT TOP 1 LotId
+     FROM InventoryLots
+     WHERE InventoryItemId = @shadowId
+       AND COALESCE(RemainingQty, 0) > 0`,
+    { shadowId }
+  )
+  if (lotUsage.recordset?.length) {
+    const err = new Error('Cannot delete variant with active lots')
+    err.status = 409
+    throw err
+  }
+
+  await query('DELETE FROM InventoryTransactions WHERE InventoryItemId = @shadowId', { shadowId })
+  await query('DELETE FROM InventoryLots WHERE InventoryItemId = @shadowId', { shadowId })
+  await query('DELETE FROM InventoryItems WHERE InventoryItemId = @shadowId', { shadowId })
   await query('DELETE FROM ProductVariants WHERE VariantId = @id;', { id: variantId })
 
   return { id: variantId }
@@ -841,6 +1000,22 @@ async function updateRetailProduct(productId, payload) {
     }
   )
 
+  if (schema.hasProductVariants) {
+    await query(
+      `UPDATE iv
+       SET
+         ProductId = NULL,
+         CategoryId = p.CategoryId,
+        Name = LEFT(CONCAT(p.Name, N' - ', pv.VariantName), 120),
+         ItemGroup = 'service'
+       FROM InventoryItems iv
+       INNER JOIN ProductVariants pv ON iv.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+       INNER JOIN Products p ON p.ProductId = pv.ProductId
+       WHERE pv.ProductId = @id`,
+      { id: productId }
+    )
+  }
+
   return { id: productId }
 }
 async function listRetailProducts() {
@@ -883,6 +1058,9 @@ async function listRetailProducts() {
         c.Description AS CategoryDescription
      FROM Products p
      LEFT JOIN ProductCategories c ON c.CategoryId = p.CategoryId
+      WHERE p.Status IS NULL
+        OR LTRIM(RTRIM(CONVERT(NVARCHAR(50), p.Status))) = ''
+        OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), p.Status)))) IN ('active', 'inactive')
      ORDER BY p.Name ASC`
   )
 
@@ -898,7 +1076,12 @@ async function listRetailProducts() {
     stock: Number(row.Stock || 0),
     soldCount: Number(row.SoldCount || 0),
     averageRating: row.AverageRating === null || row.AverageRating === undefined ? null : Number(row.AverageRating),
-    status: row.Status ?? null,
+    status: (() => {
+      const raw = String(row.Status || '').trim().toLowerCase()
+      if (!raw) return 'active'
+      if (raw === 'active' || raw === 'inactive') return raw
+      return 'inactive'
+    })(),
     kind: row.CategoryName || '',
     categoryId: row.CategoryId ?? null,
     categoryName: row.CategoryName || '',
@@ -931,7 +1114,9 @@ async function deleteRetailProduct(productId) {
   const schema = await getSchemaInfo()
   const shadowId = retailShadowId(id)
 
-  await query('DELETE FROM ProductVariants WHERE ProductId = @id', { id })
+  if (schema.hasProductVariants) {
+    await query('DELETE FROM ProductVariants WHERE ProductId = @id', { id })
+  }
   if (schema.hasProductImages) {
     await query('DELETE FROM ProductImages WHERE ProductId = @id', { id })
   }
@@ -1046,6 +1231,10 @@ async function createRetailProduct(payload) {
     }
   )
 
+  if (schema.hasProductVariants) {
+    await createVariant(id, { name: DEFAULT_RETAIL_VARIANT_NAME, stock: 0 })
+  }
+
   return { id }
 }
 
@@ -1055,7 +1244,9 @@ async function listRetailMeta() {
   const statuses = await query(
     `SELECT DISTINCT LTRIM(RTRIM(Status)) AS Name
      FROM Products
-     WHERE Status IS NOT NULL AND LTRIM(RTRIM(Status)) <> ''
+     WHERE Status IS NOT NULL
+       AND LTRIM(RTRIM(Status)) <> ''
+       AND LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) IN ('active', 'inactive')
      ORDER BY LTRIM(RTRIM(Status)) ASC;`
   )
 
@@ -1401,6 +1592,10 @@ async function listRetailOrders(filters = {}) {
   const offset = (page - 1) * pageSize
 
   const built = buildOrderFilters(filters, 'o')
+  // By default, do not show orders in 'awaiting' state in the retail management listing
+  if (!filters || (filters.status === undefined || filters.status === null || String(filters.status || '').trim() === '')) {
+    built.whereSql = `${built.whereSql} AND LOWER(LTRIM(RTRIM(ISNULL(o.Status, 'pending')))) <> 'awaiting'`
+  }
   const orderBy = resolveOrderSort(filters.sortBy, filters.sortDir, 'o')
   const channelSelectFromOrders = schema.ordersHasChannel
     ? 'o.Channel AS Cannel'
