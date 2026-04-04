@@ -6,3 +6,19 @@ my-app/.env
 
 # Ignore local config variants
 **/config/local*
+
+# Ignore node_modules
+node_modules/
+*/node_modules/
+my-node-app/node_modules/
+my-app/node_modules/
+npm-debug.log
+package-lock.json
+yarn.lock
+
+# OS and IDE
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo

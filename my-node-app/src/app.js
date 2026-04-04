@@ -44,8 +44,7 @@ function createApp() {
       for (const tableName of requiredTables) {
         try {
           const tableRes = await pool.request().query(
-            `SELECT 1 as ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName`,
-            { tableName }
+            `SELECT 1 as ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '${tableName}' AND TABLE_CATALOG = DB_NAME()`
           )
           tables[tableName] = tableRes.recordset?.length > 0 ? 'exists' : 'missing'
         } catch (e) {
