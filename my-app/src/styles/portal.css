@@ -3174,7 +3174,7 @@ input[class*="search"]::placeholder {
   border-color: rgba(37, 99, 235, 0.2);
 }
 
-.portal-badge.canceled {
+.portal-badge.cancelled {
   background: rgba(56, 1, 1, 0.099);
   color: #d50303;
   border-color: rgba(167, 0, 0, 0.414);

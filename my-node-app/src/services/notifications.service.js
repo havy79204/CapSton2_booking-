@@ -654,7 +654,7 @@ function buildOwnerEventTemplate(eventKey, payload = {}) {
     },
     staff_shift_changed: {
       title: 'Staff shift changed',
-      body: payload.body || 'A staff shift was changed or canceled.',
+      body: payload.body || 'A staff shift was changed or cancelled.',
       category: 'hr',
       severity: 'warning',
       priority: 'medium',
@@ -1502,7 +1502,7 @@ async function dispatchOwnerInsights(options = {}) {
          INNER JOIN Bookings b ON b.BookingId = bs.BookingId
          WHERE b.BookingTime >= DATEADD(DAY, -1, SYSUTCDATETIME())
            AND b.BookingTime < DATEADD(DAY, 1, SYSUTCDATETIME())
-           AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, '')))) NOT IN ('cancelled', 'canceled', 'deleted')`,
+           AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, '')))) NOT IN ('cancelled', 'cancelled', 'deleted')`,
         {},
       )
 
@@ -1528,7 +1528,7 @@ async function dispatchOwnerInsights(options = {}) {
         `SELECT COUNT(1) AS BookingCount
          FROM Bookings
          WHERE CAST(BookingTime AS date) = CAST(SYSUTCDATETIME() AS date)
-           AND LOWER(LTRIM(RTRIM(ISNULL(Status, '')))) NOT IN ('cancelled', 'canceled', 'deleted')`,
+           AND LOWER(LTRIM(RTRIM(ISNULL(Status, '')))) NOT IN ('cancelled', 'cancelled', 'deleted')`,
         {},
       )
       const count = Number(todayRes.recordset?.[0]?.BookingCount || 0)
@@ -1552,7 +1552,7 @@ async function dispatchOwnerInsights(options = {}) {
          FROM BookingServices bs
          INNER JOIN Bookings b ON b.BookingId = bs.BookingId
          WHERE CAST(b.BookingTime AS date) = CAST(SYSUTCDATETIME() AS date)
-           AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, '')))) NOT IN ('cancelled', 'canceled', 'deleted')
+           AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, '')))) NOT IN ('cancelled', 'cancelled', 'deleted')
          GROUP BY bs.StaffId
          HAVING COUNT(1) >= 8
          ORDER BY COUNT(1) DESC`,
@@ -2078,7 +2078,7 @@ async function dispatchOwnerInsights(options = {}) {
            LEFT JOIN BookingServices bs ON bs.BookingId = b.BookingId
            LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
            WHERE b.BookingTime >= DATEADD(DAY, -14, SYSUTCDATETIME())
-             AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, '')))) NOT IN ('cancelled', 'canceled', 'deleted')
+             AND LOWER(LTRIM(RTRIM(ISNULL(b.Status, '')))) NOT IN ('cancelled', 'cancelled', 'deleted')
          )
          SELECT
            SUM(CASE WHEN IsPromo = 1 THEN 1 ELSE 0 END) AS PromoRows,
@@ -2280,7 +2280,7 @@ async function dispatchOwnerInsights(options = {}) {
         `SELECT COUNT(1) AS BookingCount
          FROM Bookings
          WHERE CAST(BookingTime AS DATE) = DATEADD(DAY, 1, CAST(SYSUTCDATETIME() AS DATE))
-           AND LOWER(LTRIM(RTRIM(ISNULL(Status, '')))) NOT IN ('cancelled', 'canceled', 'deleted')`,
+           AND LOWER(LTRIM(RTRIM(ISNULL(Status, '')))) NOT IN ('cancelled', 'cancelled', 'deleted')`,
         {},
       )
       const tomorrowBookingCount = Number(tomorrowRes.recordset?.[0]?.BookingCount || 0)

@@ -9,6 +9,7 @@ import {
   IconCube,
   IconDollar,
   IconInfo,
+  IconStar,
   IconUsers,
 } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
@@ -55,6 +56,62 @@ function statusTone(level) {
   if (level === 'warning') return 'is-warning'
   if (level === 'critical') return 'is-critical'
   return 'is-neutral'
+}
+
+function safePct(part, total) {
+  const p = Number(part || 0)
+  const t = Number(total || 0)
+  if (t <= 0) return 0
+  return Math.round((p / t) * 100)
+}
+
+function orderStatusUi(rawStatus) {
+  const status = String(rawStatus || '').trim().toLowerCase()
+  if (status === 'completed' || status === 'complete' || status === 'done') {
+    return { label: 'Completed', chipClass: 'done' }
+  }
+  if (status === 'cancelled' || status === 'cancelled' || status === 'cancel') {
+    return { label: 'Cancelled', chipClass: 'cancelled' }
+  }
+  return { label: 'Pending', chipClass: 'pending' }
+}
+
+function paymentMethodLabel(rawValue) {
+  const method = String(rawValue || '').trim().toLowerCase()
+  if (!method) return 'Unknown'
+  if (method.includes('cod')) return 'COD'
+  if (method.includes('vnpay')) return 'VNPay'
+  if (method.includes('momo')) return 'MoMo'
+  if (method.includes('cash')) return 'Cash'
+  if (method.includes('bank')) return 'Bank Transfer'
+  if (method.includes('card')) return 'Card'
+  return rawValue
+}
+
+function pendingAgeDays(createdAt) {
+  const dt = new Date(createdAt)
+  if (Number.isNaN(dt.getTime())) return 0
+  const diff = Date.now() - dt.getTime()
+  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)))
+}
+
+function scheduleMinutes(value) {
+  const raw = String(value || '').trim()
+  const m = raw.match(/^(\d{1,2}):(\d{2})/)
+  if (!m) return Number.MAX_SAFE_INTEGER
+  const hh = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return Number.MAX_SAFE_INTEGER
+  return hh * 60 + mm
+}
+
+function scheduleStatusPriority(value) {
+  const s = String(value || '').trim().toLowerCase()
+  if (s === 'pending') return 0
+  if (s === 'booked' || s === 'confirmed' || s === 'confirm') return 1
+  if (s === 'cancelled' || s === 'cancel') return 2
+  if (s === 'completed' || s === 'complete' || s === 'done') return 3
+  return 4
 }
 
 export default function OwnerDashboardPage() {
@@ -132,19 +189,19 @@ export default function OwnerDashboardPage() {
       pending: Number(apiStatus.pending || apiStatus.upcoming || 0),
       booked: Number(apiStatus.booked || 0),
       completed: Number(apiStatus.completed || 0),
-      canceled: Number(apiStatus.canceled || apiStatus.cancelled || 0) + Number(apiStatus.noShow || 0),
+      cancelled: Number(apiStatus.cancelled || apiStatus.cancelled || 0) + Number(apiStatus.noShow || 0),
     }
 
-    const apiTotal = fromApi.pending + fromApi.booked + fromApi.completed + fromApi.canceled
+    const apiTotal = fromApi.pending + fromApi.booked + fromApi.completed + fromApi.cancelled
     if (apiTotal > 0) return fromApi
 
     const schedule = Array.isArray(data?.todaySchedule) ? data.todaySchedule : []
-    const fromSchedule = { pending: 0, booked: 0, completed: 0, canceled: 0 }
+    const fromSchedule = { pending: 0, booked: 0, completed: 0, cancelled: 0 }
     for (const row of schedule) {
       const raw = String(row?.status || row?.statusLabel || '').trim().toLowerCase()
       if (raw === 'completed' || raw === 'complete' || raw === 'done') fromSchedule.completed += 1
       else if (raw === 'booked' || raw === 'confirmed' || raw === 'confirm') fromSchedule.booked += 1
-      else if (raw === 'canceled' || raw === 'cancelled' || raw === 'cancel' || raw === 'no-show' || raw === 'noshow' || raw === 'no_show' || raw === 'no show') fromSchedule.canceled += 1
+      else if (raw === 'cancelled' || raw === 'cancelled' || raw === 'cancel' || raw === 'no-show' || raw === 'noshow' || raw === 'no_show' || raw === 'no show') fromSchedule.cancelled += 1
       else fromSchedule.pending += 1
     }
     return fromSchedule
@@ -154,12 +211,7 @@ export default function OwnerDashboardPage() {
     { label: 'Pending', value: bookingStatusSummary.pending, color: '#f59e0b' },
     { label: 'Booked', value: bookingStatusSummary.booked, color: '#3b82f6' },
     { label: 'Completed', value: bookingStatusSummary.completed, color: '#22c55e' },
-    { label: 'Cancelled', value: bookingStatusSummary.canceled, color: '#ef4444' },
-  ]
-
-  const customerParts = [
-    { label: 'New', value: Number(data?.customerOverview?.newCustomers || 0), color: '#3b82f6' },
-    { label: 'Returning', value: Number(data?.customerOverview?.returningCustomers || 0), color: '#22c55e' },
+    { label: 'Cancelled', value: bookingStatusSummary.cancelled, color: '#ef4444' },
   ]
 
   const orderStatusMapped = useMemo(() => {
@@ -169,7 +221,7 @@ export default function OwnerDashboardPage() {
       const raw = String(row.status || '').trim().toLowerCase()
       const count = Number(row.count || 0)
       if (raw === 'completed' || raw === 'complete' || raw === 'done') mapped.completed += count
-      else if (raw === 'cancelled' || raw === 'canceled' || raw === 'cancel') mapped.cancelled += count
+      else if (raw === 'cancelled' || raw === 'cancelled' || raw === 'cancel') mapped.cancelled += count
       else mapped.pending += count
     }
     return mapped
@@ -178,25 +230,102 @@ export default function OwnerDashboardPage() {
   const orderStatusParts = [
     { label: 'Pending', value: orderStatusMapped.pending, color: '#f59e0b' },
     { label: 'Completed', value: orderStatusMapped.completed, color: '#22c55e' },
-    { label: 'Canceled', value: orderStatusMapped.cancelled, color: '#ef4444' },
+    { label: 'Cancelled', value: orderStatusMapped.cancelled, color: '#ef4444' },
   ]
 
   const k = data?.kpis || {}
+  const bookingTotal = Number(k?.bookings?.value || 0)
+  const bookingCompleted = Number(k?.bookings?.completed || 0)
+  const bookingCancelled = Number(bookingStatusSummary.cancelled || 0)
+  const bookingCompletionRate = safePct(bookingCompleted, bookingTotal)
+  const bookingCancelRate = safePct(bookingCancelled, bookingTotal)
+  const ratingKpi = k?.rating || {}
+  const ratingValue = Number(ratingKpi.value || 0)
+  const ratingDeltaValue = Number(ratingKpi.deltaValue || 0)
+  const ratingTotalReviews = Math.max(0, Number(ratingKpi.totalReviews || 0))
+  const bookingRatingValue = Number(ratingKpi.bookingValue || 0)
+  const bookingRatingReviews = Math.max(0, Number(ratingKpi.bookingReviews || 0))
+  const orderRatingValue = Number(ratingKpi.orderValue || 0)
+  const orderRatingReviews = Math.max(0, Number(ratingKpi.orderReviews || 0))
+  const ratingDeltaText = `${ratingDeltaValue >= 0 ? '+' : ''}${ratingDeltaValue.toFixed(1)}`
+  const orderTotal = Number(orderStatusMapped.pending || 0) + Number(orderStatusMapped.completed || 0) + Number(orderStatusMapped.cancelled || 0)
+  const orderCompleted = Number(orderStatusMapped.completed || 0)
+  const orderCancelled = Number(orderStatusMapped.cancelled || 0)
+  const orderCompletionRate = safePct(orderCompleted, orderTotal)
+  const orderCancelRate = safePct(orderCancelled, orderTotal)
+  const returningCount = Number(data?.customerOverview?.returningCustomers || 0)
+  const newCount = Number(data?.customerOverview?.newCustomers || 0)
+  const activeCount = Number(k?.customers?.active30Days || 0)
+  const returningPct = safePct(returningCount, Math.max(activeCount, returningCount + newCount))
+  const inactiveCount = Number(k?.customers?.inactive || 0)
+  const inventoryTotalItems = Math.max(0, Number(k?.inventory?.totalItems || 0))
+  const inventoryOutCount = Math.max(0, Number(k?.inventory?.outOfStockCount || 0))
+  const inventoryLowCount = Math.max(0, Number(k?.inventory?.lowStockCount || 0))
+  const inventoryHealthyCount = Math.max(0, Number(k?.inventory?.healthyCount || 0))
+  const inventoryOutPct = safePct(inventoryOutCount, inventoryTotalItems)
+  const topCustomers = Array.isArray(data?.topCustomers) ? data.topCustomers : []
+  const topCustomersFeatured = topCustomers.slice(0, 6)
+  const topStaff = Array.isArray(data?.staffPerformance) ? data.staffPerformance : []
+  const topStaffFeatured = topStaff.filter((x) => Number(x?.revenue || 0) > 0).slice(0, 6)
+  const todayScheduleRows = useMemo(() => {
+    const rows = Array.isArray(data?.todaySchedule) ? [...data.todaySchedule] : []
+    rows.sort((a, b) => {
+      const byStatus = scheduleStatusPriority(a?.status) - scheduleStatusPriority(b?.status)
+      if (byStatus !== 0) return byStatus
+      return scheduleMinutes(a?.time) - scheduleMinutes(b?.time)
+    })
+    return rows
+  }, [data])
+
+  const staffAvailabilityRows = useMemo(() => {
+    const rows = Array.isArray(data?.staffAvailability) ? [...data.staffAvailability] : []
+    rows.sort((a, b) => {
+      const aAvailable = String(a?.status || '').toLowerCase() !== 'busy'
+      const bAvailable = String(b?.status || '').toLowerCase() !== 'busy'
+      if (aAvailable !== bAvailable) return aAvailable ? -1 : 1
+
+      const aNext = scheduleMinutes(String(a?.nextBookingTime || '').replace(/^next\s+at\s+/i, '').replace(/^shift\s+/i, ''))
+      const bNext = scheduleMinutes(String(b?.nextBookingTime || '').replace(/^next\s+at\s+/i, '').replace(/^shift\s+/i, ''))
+      if (aNext !== bNext) return aNext - bNext
+
+      return String(a?.name || '').localeCompare(String(b?.name || ''))
+    })
+    return rows
+  }, [data])
+
+  const recentOrders = useMemo(() => {
+    const rows = Array.isArray(data?.recentOrders) ? data.recentOrders : []
+    const pendingOnly = rows
+      .map((row) => {
+        const statusUi = orderStatusUi(row?.status)
+        const ageDays = pendingAgeDays(row?.createdAt)
+        return {
+          ...row,
+          statusUi,
+          ageDays,
+          isOverdue: statusUi.label === 'Pending' && ageDays > 7,
+        }
+      })
+      .filter((row) => row.statusUi.label === 'Pending')
+
+    pendingOnly.sort((a, b) => {
+      if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1
+      return Number(b.ageDays || 0) - Number(a.ageDays || 0)
+    })
+
+    return pendingOnly.slice(0, 6)
+  }, [data])
+  const peakRows = useMemo(() => {
+    const rows = Array.isArray(data?.bookingHeatmap) ? data.bookingHeatmap : []
+    const peakBase = Math.max(1, ...rows.map((x) => Number(x?.count || 0)))
+    return rows.map((x) => ({
+      ...x,
+      pct: Math.min(100, Math.round((Number(x?.count || 0) / peakBase) * 100)),
+    }))
+  }, [data])
 
   return (
     <div className="dashboard-page">
-      <div className="dashboard-actionsRow">
-        <div className="dashboard-headLeft">
-          <div className="dashboard-actionsTitle">Owner Dashboard</div>
-          <div className="dashboard-summary">Operational clarity for performance, causes, and next actions</div>
-        </div>
-        <div className="dashboard-actions">
-          <Link to="/portals/owner/appointments" className="dashboard-actionBtn">New Booking</Link>
-          <Link to="/portals/owner/orders" className="dashboard-actionBtn">Process Orders</Link>
-          <Link to="/portals/owner/inventory" className="dashboard-actionBtn">Inventory Alerts</Link>
-        </div>
-      </div>
-
       <PortalCard title="Filters" className="portal-card">
         <div className="dashboard-filtersCombined">
           <div className="portal-seg" role="tablist" aria-label="Period switch">
@@ -234,43 +363,56 @@ export default function OwnerDashboardPage() {
 
       <div className="dashboard-kpiGrid">
         <PortalCard title="Revenue" className="portal-kpi" right={<div className="portal-kpiIcon"><IconDollar /></div>}>
-          <div className="portal-kpiValue">{formatCompactVnd(k?.revenue?.value)}</div>
-          <div className={`portal-kpiMeta ${statusTone(k?.revenue?.status)}`}>{pctText(k?.revenue?.deltaPct)} vs previous</div>
-          <div className="dashboard-listSub">Avg/booking: {formatCompactVnd(k?.revenue?.avgRevenuePerBooking)}</div>
+          <div className="dashboard-kpiHeadline">
+            <div className="portal-kpiValue">{formatCompactVnd(k?.revenue?.value)}</div>
+            <div className={`portal-kpiMeta ${statusTone(k?.revenue?.status)}`}>↑ {pctText(k?.revenue?.deltaPct)}</div>
+          </div>
+          <div className="dashboard-listSub">Booking {formatCompactVnd(k?.revenue?.bookingRevenue || 0)} | Order {formatCompactVnd(k?.revenue?.productRevenue || 0)}</div>
         </PortalCard>
 
-        <PortalCard title="Bookings Today" className="portal-kpi" right={<div className="portal-kpiIcon"><IconCalendar /></div>}>
-          <div className="portal-kpiValue">{k?.bookings?.value || 0}</div>
-          <div className="dashboard-listSub">Pending {k?.bookings?.pending ?? k?.bookings?.upcoming ?? bookingStatusSummary.pending} | Booked {k?.bookings?.booked ?? bookingStatusSummary.booked}</div>
-          <div className="dashboard-listSub">Completed {k?.bookings?.completed ?? bookingStatusSummary.completed} | Canceled {(k?.bookings?.canceled ?? k?.bookings?.cancelled ?? 0) + Number(k?.bookings?.noShow || 0) || bookingStatusSummary.canceled}</div>
+        <PortalCard title="Active Customers" className="portal-kpi" right={<div className="portal-kpiIcon"><IconUsers /></div>}>
+          <div className="dashboard-kpiHeadline">
+            <div className="portal-kpiValue">{activeCount} active</div>
+            <div className="dashboard-kpiBadge">{inactiveCount} deactive</div>
+          </div>
+          <div className="dashboard-listSub">New {newCount} | Returning {returningCount} ({returningPct}%)</div>
         </PortalCard>
 
-        <PortalCard title="Customers" className="portal-kpi" right={<div className="portal-kpiIcon"><IconUsers /></div>}>
-          <div className="portal-kpiValue">{k?.customers?.active30Days || 0}</div>
-          <div className="dashboard-listSub">Active 30 days</div>
-          <div className="dashboard-listSub">Inactive {k?.customers?.inactive || 0} | New {k?.customers?.newCustomers || 0}</div>
+        <PortalCard title="Rating" className="portal-kpi" right={<div className="portal-kpiIcon"><IconStar /></div>}>
+          <div className="dashboard-kpiHeadline">
+            <div className="portal-kpiValue">{ratingValue > 0 ? ratingValue.toFixed(1) : '-'}</div>
+            <div className={`portal-kpiMeta ${statusTone(ratingKpi?.status)}`}>↑ {ratingDeltaText}({ratingTotalReviews})</div>
+          </div>
+          <div className="dashboard-listSub">Booking {bookingRatingValue > 0 ? bookingRatingValue.toFixed(1) : '-'} ({bookingRatingReviews}) · Order {orderRatingValue > 0 ? orderRatingValue.toFixed(1) : '-'} ({orderRatingReviews})</div>
         </PortalCard>
 
-        <PortalCard title="Retention" className="portal-kpi" right={<div className="portal-kpiIcon"><IconInfo /></div>}>
-          <div className="portal-kpiValue">{k?.retention?.returningRatePct || 0}%</div>
-          <div className="dashboard-listSub">Returning customer rate</div>
-          <div className="dashboard-listSub">Visits/customer/month: {k?.retention?.avgVisitsPerCustomerPerMonth || 0}</div>
+        <PortalCard title="Booking Reliability" className="portal-kpi" right={<div className="portal-kpiIcon"><IconClock /></div>}>
+          <div className="dashboard-kpiHeadline">
+            <div className="portal-kpiValue">{bookingCompletionRate}% completed</div>
+            <div className={`portal-kpiMeta ${statusTone(k?.appointments?.status)}`}>Cancel {bookingCancelRate}%</div>
+          </div>
+          <div className="dashboard-listSub">Completed {bookingCompleted} | Total {bookingTotal}</div>
         </PortalCard>
 
-        <PortalCard title="Orders Today" className="portal-kpi" right={<div className="portal-kpiIcon"><IconBarCart /></div>}>
-          <div className="portal-kpiValue">{k?.orders?.todayTotalOrders || 0}</div>
-          <div className="dashboard-listSub">Product revenue</div>
-          <div className="dashboard-listSub">{formatCompactVnd(k?.orders?.todayProductRevenue || 0)}</div>
+        <PortalCard title="Orders Reliability" className="portal-kpi" right={<div className="portal-kpiIcon"><IconBarCart /></div>}>
+          <div className="dashboard-kpiHeadline">
+            <div className="portal-kpiValue">{orderCompletionRate}% completed</div>
+            <div className={`portal-kpiMeta ${statusTone(k?.orders?.status)}`}>Cancel {orderCancelRate}%</div>
+          </div>
+          <div className="dashboard-listSub">Completed {orderCompleted} | Total {orderTotal}</div>
         </PortalCard>
 
-        <PortalCard title="Inventory" className="portal-kpi" right={<div className="portal-kpiIcon"><IconCube /></div>}>
-          <div className="portal-kpiValue">{k?.inventory?.lowStockCount || 0}</div>
-          <div className="dashboard-listSub">Low stock | Critical {k?.inventory?.criticalCount || 0}</div>
-          <div className="dashboard-listSub">Value: {formatCompactVnd(k?.inventory?.totalValue || 0)}</div>
+        <PortalCard title="Inventory Alerts" className="portal-kpi" right={<div className="portal-kpiIcon"><IconAlertTriangle /></div>}>
+          <div className="portal-kpiValue">{inventoryOutPct}% out of stock</div>
+          <div className="dashboard-kpiRow">
+            <span className="dashboard-kpiChip cancelled">Out {inventoryOutCount}</span>
+            <span className="dashboard-kpiChip pending">Low {inventoryLowCount}</span>
+            <span className="dashboard-kpiChip done">Healthy {inventoryHealthyCount}</span>
+          </div>
         </PortalCard>
       </div>
 
-      <div className="portal-grid2">
+      <div className="portal-grid2 ">
         <PortalCard title="Revenue Trend (Stacked Revenue)" className="portal-card dashboard-revenueFullWidthCard">
           <div className="dashboard-revenueLegend">
             <span><i className="service" />Booking Revenue</span>
@@ -338,15 +480,15 @@ export default function OwnerDashboardPage() {
           ) : null}
         </PortalCard>
 
-        <PortalCard title="Phân Tích Doanh Thu" className="portal-card dashboard-revenueBreakdownCard">
-          <div className="dashboard-breakdownSubtitle">Doanh thu từ dịch vụ và sản phẩm</div>
+        <PortalCard title="Revenue Analysis" className="portal-card dashboard-revenueBreakdownCard">
+          <div className="dashboard-breakdownSubtitle">Revenue from services and products</div>
           <div className="dashboard-breakdownLayout">
             <div className="dashboard-breakdownDonutCol">
               <div className="dashboard-breakdownDonut" style={{ background: buildConic(revenueSplit) }}>
                 <div className="dashboard-breakdownDonutHole" />
               </div>
               <div className="dashboard-breakdownTotal">{formatVnd(revenueBreakdownMeta.total)}</div>
-              <div className="dashboard-breakdownTotalLabel">Tổng doanh thu</div>
+              <div className="dashboard-breakdownTotalLabel">Total revenue</div>
             </div>
 
             <div className="dashboard-breakdownDetailsCol">
@@ -354,15 +496,18 @@ export default function OwnerDashboardPage() {
                 <div className="dashboard-breakdownBlockHead">
                   <div className="dashboard-breakdownName">
                     <span className="dashboard-statusDot" style={{ background: '#f59e0b' }} />
-                    Dịch Vụ
+                    Services
                   </div>
                   <div className="dashboard-breakdownAmount">{formatVnd(revenueBreakdownMeta.bookingRevenue)}</div>
                 </div>
-                <div className="dashboard-breakdownPercent">{revenueBreakdownMeta.bookingPct}% tổng doanh thu</div>
+                <div className="dashboard-breakdownPercent">{revenueBreakdownMeta.bookingPct}% of total revenue</div>
                 <div className="dashboard-breakdownItems">
-                  {(data?.topServices || []).slice(0, 4).map((x) => (
+                  {(data?.topServices || []).slice(0, 5).map((x) => (
                     <div className="dashboard-breakdownItem" key={`svc_break_${x.name}`}>
-                      <span>{x.name}</span>
+                      <span>
+                        {x.name} <small>({Number(x.bookings || 0)})</small>
+                        <small className="dashboard-breakdownRating"> <IconStar />{Number(x.avgRating || 0) > 0 ? Number(x.avgRating || 0).toFixed(1) : '-'}</small>
+                      </span>
                       <b>{formatVnd(x.revenue)}</b>
                     </div>
                   ))}
@@ -373,15 +518,18 @@ export default function OwnerDashboardPage() {
                 <div className="dashboard-breakdownBlockHead">
                   <div className="dashboard-breakdownName">
                     <span className="dashboard-statusDot" style={{ background: '#2563eb' }} />
-                    Sản Phẩm
+                    Product
                   </div>
                   <div className="dashboard-breakdownAmount">{formatVnd(revenueBreakdownMeta.orderRevenue)}</div>
                 </div>
-                <div className="dashboard-breakdownPercent">{revenueBreakdownMeta.orderPct}% tổng doanh thu</div>
+                <div className="dashboard-breakdownPercent">{revenueBreakdownMeta.orderPct}% of total revenue</div>
                 <div className="dashboard-breakdownItems">
-                  {(data?.topProducts || []).slice(0, 3).map((x) => (
+                  {(data?.topProducts || []).slice(0, 5).map((x) => (
                     <div className="dashboard-breakdownItem" key={`prd_break_${x.name}`}>
-                      <span>{x.name}</span>
+                      <span>
+                        {x.name} <small>({Number(x.sold || 0)})</small>
+                        <small className="dashboard-breakdownRating"> <IconStar />{Number(x.avgRating || 0) > 0 ? Number(x.avgRating || 0).toFixed(1) : '-'}</small>
+                      </span>
                       <b>{formatVnd(x.revenue)}</b>
                     </div>
                   ))}
@@ -392,143 +540,184 @@ export default function OwnerDashboardPage() {
         </PortalCard>
       </div>
 
-      <div className="portal-grid2">
-        <PortalCard title="Customer Overview" className="portal-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div style={{ width: 132, height: 132, borderRadius: '50%', background: buildConic(customerParts), flexShrink: 0 }} />
-            <div className="dashboard-statusInline" style={{ width: '100%' }}>
-              {customerParts.map((x) => (
-                <div className="dashboard-statusChip" key={x.label}>
-                  <span className="dashboard-statusLeft"><span className="dashboard-statusDot" style={{ background: x.color }} />{x.label}</span>
-                  <b>{x.value}</b>
+      {period === 'day' ? (
+        <div className="portal-grid2">
+          <PortalCard
+            title={(
+              <span className="dashboard-cardTitleWithIcon">
+                <IconCalendar />
+                Today Schedule (Auto-refresh 30s)
+              </span>
+            )}
+            className="portal-card"
+          >
+            <div className="dashboard-scheduleList">
+              {todayScheduleRows.map((row) => {
+              const rating = Number(row.reviewRating || 0)
+              const activeStars = Math.max(0, Math.min(5, Math.round(rating)))
+              const hour = Number.parseInt(String(row.time || '').slice(0, 2), 10)
+              const timeTone = Number.isFinite(hour)
+                ? (hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening')
+                : 'afternoon'
+              const statusRaw = String(row.status || '').toLowerCase()
+              const statusTone = statusRaw === 'completed'
+                ? 'completed'
+                : statusRaw === 'booked'
+                  ? 'booked'
+                  : statusRaw === 'cancelled'
+                    ? 'cancelled'
+                    : 'pending'
+              const statusLabel = statusRaw === 'completed'
+                ? 'Completed'
+                : statusRaw === 'booked'
+                  ? 'Booked'
+                  : statusRaw === 'cancelled'
+                    ? 'Cancelled'
+                    : 'Pending'
+              const needsAttention = rating > 0 && rating <= 2
+              return (
+                <div className={`dashboard-scheduleItem is-${timeTone} ${needsAttention ? 'is-attention' : ''}`.trim()} key={String(row.bookingId) + row.time}>
+                  <div className="dashboard-scheduleTime">{row.time}</div>
+
+                  <div className="dashboard-scheduleMain">
+                    <div className="dashboard-scheduleCustomer">{row.customer}</div>
+                    <div className="dashboard-scheduleService">{row.service}</div>
+                    {row.reviewComment ? <div className="dashboard-scheduleComment">"{clipText(row.reviewComment, 88)}"</div> : null}
+                  </div>
+
+                  <div className="dashboard-scheduleRight">
+                    <div className="dashboard-scheduleStaff">{row.staff}</div>
+                    {rating > 0 ? (
+                      <div className="dashboard-scheduleRatingRow">
+                        <span className="dashboard-scheduleStars" aria-label={`${rating}/5`}>
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <span key={`${row.bookingId}_star_${i}`} className={`dashboard-scheduleStar ${i < activeStars ? 'is-on' : 'is-off'}`.trim()}>
+                              <IconStar />
+                            </span>
+                          ))}
+                        </span>
+                        {needsAttention ? <span className="dashboard-scheduleAttention">Needs attention</span> : null}
+                      </div>
+                    ) : null}
+                    <span className={`dashboard-scheduleStatus ${statusTone}`.trim()}>{statusLabel}</span>
+                  </div>
+                </div>
+              )
+              })}
+            </div>
+          </PortalCard>
+
+          <PortalCard title="Staff Availability (Real-time snapshot)" className="portal-card" right={<div className="portal-kpiIcon"><IconClock /></div>}>
+            <div className="dashboard-availabilityList">
+              {staffAvailabilityRows.map((x, idx) => (
+                <div className={`dashboard-availabilityItem ${x.status === 'busy' ? 'is-busy' : 'is-available'}`.trim()} key={x.name + idx}>
+                  <div className="dashboard-availabilityTop">
+                    <div className="dashboard-availabilityNameWrap">
+                      <span className="dashboard-statusDot" style={{ background: x.status === 'busy' ? '#ef4444' : '#22c55e' }} />
+                      <b className="dashboard-availabilityName">{x.name}</b>
+                    </div>
+                    <span className="dashboard-availabilityState">{x.status === 'busy' ? 'Busy' : 'Available'}</span>
+                  </div>
+
+                  <div className="dashboard-availabilityMeta">
+                    {x.status === 'busy'
+                      ? 'Currently serving a customer'
+                      : (x.nextBookingTime ? `Next at ${x.nextBookingTime}` : 'No upcoming booking')}
+                  </div>
+
+                  <div className="dashboard-availabilitySkills">
+                    {(Array.isArray(x.skills) ? x.skills : []).slice(0, 3).map((skill, skillIdx) => (
+                      <span className="dashboard-availabilitySkill" key={`${x.name}_${skill}_${skillIdx}`}>{skill}</span>
+                    ))}
+                    {(!Array.isArray(x.skills) || x.skills.length === 0) ? <span className="dashboard-availabilitySkill is-empty">No skill data</span> : null}
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
-          <div className="portal-tableWrap" style={{ marginTop: 12 }}>
-            <table className="portal-table">
-              <thead>
-                <tr>
-                  <th>Customer</th>
-                  <th>Total Spend</th>
-                  <th>Visits</th>
-                  <th>Featured Review</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data?.topCustomers || []).map((x) => (
-                  <tr key={x.name}>
-                    <td>{x.name}</td>
-                    <td>{formatVnd(x.spending)}</td>
-                    <td>{x.visits}</td>
-                    <td>
-                      {x.featuredReview
-                        ? `${Number(x.featuredReviewRating || 0)}/5 - ${clipText(x.featuredReview, 64)}`
-                        : (Number(x.avgRating || 0) > 0 ? `${Number(x.avgRating || 0)}/5` : 'No review')}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          </PortalCard>
+
+        </div>
+      ) : null}
+
+      <div className="portal-grid2 dashboard-grid2--equalHeight">
+        <PortalCard title="Customer Overview" className="portal-card" right={<div className="dashboard-leaderboardHint">Top {topCustomersFeatured.length}</div>}>
+          <div className="dashboard-leaderboard dashboard-tableTopSpace">
+            {topCustomersFeatured.map((x, idx) => {
+              const rank = idx + 1
+              const rankTone = rank === 1 ? 'is-top1' : rank === 2 ? 'is-top2' : rank === 3 ? 'is-top3' : ''
+
+              return (
+                <div className={`dashboard-leaderboardItem ${rankTone}`.trim()} key={`${x.customerUserId || x.name}-${rank}`}>
+                  <div className="dashboard-rankPill">{rank}</div>
+                  <div className="dashboard-leaderboardMain">
+                    <div className="dashboard-leaderboardTopRow">
+                      <div className="dashboard-leaderboardNameWrap">
+                        <div className="dashboard-leaderboardName">{x.name}</div>
+                      </div>
+                      <div className="dashboard-leaderboardValue customer">{formatCompactVnd(x.spending)}</div>
+                    </div>
+                    <div className="dashboard-leaderboardMetaRow">
+                      <span><IconUsers />{Number(x.visits || 0)} visits</span>
+                      <span><IconStar />{Number(x.avgRating || 0) > 0 ? `${Number(x.avgRating || 0).toFixed(1)} (${Number(x.ratingCount || 0)} reviews)` : '-'}</span>
+                      <span><IconCalendar />Last {x.lastVisit || '-'}</span>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </PortalCard>
 
-        <PortalCard title="Staff Performance" className="portal-card">
-          <div className="portal-tableWrap">
-            <table className="portal-table">
-              <thead>
-                <tr>
-                  <th>Staff</th>
-                  <th>Revenue</th>
-                  <th>Bookings</th>
-                  <th>Rating</th>
-                  <th>Featured Review</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data?.staffPerformance || []).map((x, idx) => (
-                  <tr key={x.name + idx}>
-                    <td>{x.name}{idx === 0 ? ' (Top)' : ''}</td>
-                    <td>{formatVnd(x.revenue)}</td>
-                    <td>{x.appts}</td>
-                    <td>{Number(x.avgRating || 0) > 0 ? `${Number(x.avgRating || 0)}/5` : 'No review'}</td>
-                    <td>{x.featuredReview ? `${Number(x.featuredReviewRating || 0)}/5 - ${clipText(x.featuredReview, 64)}` : '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <PortalCard title="Staff Performance" className="portal-card" right={<div className="dashboard-leaderboardHint">Top {topStaffFeatured.length} featured</div>}>
+          <div className="dashboard-leaderboard dashboard-leaderboard--staff">
+            {topStaffFeatured.map((x, idx) => {
+              const rank = idx + 1
+              const rankTone = rank === 1 ? 'is-top1' : rank === 2 ? 'is-top2' : rank === 3 ? 'is-top3' : ''
+
+              return (
+                <div className={`dashboard-leaderboardItem ${rankTone}`.trim()} key={`${x.staffId || x.name}-${rank}`}>
+                  <div className="dashboard-rankPill">{rank}</div>
+                  <div className="dashboard-leaderboardMain">
+                    <div className="dashboard-leaderboardTopRow">
+                      <div className="dashboard-leaderboardNameWrap">
+                        <div className="dashboard-leaderboardName">{x.name}</div>
+                      </div>
+                      <div className="dashboard-leaderboardValue staff">{formatCompactVnd(x.revenue)}</div>
+                    </div>
+                    <div className="dashboard-leaderboardMetaRow">
+                      <span><IconUsers />{Number(x.appts || 0)} bookings</span>
+                      <span><IconStar />{Number(x.avgRating || 0) > 0 ? `${Number(x.avgRating || 0).toFixed(1)} (${Number(x.ratingCount || 0)} reviews)` : '-'}</span>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </PortalCard>
       </div>
 
       <div className="portal-grid2">
-        <PortalCard title="Today Schedule (Auto-refresh 30s)" className="portal-card">
-          <div className="portal-tableWrap">
-            <table className="portal-table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Customer</th>
-                  <th>Staff</th>
-                  <th>Service</th>
-                  <th>Status</th>
-                  <th>Review</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data?.todaySchedule || []).slice(0, 12).map((row) => (
-                  <tr key={String(row.bookingId) + row.time}>
-                    <td>{row.time}</td>
-                    <td>{row.customer}</td>
-                    <td>{row.staff}</td>
-                    <td>{row.service}</td>
-                    <td>
-                      <span className={`dashboard-stockTag ${row.status === 'canceled' ? 'is-critical' : row.status === 'completed' ? 'is-warning' : ''}`.trim()}>
-                        {row.statusLabel}
-                      </span>
-                    </td>
-                    <td>
-                      {Number(row.reviewRating || 0) > 0 ? (
-                        <div>
-                          <span className={`dashboard-reviewPill ${Number(row.reviewRating || 0) <= 2 ? 'is-negative' : Number(row.reviewRating || 0) >= 4 ? 'is-positive' : 'is-neutral'}`.trim()}>
-                            {Number(row.reviewRating || 0)}/5
-                          </span>
-                          <div className="dashboard-reviewInlineText">{clipText(row.reviewComment, 52) || 'No comment'}</div>
-                        </div>
-                      ) : row.status === 'completed' ? (
-                        <span className="dashboard-reviewInlineText">No review yet</span>
-                      ) : (
-                        <span className="dashboard-reviewInlineText">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </PortalCard>
-
-        <PortalCard title="Staff Availability (Real-time snapshot)" className="portal-card" right={<div className="portal-kpiIcon"><IconClock /></div>}>
-          <div className="dashboard-statusInline">
-            {(data?.staffAvailability || []).map((x, idx) => (
-              <div className="dashboard-statusChip" key={x.name + idx}>
-                <span className="dashboard-statusLeft">
-                  <span className="dashboard-statusDot" style={{ background: x.status === 'busy' ? '#ef4444' : '#22c55e' }} />
-                  {x.name}
-                </span>
-                <b>{x.status === 'busy' ? 'Busy' : 'Available'}</b>
+        <PortalCard title="Peak Hours" className="portal-card">
+          <div className="dashboard-peakList">
+            {peakRows.length === 0 ? (
+              <div className="dashboard-peakEmpty">No completed or active booking slots in this period.</div>
+            ) : peakRows.map((x) => (
+              <div className={`dashboard-peakItem ${x.isPeak ? 'is-peak' : ''}`.trim()} key={x.hour}>
+                <div className="dashboard-peakItemHead">
+                  <span className="dashboard-peakHour">{x.hour}</span>
+                  <span className="dashboard-peakCount">{x.count} bookings</span>
+                  {x.isPeak ? <span className="dashboard-peakBadge">Peak</span> : null}
+                </div>
+                <div className="dashboard-peakTrack"><span style={{ width: `${x.pct}%` }} /></div>
               </div>
             ))}
           </div>
         </PortalCard>
 
-      </div>
-
-      <div className="portal-grid2">
         <PortalCard title="Booking Status" className="portal-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div style={{ width: 132, height: 132, borderRadius: '50%', background: buildConic(bookingStatusParts), flexShrink: 0 }} />
-            <div className="dashboard-statusInline" style={{ width: '100%' }}>
+          <div className="dashboard-donutRow dashboard-donutRow--status">
+            <div className="dashboard-donutDisplay dashboard-donutDisplay--status" style={{ background: buildConic(bookingStatusParts) }} />
+            <div className="dashboard-statusInline dashboard-statusInline--wide dashboard-statusInline--legendRow">
               {bookingStatusParts.map((x) => (
                 <div className="dashboard-statusChip" key={x.label}>
                   <span className="dashboard-statusLeft"><span className="dashboard-statusDot" style={{ background: x.color }} />{x.label}</span>
@@ -538,75 +727,79 @@ export default function OwnerDashboardPage() {
             </div>
           </div>
         </PortalCard>
-
-        <PortalCard title="Peak Hours" className="portal-card">
-          <div className="dashboard-heatmap">
-            {(data?.bookingHeatmap || []).map((x) => (
-              <div className={`dashboard-heatCell ${x.isPeak ? 'is-peak' : ''}`.trim()} key={x.hour}>
-                <span style={{ width: 54 }}>{x.hour}</span>
-                <div className="dashboard-heatTrack"><span style={{ width: `${Math.min(100, (Number(x.count || 0) / Math.max(1, Math.max(...(data?.bookingHeatmap || []).map((i) => Number(i.count || 0), 1)))) * 100)}%` }} /></div>
-                <span>{x.count}</span>
-                {x.isPeak ? <span className="dashboard-peakBadge">Peak</span> : null}
-              </div>
-            ))}
-          </div>
-        </PortalCard>
       </div>
 
       <div className="portal-grid2">
-        <PortalCard title="Order Status" className="portal-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div style={{ width: 132, height: 132, borderRadius: '50%', background: buildConic(orderStatusParts), flexShrink: 0 }} />
-            <div className="dashboard-statusInline" style={{ width: '100%' }}>
-              {orderStatusParts.map((x) => (
-                <div className="dashboard-statusChip" key={x.label}>
-                  <span className="dashboard-statusLeft"><span className="dashboard-statusDot" style={{ background: x.color }} />{x.label}</span>
-                  <b>{x.value}</b>
-                </div>
-              ))}
-            </div>
-          </div>
-        </PortalCard>
+        <PortalCard title="Pending Orders" className="portal-card dashboard-orderAttentionCard">
+          <div className="dashboard-list dashboard-list--spaced dashboard-recentOrders">
+            {recentOrders.length === 0 ? (
+              <div className="dashboard-listSub">No pending orders in this period.</div>
+            ) : recentOrders.map((item) => {
+              const orderLabel = item.orderId > 0 ? `#${item.orderId}` : 'Order'
+              const customer = clipText(item.customerName || 'Guest', 24)
+              const created = item.createdAt ? new Date(item.createdAt).toLocaleString('vi-VN') : '-'
+              const payment = paymentMethodLabel(item.paymentMethod)
+              const pendingText = item.ageDays > 0 ? `Pending ${item.ageDays} day${item.ageDays > 1 ? 's' : ''}` : 'Pending today'
+              const productLine = clipText(item.productSummary || 'No product details', 92)
+              return (
+                <div className={`dashboard-listItem dashboard-recentOrderItem ${item.isOverdue ? 'is-overdue' : ''}`.trim()} key={`recent-order-${orderLabel}-${created}`}>
+                  <div className="dashboard-recentOrderTop">
+                    <div className="dashboard-recentOrderMain">
+                      <div className="dashboard-listTitle dashboard-recentOrderTitle">{orderLabel} - {customer}</div>
+                      <div className="dashboard-listSub dashboard-recentOrderMeta">{created}</div>
+                    </div>
+                    <div className="dashboard-recentOrderSide">
+                      <b className="dashboard-recentOrderTotal">{formatCompactVnd(item.total || 0)}</b>
+                      <div className="dashboard-recentOrderSideTags">
+                        <span className="dashboard-kpiChip payment">{payment}</span>
+                        <span className={`dashboard-kpiChip ${item.isOverdue ? 'overdue' : 'neutral'}`}>{pendingText}</span>
+                      </div>
+                    </div>
 
-        <PortalCard title="Order Attention" className="portal-card dashboard-orderAttentionCard">
-          <div className="dashboard-orderAttentionStats">
-            <div className="dashboard-orderAttentionStat is-warning">
-              <span>Pending Orders</span>
-              <b>{Number(k?.pendingOrders?.value || 0)}</b>
-            </div>
-            <div className="dashboard-orderAttentionStat is-info">
-              <span>Today Orders</span>
-              <b>{Number(k?.orders?.todayTotalOrders || 0)}</b>
-            </div>
-            <div className="dashboard-orderAttentionStat is-good">
-              <span>Completion Rate</span>
-              <b>{Number(k?.orderCompletion?.value || 0)}%</b>
-            </div>
-          </div>
-          <div className="dashboard-list" style={{ marginTop: 10 }}>
-            {(data?.insights || []).filter((x) => String(x.text || '').toLowerCase().includes('order')).slice(0, 3).map((item, idx) => (
-              <div className="dashboard-listItem" key={`order-attn-${idx}`}>
-                <div>
-                  <div className="dashboard-listTitle">{item.text}</div>
+                    <div className="dashboard-recentOrderProducts">{productLine}</div>
+                  </div>
+
+                  {item.isOverdue ? <div className="dashboard-recentOrderWarn">Warning: Pending over 1 week, please process soon.</div> : null}
                 </div>
-                {item.actionHref ? <Link className="dashboard-insightAction" to={item.actionHref}>{item.actionLabel || 'Open'}</Link> : null}
-              </div>
-            ))}
+              )
+            })}
           </div>
+          </PortalCard>
+
+          <PortalCard title="Order Status" className="portal-card">
+            <div className="dashboard-donutRow dashboard-donutRow--status">
+              <div className="dashboard-donutDisplay dashboard-donutDisplay--status" style={{ background: buildConic(orderStatusParts) }} />
+              <div className="dashboard-statusInline dashboard-statusInline--wide dashboard-statusInline--legendRow">
+                {orderStatusParts.map((x) => (
+                  <div className="dashboard-statusChip" key={x.label}>
+                    <span className="dashboard-statusLeft"><span className="dashboard-statusDot" style={{ background: x.color }} />{x.label}</span>
+                    <b>{x.value}</b>
+                  </div>
+                ))}
+              </div>
+            </div>
         </PortalCard>
       </div>
 
       <div className="portal-grid2">
         <PortalCard title="Inventory Alerts" className="portal-warningCard dashboard-cardFullWidth" right={<span className="portal-warningPill"><IconAlertTriangle /> Priority</span>}>
-          <div className="dashboard-list">
+          <div className="dashboard-list dashboard-inventoryAlertList">
             {(data?.inventoryAlerts || []).map((x) => (
-              <div className="dashboard-listItem" key={x.name}>
-                <div>
+              <div className={`dashboard-listItem dashboard-inventoryAlertItem ${x.severity === 'out_of_stock' ? 'is-out' : 'is-warning'}`.trim()} key={x.name}>
+                <div className="dashboard-inventoryAlertMain">
                   <div className="dashboard-listTitle">{x.name}</div>
-                  <div className="dashboard-listSub">Current: {x.qty} | Reorder: {x.reorderLevel}</div>
+                  <div className="dashboard-listSub dashboard-inventoryAlertMeta">Type: {x.typeLabel || (x.type === 'retail' ? 'Retail Product' : 'Supply Item')}</div>
+                  <div className="dashboard-kpiRow dashboard-inventoryAlertChips">
+                    <span className="dashboard-kpiChip neutral">Current: {x.qty}</span>
+                    <span className="dashboard-kpiChip pending">Reorder: {x.reorderLevel}</span>
+                    <span className={`dashboard-kpiChip ${x.severity === 'out_of_stock' || x.daysRemaining <= 3 ? 'cancelled' : 'neutral'}`}>Days Left: {x.daysRemaining}</span>
+                  </div>
+                  <div className="dashboard-listSub dashboard-inventoryAlertPriceRow">
+                    Import: {formatCompactVnd(x.importPrice || 0)} | Sell: {formatCompactVnd(x.sellPrice || 0)}
+                  </div>
                 </div>
-                <span className={`dashboard-stockTag ${x.severity === 'critical' ? 'is-critical' : 'is-warning'}`.trim()}>
-                  {x.severity === 'critical' ? 'Critical' : 'Low stock'}
+                <span className={`dashboard-stockTag ${x.severity === 'out_of_stock' ? 'is-out' : 'is-warning'}`.trim()}>
+                  {x.severityLabel || (x.severity === 'out_of_stock' ? 'Out of stock' : 'Warning')}
                 </span>
               </div>
             ))}

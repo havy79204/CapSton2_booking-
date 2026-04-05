@@ -44,13 +44,33 @@ async function getReports(from, to, options = {}) {
   const searchLike = search ? `%${search}%` : null
   const paymentFilter = paymentMethod && paymentMethod !== 'StockOut' ? '__NO_MATCH__' : null
 
-  const rangeWhere = fromIso && toIso ? 'WHERE PaidAt IS NOT NULL AND CAST(PaidAt AS date) BETWEEN @from AND @to' : ''
-  const binds = fromIso && toIso ? { from: fromIso, to: toIso } : {}
+  const binds = { from: fromIso, to: toIso }
 
   const revenueRes = await query(
-    `SELECT SUM(Amount) AS Revenue, COUNT(1) AS Cnt
-     FROM Payments
-     ${rangeWhere}`,
+    `SELECT
+        SUM(COALESCE(x.Revenue, 0)) AS Revenue,
+        SUM(COALESCE(x.Cnt, 0)) AS Cnt
+      FROM (
+        SELECT
+          SUM(ISNULL(sv.Price, 0)) AS Revenue,
+          COUNT(DISTINCT b.BookingId) AS Cnt
+        FROM BookingServices bs
+        INNER JOIN Bookings b ON b.BookingId = bs.BookingId
+        LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+        WHERE (@from IS NULL OR CAST(b.BookingTime AS date) >= @from)
+          AND (@to IS NULL OR CAST(b.BookingTime AS date) <= @to)
+          AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')
+
+        UNION ALL
+
+        SELECT
+          SUM(ISNULL(o.Total, 0)) AS Revenue,
+          COUNT(1) AS Cnt
+        FROM Orders o
+        WHERE (@from IS NULL OR CAST(o.CreatedAt AS date) >= @from)
+          AND (@to IS NULL OR CAST(o.CreatedAt AS date) <= @to)
+          AND LOWER(LTRIM(RTRIM(COALESCE(o.Status, '')))) IN ('completed', 'complete', 'done')
+      ) x`,
     binds
   ).catch(() => ({ recordset: [{ Revenue: 0, Cnt: 0 }] }))
 
@@ -66,11 +86,31 @@ async function getReports(from, to, options = {}) {
   const activeCustomers = Number(activeCustRes.recordset?.[0]?.Cnt || 0)
 
   const trendRes = await query(
-    `SELECT CAST(PaidAt AS date) AS D, SUM(Amount) AS Revenue
-     FROM Payments
-     WHERE PaidAt IS NOT NULL AND CAST(PaidAt AS date) >= DATEADD(day, -6, CAST(GETDATE() AS date))
-     GROUP BY CAST(PaidAt AS date)
-     ORDER BY D`
+    `SELECT t.D, SUM(t.Revenue) AS Revenue
+     FROM (
+       SELECT
+         CAST(b.BookingTime AS date) AS D,
+         SUM(ISNULL(sv.Price, 0)) AS Revenue
+       FROM BookingServices bs
+       INNER JOIN Bookings b ON b.BookingId = bs.BookingId
+       LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+       WHERE CAST(b.BookingTime AS date) >= DATEADD(day, -6, CAST(GETDATE() AS date))
+         AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')
+       GROUP BY CAST(b.BookingTime AS date)
+
+       UNION ALL
+
+       SELECT
+         CAST(o.CreatedAt AS date) AS D,
+         SUM(ISNULL(o.Total, 0)) AS Revenue
+       FROM Orders o
+       WHERE o.CreatedAt IS NOT NULL
+         AND CAST(o.CreatedAt AS date) >= DATEADD(day, -6, CAST(GETDATE() AS date))
+         AND LOWER(LTRIM(RTRIM(COALESCE(o.Status, '')))) IN ('completed', 'complete', 'done')
+       GROUP BY CAST(o.CreatedAt AS date)
+     ) t
+     GROUP BY t.D
+     ORDER BY t.D`
   ).catch(() => ({ recordset: [] }))
 
   const byDate = new Map((trendRes.recordset || []).map((r) => [String(r.D).slice(0, 10), Number(r.Revenue || 0)]))
@@ -85,9 +125,14 @@ async function getReports(from, to, options = {}) {
   const topServicesRes = await query(
     `SELECT TOP 5 sv.Name, COUNT(1) AS Cnt
      FROM BookingServices bs
+     INNER JOIN Bookings b ON b.BookingId = bs.BookingId
      LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+     WHERE (@from IS NULL OR CAST(b.BookingTime AS date) >= @from)
+       AND (@to IS NULL OR CAST(b.BookingTime AS date) <= @to)
+       AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')
      GROUP BY sv.Name
-     ORDER BY Cnt DESC`
+     ORDER BY Cnt DESC`,
+    binds
   ).catch(() => ({ recordset: [] }))
 
   const services = (topServicesRes.recordset || []).map((r) => ({ name: r.Name || '—', value: Number(r.Cnt || 0) }))
@@ -98,11 +143,16 @@ async function getReports(from, to, options = {}) {
         COUNT(bs.BookingServiceId) AS Appt,
         SUM(COALESCE(bs.Price, sv.Price)) AS Revenue
       FROM BookingServices bs
+      INNER JOIN Bookings b ON b.BookingId = bs.BookingId
       LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
       LEFT JOIN Staff st ON st.StaffId = bs.StaffId
       LEFT JOIN Users su ON su.UserId = st.UserId
+      WHERE (@from IS NULL OR CAST(b.BookingTime AS date) >= @from)
+        AND (@to IS NULL OR CAST(b.BookingTime AS date) <= @to)
+        AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')
       GROUP BY su.Name
-      ORDER BY Revenue DESC`
+      ORDER BY Revenue DESC`,
+    binds
   ).catch(() => ({ recordset: [] }))
 
   const staff = (staffRes.recordset || []).map((r) => ({
