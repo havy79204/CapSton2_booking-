@@ -529,7 +529,7 @@ async function getProduct(productId) {
               ${schema.hasOrders ? 'LEFT JOIN Orders o ON o.OrderId = oi.OrderId' : ''}
               WHERE oi.ProductId = p.ProductId
               ${schema.hasOrders && schema.ordersHasStatus
-                ? "AND (o.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), o.Status)))) NOT IN ('cancelled', 'canceled'))"
+                ? "AND (o.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), o.Status)))) NOT IN ('cancelled', 'cancelled'))"
                 : ''}
             )`
           : 'CAST(0 AS INT)'} AS SoldCount,
@@ -1070,7 +1070,7 @@ async function listRetailProducts() {
               ${schema.hasOrders ? 'LEFT JOIN Orders o ON o.OrderId = oi.OrderId' : ''}
               WHERE oi.ProductId = p.ProductId
               ${schema.hasOrders && schema.ordersHasStatus
-                ? "AND (o.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), o.Status)))) NOT IN ('cancelled', 'canceled'))"
+                ? "AND (o.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), o.Status)))) NOT IN ('cancelled', 'cancelled'))"
                 : ''}
             )`
           : 'CAST(0 AS INT)'} AS SoldCount,
@@ -1324,7 +1324,7 @@ function normalizeOrderStatusInput(value) {
   if (raw === 'processing') return 'Processing'
   if (raw === 'shipping' || raw === 'shipped' || raw === 'delivering' || raw === 'in transit' || raw === 'dang giao hang') return 'Shipping'
   if (raw === 'completed' || raw === 'complete' || raw === 'delivered') return 'Completed'
-  if (raw === 'cancelled' || raw === 'canceled') return 'Cancelled'
+  if (raw === 'cancelled' || raw === 'cancelled') return 'Cancelled'
   if (raw === 'failed') return 'Failed'
   return null
 }
@@ -1421,7 +1421,7 @@ function buildOrderFilters(filters = {}, alias = 'o') {
     } else if (status === 'Completed') {
       where.push(`(${alias}.Status IN ('Completed', 'Delivered'))`)
     } else if (status === 'Cancelled') {
-      where.push(`(${alias}.Status IN ('Cancelled', 'Canceled'))`)
+      where.push(`(${alias}.Status IN ('Cancelled', 'Cancelled'))`)
     } else {
       where.push(`${alias}.Status = @status`)
       params.status = status

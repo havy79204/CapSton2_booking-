@@ -231,7 +231,7 @@ async function listServicesGrouped(includeInactive = false) {
           ${schema.bookingsTableExists && schema.bookingsHasStatus
             ? `AND (
               b.BookingStatus IS NULL
-              OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.BookingStatus)))) NOT IN ('cancelled', 'canceled')
+              OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.BookingStatus)))) NOT IN ('cancelled', 'cancelled')
             )`
             : ''}
         ) AS TotalBookings,`
@@ -343,7 +343,7 @@ async function getServiceById(serviceId, includeInactive = false) {
           ${schema.bookingsTableExists && schema.bookingsHasStatus
             ? `AND (
               b.BookingStatus IS NULL
-              OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.BookingStatus)))) NOT IN ('cancelled', 'canceled')
+              OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), b.BookingStatus)))) NOT IN ('cancelled', 'cancelled')
             )`
             : ''}
         ) AS TotalBookings,`

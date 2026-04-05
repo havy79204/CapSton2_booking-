@@ -270,7 +270,7 @@ function derivePaymentStatus(orderStatus, paymentMethod) {
   const status = String(orderStatus || '').trim().toLowerCase()
   const method = String(paymentMethod || '').trim().toLowerCase()
 
-  if (status === 'cancelled' || status === 'canceled' || status === 'failed') return 'Failed'
+  if (status === 'cancelled' || status === 'cancelled' || status === 'failed') return 'Failed'
   if (status === 'completed' || status === 'delivered' || status === 'paid' || status === 'confirmed') return 'Paid'
   if (method === 'cod' || method === 'store') return 'Pay On Delivery'
   return 'C Payment'

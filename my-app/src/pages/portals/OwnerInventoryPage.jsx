@@ -4161,7 +4161,7 @@ export default function OwnerInventoryPage() {
                   <tr key={`${h.date}-${h.product}-${idx}`}>
                     <td>{h.date}</td>
                     <td>
-                      <span className={`portal-badge ${h.type === 'Stock In' ? 'confirmed' : 'canceled'}`.trim()}>
+                      <span className={`portal-badge ${h.type === 'Stock In' ? 'confirmed' : 'cancelled'}`.trim()}>
                         {h.type}
                       </span>
                     </td>

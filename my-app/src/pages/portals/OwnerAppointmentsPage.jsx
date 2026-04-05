@@ -260,7 +260,7 @@ export default function OwnerAppointmentsPage() {
     if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') e.nativeEvent.stopImmediatePropagation();
     if (typeof console !== 'undefined' && console.debug) console.debug('OwnerAppointments: handleEditClick', { id: appt?.id, status: appt?.status, eventType: e.type, button: e.button });
     const rawStatus = String(appt?.status || '').trim().toLowerCase();
-    const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'canceled' : (appt?.status || 'pending');
+    const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'cancelled' : (appt?.status || 'pending');
     setEditingAppt({ ...appt, status: normalizedStatus });
     const currentIds = Array.isArray(appt.serviceIds) ? appt.serviceIds.map(String) : [];
     setSelectedServiceIds(currentIds);
@@ -381,7 +381,7 @@ export default function OwnerAppointmentsPage() {
         if (raw !== null && String(raw).trim() !== '') {
           const s = String(raw).trim();
           const lower = s.toLowerCase();
-          if (lower === 'delete' || lower === 'deleted') return 'canceled';
+          if (lower === 'delete' || lower === 'deleted') return 'cancelled';
           return s;
         }
         return editingAppt?.status || 'pending';
@@ -415,7 +415,7 @@ export default function OwnerAppointmentsPage() {
   const filteredAppointments = useMemo(() => 
     appointments
       .filter(appt => {
-        // Show all appointments including canceled and completed
+        // Show all appointments including cancelled and completed
         // Only filter out appointments that are explicitly marked for deletion with a special flag
         return true;
       })
@@ -700,7 +700,7 @@ export default function OwnerAppointmentsPage() {
               <option value="pending">Pending</option>
               <option value="booked">Booked</option>
                 <option value="completed">Completed</option>
-                <option value="canceled">Canceled</option>
+                <option value="cancelled">Cancelled</option>
             </select>
           </div>
 
