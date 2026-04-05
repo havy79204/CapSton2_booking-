@@ -16,6 +16,7 @@ const aiClient = require('./aiClient')
 const simpleCache = require('./simpleCache')
 const fs = require('fs/promises')
 const path = require('path')
+const crypto = require('crypto')
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY
 const ACTIVE_BOOKING_STATUSES = ['pending', 'booked', 'confirmed', 'c']
@@ -33,6 +34,31 @@ function parseImageDataUrl(dataUrl) {
   const buf = Buffer.from(base64, 'base64')
   const ext = kind === 'jpeg' ? 'jpg' : kind
   return { buf, ext, mime: `image/${ext === 'jpg' ? 'jpeg' : ext}` }
+}
+
+function hashText(value = '') {
+  return crypto.createHash('sha1').update(String(value || ''), 'utf8').digest('hex').slice(0, 24)
+}
+
+function normalizePromptForCache(prompt = '') {
+  return normalizeForCompare(prompt || '').slice(0, 200)
+}
+
+function getImageAnalysisCacheTtlSeconds() {
+  const raw = Number(process.env.IMAGE_ANALYSIS_CACHE_TTL_SECONDS || 1800)
+  return Number.isFinite(raw) && raw > 0 ? raw : 1800
+}
+
+function getImageQaCacheTtlSeconds() {
+  const raw = Number(process.env.IMAGE_QA_CACHE_TTL_SECONDS || 1200)
+  return Number.isFinite(raw) && raw > 0 ? raw : 1200
+}
+
+function buildImageAnalysisCacheKey({ imageDataUrl, userPrompt }) {
+  const base64 = String(imageDataUrl || '').split(',')[1] || ''
+  const imageHash = hashText(base64)
+  const promptHash = hashText(normalizePromptForCache(userPrompt || ''))
+  return `ai:image-analysis:v2:${imageHash}:${promptHash}`
 }
 
 async function saveChatImageFromDataUrl({ dataUrl } = {}) {
@@ -144,6 +170,63 @@ async function findSuggestedServicesByKeywords(keywords = []) {
   }))
 }
 
+async function findFallbackProducts(limit = 4) {
+  const safeLimit = Number.isFinite(Number(limit)) ? Number(limit) : 4
+  let res = await query(
+    `SELECT TOP (${safeLimit})
+        p.ProductId,
+        p.Name,
+        p.Price,
+        p.Stock,
+        COALESCE(img.ImageUrl, p.ImageUrl) AS ImageUrl
+     FROM Products p
+     OUTER APPLY (
+       SELECT TOP 1 pi.ImageUrl
+       FROM ProductImages pi
+       WHERE pi.ProductId = p.ProductId
+       ORDER BY ISNULL(pi.SortOrder, 2147483647), pi.ImageId
+     ) img
+     ORDER BY p.Stock DESC, p.Name ASC`,
+    {}
+  ).catch(() => null)
+
+  if (!res || !Array.isArray(res.recordset)) {
+    res = await query(
+      `SELECT TOP (${safeLimit}) p.ProductId, p.Name, p.Price, p.Stock, p.ImageUrl
+       FROM Products p
+       ORDER BY p.Stock DESC, p.Name ASC`,
+      {}
+    ).catch(() => ({ recordset: [] }))
+  }
+
+  return (res.recordset || []).map((r) => ({
+    ProductId: r.ProductId,
+    Name: r.Name,
+    Price: Number(r.Price || 0),
+    ImageUrl: r.ImageUrl || null,
+    Stock: Number(r.Stock || 0),
+  }))
+}
+
+async function findFallbackServices(limit = 4) {
+  const safeLimit = Number.isFinite(Number(limit)) ? Number(limit) : 4
+  const res = await query(
+    `SELECT TOP (${safeLimit}) s.ServiceId, s.Name, s.Price, s.DurationMinutes, s.Description
+     FROM Services s
+     WHERE (s.Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), s.Status)))) NOT IN ('deleted','delete','inactive'))
+     ORDER BY s.Name ASC`,
+    {}
+  ).catch(() => ({ recordset: [] }))
+
+  return (res.recordset || []).map((r) => ({
+    ServiceId: r.ServiceId,
+    Name: r.Name,
+    Price: Number(r.Price || 0),
+    DurationMinutes: Number(r.DurationMinutes || 0),
+    Description: r.Description || '',
+  }))
+}
+
 function extractPromptKeywords(prompt = '') {
   const raw = String(prompt || '').toLowerCase()
   if (!raw) return []
@@ -173,11 +256,72 @@ function extractPromptKeywords(prompt = '') {
   return [...new Set([...tokens, ...hints])]
 }
 
+function detectImageRequestMode(prompt = '') {
+  const raw = normalizeForCompare(prompt)
+  if (!raw) return 'general'
+
+  const asksService = /(dich vu|goi y dich vu|service|combo|cham soc|manicure|pedicure|phuc hoi|tri lieu)/i.test(raw)
+  const asksProduct = /(san pham|goi y san pham|product|serum|kem|dau|mask|mat na)/i.test(raw)
+
+  if (asksService && asksProduct) return 'both'
+  if (asksService) return 'service'
+  if (asksProduct) return 'product'
+  return 'general'
+}
+
+function buildServiceKeywords({ baseKeywords = [], caption = '', analyses = [] } = {}) {
+  const out = []
+  out.push(...(Array.isArray(baseKeywords) ? baseKeywords : []))
+
+  const cap = normalizeForCompare(caption)
+  if (/mong|tay|nail|manicure|pedicure/.test(cap)) {
+    out.push('nail', 'manicure', 'pedicure', 'cham soc mong', 'duong mong')
+  }
+  if (/yeu|mong|gay|de gay|hu ton|kho/.test(cap)) {
+    out.push('phuc hoi', 'duong mong', 'tri lieu', 'cham soc')
+  }
+  if (/son|gel|mau|ombre|cat eye/.test(cap)) {
+    out.push('son gel', 'son mong', 'nail art')
+  }
+
+  for (const a of (Array.isArray(analyses) ? analyses : [])) {
+    const h = a?.nail_health || {}
+    const structure = String(h?.structure || '').toLowerCase()
+    const moisture = String(h?.moisture || '').toLowerCase()
+    const risk = String(h?.risk_level || '').toLowerCase()
+
+    if (structure === 'weak') out.push('phuc hoi', 'duong mong', 'tri lieu mong yeu')
+    if (moisture === 'dry') out.push('duong am', 'duong mong', 'cham soc mong kho')
+    if (risk === 'high' || risk === 'medium') out.push('cham soc', 'tri lieu', 'bao ve mong')
+  }
+
+  // Keep both EN and VI tokens because DB data can be mixed.
+  out.push('service', 'care', 'treatment', 'combo')
+
+  return [...new Set(out.map((k) => String(k || '').trim()).filter(Boolean))].slice(0, 16)
+}
+
+function buildProductKeywords({ baseKeywords = [], caption = '' } = {}) {
+  const out = []
+  out.push(...(Array.isArray(baseKeywords) ? baseKeywords : []))
+
+  const cap = normalizeForCompare(caption)
+  if (/mong|tay|nail/.test(cap)) out.push('nail', 'cuticle oil', 'nail hardener', 'repair')
+  if (/kho|hu ton|yeu|gay/.test(cap)) out.push('serum', 'oil', 'repair', 'nourishing')
+  out.push('product', 'care')
+
+  return [...new Set(out.map((k) => String(k || '').trim()).filter(Boolean))].slice(0, 16)
+}
+
 async function analyzeNailImageWithAI({ imageDataUrl, userPrompt = '' } = {}) {
+  const cacheKey = buildImageAnalysisCacheKey({ imageDataUrl, userPrompt })
+  const cached = simpleCache.get(cacheKey)
+  if (cached) return cached
+
   const discovered = await discoverAvailableModels()
   const models = discovered.generateContentModels.length
     ? discovered.generateContentModels
-    : ['gemini-1.5-flash', 'gemini-1.5-flash-latest']
+    : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
 
   const analysisInstruction = [
     'Bạn là AI Assistant cho salon làm đẹp, có thể phân tích ảnh móng, sản phẩm và dịch vụ.',
@@ -186,6 +330,7 @@ async function analyzeNailImageWithAI({ imageDataUrl, userPrompt = '' } = {}) {
     'Bước 3: nếu là product/service thì mô tả ngắn nội dung ảnh và đưa keyword gợi ý mua/sử dụng trong keywords + advice.',
     'Không được trả lời sai domain (ví dụ ảnh sản phẩm thì không nói là ảnh móng tay).',
     'Nếu khách có đặt câu hỏi kèm ảnh, hãy trả lời ngắn gọn đúng câu hỏi trong field question_answer.',
+    'Không được nhắc lại nguyên văn câu hỏi của khách trong question_answer.',
     'Đầu ra BẮT BUỘC là JSON thuần theo schema:',
     '{"detected_domain":"nail|product|service|other","is_hand_image":boolean,"image_quality":"good|medium|poor","nail_health":{"moisture":"dry|normal|oily","structure":"weak|normal|strong","regrowth_mm":number,"risk_level":"low|medium|high"},"keywords":[string],"visual_tags":[string],"dominant_colors":["#RRGGBB"],"advice":[string],"summary":string,"customer_message":string,"question_answer":string}',
     `Ngữ cảnh thêm từ khách: ${String(userPrompt || '')}`,
@@ -271,13 +416,14 @@ async function matchProductsByImageAnalysis(analysis = {}) {
 
       const normalized = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
       const parsed = JSON.parse(normalized)
+      simpleCache.set(cacheKey, parsed, getImageAnalysisCacheTtlSeconds() * 1000)
       return parsed
     } catch (err) {
       errors.push(`vision:${modelName}:${String(err?.message || err)}`)
     }
   }
 
-  return {
+  const fallback = {
     detected_domain: 'other',
     is_hand_image: false,
     image_quality: 'poor',
@@ -289,6 +435,8 @@ async function matchProductsByImageAnalysis(analysis = {}) {
     question_answer: userPrompt ? 'Mình chưa thể trả lời chính xác câu hỏi từ ảnh hiện tại. Bạn chụp lại ảnh rõ hơn giúp mình nhé.' : '',
     _debug: errors.join(' | '),
   }
+  simpleCache.set(cacheKey, fallback, getImageAnalysisCacheTtlSeconds() * 1000)
+  return fallback
 }
 
 function toIsoDate(d) {
@@ -328,6 +476,32 @@ function buildLookupTokens(prompt = '') {
   return [...new Set([...normalizedPromptTokens, ...keywordTokens])]
     .filter((t) => !genericStop.has(t))
     .slice(0, 8)
+}
+
+function looksLikeQuestionEcho(text = '', question = '') {
+  const t = normalizeForCompare(text)
+  const q = normalizeForCompare(question)
+  if (!t || !q) return false
+  if (t === q) return true
+  if (t.includes(q) && t.length <= q.length + 24) return true
+  if (q.includes(t) && q.length <= t.length + 24) return true
+  return false
+}
+
+function sanitizeAnswerEcho(text = '', question = '') {
+  const raw = String(text || '').trim()
+  const q = String(question || '').trim()
+  if (!raw) return ''
+  if (!q) return raw
+  if (looksLikeQuestionEcho(raw, q)) return ''
+
+  let cleaned = raw
+  const qEsc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  cleaned = cleaned.replace(new RegExp(`^\\s*${qEsc}\\s*[:：-]*\\s*`, 'i'), '').trim()
+  cleaned = cleaned.replace(new RegExp(`\\b${qEsc}\\b`, 'i'), '').trim()
+
+  if (!cleaned || looksLikeQuestionEcho(cleaned, q)) return ''
+  return cleaned
 }
 
 function detectIntent(prompt) {
@@ -985,11 +1159,6 @@ function detectWindowFromPrompt(prompt = '') {
   return null
 }
 
-function shouldAutoCreateBooking(prompt) {
-  const t = normalize(prompt)
-  return /xác nhận|xac nhan|đặt luôn|dat luon|chốt lịch|chot lich|ok đặt/.test(t)
-}
-
 function buildSystemPrompt({ intent, userPrompt, services, products, orderCatalogCtx, bookingCtx, settingsCtx, userBookingCtx, conversationCtx }) {
   const serviceJson = JSON.stringify(services.slice(0, 20))
   const productJson = JSON.stringify((products || []).slice(0, 20))
@@ -1002,6 +1171,9 @@ function buildSystemPrompt({ intent, userPrompt, services, products, orderCatalo
   return [
     'Bạn là trợ lý CSKH cho salon nail.',
     'Mục tiêu: tư vấn dịch vụ, cung cấp thông tin giá/thời lượng, hỗ trợ đặt lịch, trả lời FAQ.',
+    'QUY TẮC BẮT BUỘC: bạn KHÔNG có quyền tạo/đặt lịch thay khách; chỉ được tra cứu lịch trống, giờ làm và nhân viên rảnh.',
+    'Không được nói các câu như: "đã đặt lịch", "đã ghi nhận yêu cầu đặt lịch", "đã tạo lịch".',
+    'Khi khách muốn đặt lịch, hãy hướng dẫn khách tự đặt qua trang đặt lịch hoặc liên hệ lễ tân.',
     'Chỉ dùng dữ liệu nội bộ được cung cấp bên dưới; không bịa thông tin ngoài hệ thống.',
     'Nếu thiếu dữ liệu, nói rõ là hệ thống chưa có thông tin đó.',
     'Giọng điệu lịch sự, tư vấn ngắn gọn, thực tế.',
@@ -1076,9 +1248,9 @@ function localFallbackResponse({
         const alt = (bookingCtx?.alternatives || []).slice(0, 3).join(', ')
         return `Khung giờ ${parsedDateTime.time} ngày ${parsedDateTime.date} hiện đang bận. Bạn có thể chọn: ${alt || 'khung giờ khác trong ngày'} .`
       }
-      return `Khung giờ ${parsedDateTime.time} ngày ${parsedDateTime.date} hiện có thể đặt. Bạn hãy nhắn: "Xác nhận đặt lịch" để mình tạo lịch cho bạn.`
+      return `Khung giờ ${parsedDateTime.time} ngày ${parsedDateTime.date} hiện có thể đặt. Chatbox chỉ hỗ trợ tra cứu, không tự tạo lịch. Bạn vui lòng đặt lịch tại trang Booking hoặc liên hệ lễ tân để xác nhận.`
     }
-    return 'Bạn cho mình xin ngày và giờ cụ thể (ví dụ: 17h ngày mai) để mình kiểm tra lịch trống nhé.'
+    return 'Bạn cho mình xin ngày và giờ cụ thể (ví dụ: 17h ngày mai) để mình kiểm tra lịch trống nhé. Chatbox không tự đặt lịch.'
   }
 
   if (intent === 'faq') {
@@ -1269,34 +1441,71 @@ async function discoverAvailableModels() {
   return discovered
 }
 
+function parseGeminiMaxTokens(defaultTokens = 2200) {
+  const maxTokensEnv = process.env.GEMINI_MAX_TOKENS
+  if (maxTokensEnv === undefined || maxTokensEnv === null || String(maxTokensEnv).trim() === '') {
+    return defaultTokens
+  }
+
+  const raw = String(maxTokensEnv).trim().toLowerCase()
+  if (raw === 'unlimited' || Number(raw) === 0) return null
+
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultTokens
+}
+
+function hasCustomGeminiMaxTokens() {
+  const raw = process.env.GEMINI_MAX_TOKENS
+  return !(raw === undefined || raw === null || String(raw).trim() === '')
+}
+
+function isGeminiMaxTokenFinishReason(candidate = null) {
+  const reason = String(
+    candidate?.finishReason || candidate?.finish_reason || candidate?.finishReasonType || ''
+  ).toUpperCase()
+  return reason.includes('MAX_TOKENS') || reason.includes('TOKEN')
+}
+
+async function generateGeminiSdkText(model, fullPrompt, maxTokens) {
+  const genCfg = { temperature: 0.25 }
+  if (Number.isFinite(maxTokens) && maxTokens > 0) genCfg.maxOutputTokens = maxTokens
+
+  const result = await aiClient.guard(() => model.generateContent({
+    contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+    generationConfig: genCfg,
+  }), { cost: 1 })
+
+  const text = String(result?.response?.text?.() || '').trim()
+  const candidate = result?.response?.candidates?.[0] || null
+  return { text, candidate }
+}
+
 async function tryGeminiSdk(fullPrompt, discoveredModels = null) {
   const { GoogleGenerativeAI } = require('@google/generative-ai')
   const genAI = new GoogleGenerativeAI(GEMINI_KEY)
   const discovered = discoveredModels || await discoverAvailableModels()
   const models = discovered.generateContentModels.length
     ? discovered.generateContentModels
-    : ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-pro']
+    : ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-2.5-pro']
   const errors = []
 
   for (const modelName of models) {
     try {
       const model = genAI.getGenerativeModel({ model: modelName })
-      const maxTokensEnv = process.env.GEMINI_MAX_TOKENS
-      const maxTokens = (maxTokensEnv === undefined || maxTokensEnv === null || String(maxTokensEnv).trim() === '')
-        ? 700
-        : (String(maxTokensEnv).toLowerCase() === 'unlimited' || Number(maxTokensEnv) === 0)
-          ? null
-          : Number(maxTokensEnv)
+      const baseMaxTokens = parseGeminiMaxTokens(2200)
+      const { text, candidate } = await generateGeminiSdkText(model, fullPrompt, baseMaxTokens)
 
-      const genCfg = { temperature: 0.25 }
-      if (Number.isFinite(maxTokens) && maxTokens > 0) genCfg.maxOutputTokens = maxTokens
+      if (text) {
+        if (!isGeminiMaxTokenFinishReason(candidate)) return text
 
-      const result = await aiClient.guard(() => model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
-        generationConfig: genCfg,
-      }), { cost: 1 })
-      const text = result?.response?.text?.() || ''
-      if (String(text).trim()) return String(text).trim()
+        // Retry once with higher cap when server uses default token policy.
+        if (!hasCustomGeminiMaxTokens() && Number.isFinite(baseMaxTokens) && baseMaxTokens < 4096) {
+          const retry = await generateGeminiSdkText(model, fullPrompt, 4096)
+          if (retry.text) return retry.text
+        }
+
+        return text
+      }
     } catch (err) {
       errors.push(`sdk:${modelName}:${String(err?.message || err)}`)
     }
@@ -1315,12 +1524,7 @@ async function tryGeminiHttp(fullPrompt, discoveredModels = null) {
   const attempts = []
 
   // prepare generationConfig based on GEMINI_MAX_TOKENS env var
-  const maxTokensEnvHttp = process.env.GEMINI_MAX_TOKENS
-  const maxTokensHttp = (maxTokensEnvHttp === undefined || maxTokensEnvHttp === null || String(maxTokensEnvHttp).trim() === '')
-    ? 700
-    : (String(maxTokensEnvHttp).toLowerCase() === 'unlimited' || Number(maxTokensEnvHttp) === 0)
-      ? null
-      : Number(maxTokensEnvHttp)
+  const maxTokensHttp = parseGeminiMaxTokens(2200)
 
   const genCfgHttp = { temperature: 0.25 }
   if (Number.isFinite(maxTokensHttp) && maxTokensHttp > 0) genCfgHttp.maxOutputTokens = maxTokensHttp
@@ -1368,7 +1572,7 @@ async function tryGeminiHttp(fullPrompt, discoveredModels = null) {
     // hard fallback if discovery returns empty
     attempts.push(
       {
-        url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent',
+        url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
         body: {
           contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
           generationConfig: genCfgHttp,
@@ -1404,13 +1608,8 @@ async function tryGeminiHttp(fullPrompt, discoveredModels = null) {
   for (const item of attempts) {
     const url = `${item.url}?key=${apiKey}`
     try {
-      // respect GEMINI_MAX_TOKENS env var; if set to 'unlimited' or 0 omit maxOutputTokens
-      const maxTokensEnv = process.env.GEMINI_MAX_TOKENS
-      const maxTokens = (maxTokensEnv === undefined || maxTokensEnv === null || String(maxTokensEnv).trim() === '')
-        ? (item.body.generationConfig && item.body.generationConfig.maxOutputTokens) || null
-        : (String(maxTokensEnv).toLowerCase() === 'unlimited' || Number(maxTokensEnv) === 0)
-          ? null
-          : Number(maxTokensEnv)
+      // respect GEMINI_MAX_TOKENS env var; if unset, use higher default to reduce cut-off replies
+      const maxTokens = parseGeminiMaxTokens((item.body.generationConfig && item.body.generationConfig.maxOutputTokens) || 2200)
 
       const body = JSON.parse(JSON.stringify(item.body))
       if (body.generationConfig) {
@@ -1441,11 +1640,31 @@ async function tryGeminiHttp(fullPrompt, discoveredModels = null) {
       }
 
       const data = await res.json().catch(() => null)
-      const text = item.parser ? item.parser(data) : ''
-      if (String(text).trim()) {
+      const text = String(item.parser ? item.parser(data) : '').trim()
+      if (text) {
+        const candidate = data?.candidates?.[0] || null
+        const cappedByToken = isGeminiMaxTokenFinishReason(candidate)
+        if (cappedByToken && !hasCustomGeminiMaxTokens() && body?.generationConfig) {
+          const boostedBody = JSON.parse(JSON.stringify(body))
+          boostedBody.generationConfig.maxOutputTokens = 4096
+          const retryRes = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(boostedBody),
+          })
+          if (retryRes.ok) {
+            const retryData = await retryRes.json().catch(() => null)
+            const retryText = String(item.parser ? item.parser(retryData) : '').trim()
+            if (retryText) {
+              try { await aiClient.increment(1) } catch (_) { /* ignore */ }
+              return retryText
+            }
+          }
+        }
+
         // increment quota for successful useful response
         try { await aiClient.increment(1) } catch (_) { /* ignore */ }
-        return String(text).trim()
+        return text
       }
     } catch (err) {
       errors.push({ url: `${item.url}?key=***`, error: String(err?.message || err) })
@@ -1657,8 +1876,13 @@ async function postUserImageMessage(sessionId, userId, { imageDataUrl, imageData
   const analysisKeywords = analyses.flatMap((a) => (Array.isArray(a?.keywords) ? a.keywords : []))
   const promptKeywords = extractPromptKeywords(caption || '')
   const keywords = [...new Set([...analysisKeywords, ...promptKeywords])]
+  const requestMode = detectImageRequestMode(caption || '')
+  const serviceKeywords = buildServiceKeywords({ baseKeywords: keywords, caption: caption || '', analyses })
+  const productKeywords = buildProductKeywords({ baseKeywords: keywords, caption: caption || '' })
 
-  let questionAnswer = analyses.map((a) => String(a?.question_answer || '').trim()).find(Boolean) || ''
+  let questionAnswer = analyses
+    .map((a) => sanitizeAnswerEcho(String(a?.question_answer || '').trim(), caption || ''))
+    .find(Boolean) || ''
   if (!questionAnswer && String(caption || '').trim()) {
     const healthHints = analyses.slice(0, 3).map((a, idx) => {
       const h = a?.nail_health || {}
@@ -1674,17 +1898,45 @@ async function postUserImageMessage(sessionId, userId, { imageDataUrl, imageData
       'Hãy trả lời trực tiếp câu hỏi khách bằng tiếng Việt, ngắn gọn, thực tế, ưu tiên gợi ý sản phẩm/dịch vụ phù hợp.',
     ].join('\n')
 
-    questionAnswer = await generateAIResponse(imageContext, uid, { sessionId })
+    const qaCacheKey = `ai:image-qa:v1:${hashText(`${normalizePromptForCache(caption || '')}|${normalizeForCompare(healthHints)}`)}`
+    const cachedQa = await simpleCache.getOrSet(
+      qaCacheKey,
+      getImageQaCacheTtlSeconds(),
+      async () => generateAIResponse(imageContext, uid, { sessionId })
+    )
+    questionAnswer = sanitizeAnswerEcho(cachedQa, caption || '')
   }
 
-  const [suggestedProducts, suggestedServices] = await Promise.all([
-    findSuggestedProductsByKeywords(keywords.length ? keywords : ['product', 'care', 'repair', 'serum', 'oil']),
-    findSuggestedServicesByKeywords(keywords.length ? keywords : ['service', 'care', 'treatment', 'manicure', 'combo']),
+  const [relatedProducts, relatedServices] = await Promise.all([
+    findSuggestedProductsByKeywords(productKeywords.length ? productKeywords : ['product', 'care', 'repair', 'serum', 'oil']),
+    findSuggestedServicesByKeywords(serviceKeywords.length ? serviceKeywords : ['service', 'care', 'treatment', 'manicure', 'combo']),
   ])
+
+  const wantsServiceSuggestions = requestMode === 'service' || requestMode === 'both'
+  const wantsProductSuggestions = requestMode === 'product' || requestMode === 'both'
+
+  const hasRelatedProducts = Array.isArray(relatedProducts) && relatedProducts.length > 0
+  const hasRelatedServices = Array.isArray(relatedServices) && relatedServices.length > 0
+
+  const [fallbackProducts, fallbackServices] = (!hasRelatedProducts || !hasRelatedServices)
+    ? await Promise.all([
+      hasRelatedProducts ? Promise.resolve([]) : findFallbackProducts(4),
+      hasRelatedServices ? Promise.resolve([]) : findFallbackServices(4),
+    ])
+    : [[], []]
+
+  const suggestedProducts = wantsProductSuggestions
+    ? (hasRelatedProducts ? relatedProducts : fallbackProducts)
+    : []
+  const suggestedServices = wantsServiceSuggestions
+    ? (hasRelatedServices ? relatedServices : fallbackServices)
+    : []
 
   const allAdvice = [...new Set(analyses.flatMap((a) => (Array.isArray(a?.advice) ? a.advice : [])))].slice(0, 8)
   const customerMessages = analyses
     .map((a) => String(a?.customer_message || '').trim())
+    .map((msg) => sanitizeAnswerEcho(msg, caption || ''))
+    .filter((msg) => !looksLikeQuestionEcho(msg, caption || ''))
     .filter(Boolean)
   const fallbackMessage = analyses.length > 1
     ? `AI đã phân tích ${analyses.length} ảnh của bạn. Dưới đây là gợi ý phù hợp.`
@@ -1699,11 +1951,29 @@ async function postUserImageMessage(sessionId, userId, { imageDataUrl, imageData
   const firstHealth = analyses.map((a) => a?.nail_health).find(Boolean) || null
   const isHandImage = analyses.every((a) => Boolean(a?.is_hand_image))
   const detectedDomains = [...new Set(analyses.map((a) => String(a?.detected_domain || '').trim()).filter(Boolean))]
+  const serviceIntro = wantsServiceSuggestions
+    ? (suggestedServices.length
+      ? `Dịch vụ phù hợp bạn có thể cân nhắc: ${suggestedServices.slice(0, 3).map((s) => s.Name).join(', ')}.`
+      : 'Mình chưa tìm thấy dịch vụ phù hợp trực tiếp trong dữ liệu hiện tại.')
+    : ''
+
+  const productIntro = wantsProductSuggestions
+    ? (suggestedProducts.length
+      ? `Sản phẩm phù hợp bạn có thể tham khảo: ${suggestedProducts.slice(0, 3).map((p) => p.Name).join(', ')}.`
+      : 'Mình chưa tìm thấy sản phẩm phù hợp trực tiếp trong dữ liệu hiện tại.')
+    : ''
+
+  const mainText = [questionAnswer, ...customerMessages].filter(Boolean).join('\n\n') || fallbackMessage
 
   const aiPayload = {
     type: 'image-analysis',
-    text: [questionAnswer, ...customerMessages].filter(Boolean).join('\n\n') || fallbackMessage,
+    text: [mainText, serviceIntro, productIntro].filter(Boolean).join('\n\n'),
     questionAnswer: questionAnswer || '',
+    requestMode,
+    relatedFound: {
+      products: wantsProductSuggestions ? hasRelatedProducts : null,
+      services: wantsServiceSuggestions ? hasRelatedServices : null,
+    },
     analysis: {
       isHandImage,
       imageQuality,
@@ -1907,19 +2177,7 @@ async function generateAIResponse(prompt, userId = null, options = {}) {
       console.warn('availability check failed', String(availErr?.message || availErr))
     }
 
-    if (intent === 'booking' && shouldAutoCreateBooking(prompt) && userId && parsedDateTime && mentionedServices.length) {
-      try {
-        const booking = await customerCommerceService.createBooking(userId, {
-          date: parsedDateTime.date,
-          time: parsedDateTime.time,
-          serviceItems: mentionedServices.slice(0, 2).map((s) => ({ serviceId: s.ServiceId, quantity: 1 })),
-          notes: 'Booked via AI assistant',
-        })
-        return `Mình đã tạo lịch thành công cho bạn. Mã đặt lịch: ${booking?.BookingId || booking?.id || 'N/A'}. Thời gian: ${parsedDateTime.time} ngày ${parsedDateTime.date}.`
-      } catch (bookErr) {
-        return `Mình chưa thể tạo lịch tự động: ${String(bookErr?.message || 'thiếu dữ liệu đặt lịch')}. Bạn vui lòng chọn thêm chuyên viên hoặc xác nhận lại dịch vụ.`
-      }
-    }
+    // Chatbox runs in information-only mode for booking: never auto-create bookings.
 
     const fullPrompt = buildSystemPrompt({
       intent,
