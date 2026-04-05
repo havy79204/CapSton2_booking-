@@ -1,5 +1,6 @@
 const { asyncHandler } = require('../../utils/asyncHandler')
 const appointmentsService = require('../../services/appointments.service')
+const { emitStaffDataUpdated } = require('../../realtime/socket')
 
 const getAppointments = asyncHandler(async (req, res) => {
   const data = await appointmentsService.listAppointments()
@@ -20,6 +21,7 @@ const postAppointment = asyncHandler(async (req, res) => {
 
   // Truyền nguyên req.body qua Service, Service sẽ lo việc lặp mảng để chèn DB
   const data = await appointmentsService.createAppointment(req.body)
+  emitStaffDataUpdated({ source: 'appointments', action: 'create', staffId: String(req.body?.staffId || '') })
   res.status(201).json({ ok: true, data })
 })
 
@@ -52,6 +54,7 @@ const putAppointment = asyncHandler(async (req, res) => {
   }
 
   const data = await appointmentsService.updateAppointment(id, req.body)
+  emitStaffDataUpdated({ source: 'appointments', action: 'update', staffId: String(req.body?.staffId || ''), appointmentId: String(id) })
   res.json({ ok: true, data })
 })
 
@@ -63,6 +66,7 @@ const deleteAppointment = asyncHandler(async (req, res) => {
   }
 
   const data = await appointmentsService.cancelAppointment(id)
+  emitStaffDataUpdated({ source: 'appointments', action: 'delete', appointmentId: String(id) })
   res.json({ ok: true, data })
 })
 

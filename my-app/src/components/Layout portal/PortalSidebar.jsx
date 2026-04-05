@@ -23,7 +23,7 @@ const navItems = [
   { to: '/portals/owner/products', label: 'Products', Icon: IconBox },
   { to: '/portals/owner/orders', label: 'Orders', Icon: IconBarCart },
   { to: '/portals/owner/inventory', label: 'Inventory', Icon: IconBox },
-  { to: '/portals/owner/reports', label: 'Reports', Icon: IconBarCart },
+  // { to: '/portals/owner/reports', label: 'Reports', Icon: IconBarCart },
   { to: '/portals/owner/settings', label: 'Settings', Icon: IconSettings },
 ]
 

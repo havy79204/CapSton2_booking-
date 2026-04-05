@@ -1,4 +1,4 @@
-const { query, newId } = require('../config/query')
+﻿const { query, newId } = require('../config/query')
 const { toAppointmentListItem } = require('../models/appointment.model')
 const { getSettingsMap } = require('./settings.service')
 const { notifyCustomerEvent, notifyOwnerEvent } = require('./notifications.service')
@@ -500,10 +500,118 @@ async function cancelAppointment(bookingId) {
   return { id: bookingId }
 }
 
+// Recalculate commission for all staff based on current tier settings
+// Called when owner updates commission tier settings
+async function recalculateAllCommissions() {
+  try {
+    console.log('[RECALC COMMISSION] Starting recalculation for all staff...')
+    
+    // Get all staff with completed bookings
+    const staffRes = await query(
+      `SELECT DISTINCT bs.StaffId
+       FROM BookingServices bs
+       JOIN Bookings b ON b.BookingId = bs.BookingId
+       WHERE bs.StaffId IS NOT NULL
+         AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')`
+    )
+    
+    const staffIds = staffRes.recordset?.map(r => r.StaffId).filter(Boolean) || []
+    console.log(`[RECALC COMMISSION] Found ${staffIds.length} staff with completed bookings`)
+    
+    const settingsMap = await getSettingsMap()
+    let commissionTiers = {}
+    
+    // Load current tier settings
+    if (Array.isArray(settingsMap.CommissionTiers) && settingsMap.CommissionTiers.length > 0) {
+      const sortedTiers = settingsMap.CommissionTiers.sort((a, b) => (a.threshold || 0) - (b.threshold || 0))
+      const tier1Threshold = sortedTiers[0].threshold !== undefined && sortedTiers[0].threshold !== null ? Number(sortedTiers[0].threshold) : 500000
+      const tier1Rate = sortedTiers[0].rate !== undefined && sortedTiers[0].rate !== null ? Number(sortedTiers[0].rate) : 0.10
+      const tier2Threshold = sortedTiers.length > 1 && sortedTiers[1].threshold !== undefined && sortedTiers[1].threshold !== null ? Number(sortedTiers[1].threshold) : tier1Threshold
+      const tier2Rate = sortedTiers.length > 1 && sortedTiers[1].rate !== undefined && sortedTiers[1].rate !== null ? Number(sortedTiers[1].rate) : tier1Rate
+      commissionTiers = {
+        CommissionTierLow: tier1Threshold,
+        CommissionRateLow: tier1Rate,
+        CommissionTierHigh: tier2Threshold,
+        CommissionRateHigh: tier2Rate,
+      }
+    } else {
+      const tierLow = settingsMap.CommissionTierLow !== undefined && settingsMap.CommissionTierLow !== null ? Number(settingsMap.CommissionTierLow) : 500000
+      const rateLow = settingsMap.CommissionRateLow !== undefined && settingsMap.CommissionRateLow !== null ? Number(settingsMap.CommissionRateLow) : 0.10
+      const tierHigh = settingsMap.CommissionTierHigh !== undefined && settingsMap.CommissionTierHigh !== null ? Number(settingsMap.CommissionTierHigh) : 2000000
+      const rateHigh = settingsMap.CommissionRateHigh !== undefined && settingsMap.CommissionRateHigh !== null ? Number(settingsMap.CommissionRateHigh) : 0.15
+      commissionTiers = {
+        CommissionTierLow: tierLow,
+        CommissionRateLow: rateLow,
+        CommissionTierHigh: tierHigh,
+        CommissionRateHigh: rateHigh,
+      }
+    }
+    
+    // Recalculate for each staff
+    let successCount = 0
+    let errorCount = 0
+    
+    for (const staffId of staffIds) {
+      try {
+        // Get total completed revenue for this staff
+        const staffRevenueRes = await query(
+          `SELECT
+            SUM(ISNULL(COALESCE(bs.Price, sv.Price), 0)) as TotalRevenue
+           FROM BookingServices bs
+          JOIN Bookings b ON b.BookingId = bs.BookingId
+          LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+           WHERE bs.StaffId = @staffId
+             AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')`,
+          { staffId }
+        )
+        
+        const totalRevenue = Number(staffRevenueRes.recordset?.[0]?.TotalRevenue || 0)
+        const totalCommissionAmount = calculateCommission(totalRevenue, commissionTiers)
+        const commissionPercentage = totalRevenue > 0 ? (totalCommissionAmount / totalRevenue) : 0
+        
+        // Update all BookingServices for this staff
+        const bookingServicesRes = await query(
+          `SELECT bs.BookingServiceId, COALESCE(bs.Price, sv.Price, 0) AS Price
+           FROM BookingServices bs
+           LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+           JOIN Bookings b ON b.BookingId = bs.BookingId
+           WHERE bs.StaffId = @staffId
+             AND LOWER(LTRIM(RTRIM(COALESCE(b.Status, '')))) IN ('completed', 'complete', 'done')`,
+          { staffId }
+        )
+        
+        for (const bs of bookingServicesRes.recordset || []) {
+          const commissionAmount = bs.Price * commissionPercentage
+          await query(
+            'UPDATE BookingServices SET CommissionAmount = @commissionAmount WHERE BookingServiceId = @bookingServiceId',
+            {
+              commissionAmount: commissionAmount > 0 ? Math.round(commissionAmount) : 0,
+              bookingServiceId: bs.BookingServiceId,
+            }
+          )
+        }
+        
+        successCount++
+        console.log(`[RECALC COMMISSION] Staff ${staffId}: Success (Revenue: ${totalRevenue}, Commission: ${totalCommissionAmount})`)
+      } catch (err) {
+        errorCount++
+        console.error(`[RECALC COMMISSION] Staff ${staffId} failed:`, err.message)
+      }
+    }
+    
+    console.log(`[RECALC COMMISSION] Complete! Success: ${successCount}, Errors: ${errorCount}`)
+    return { success: true, successCount, errorCount, totalStaff: staffIds.length }
+  } catch (err) {
+    console.error('[RECALC COMMISSION] Fatal error:', err.message)
+    return { success: false, error: err.message }
+  }
+}
+
 module.exports = {
   listAppointments,
   createAppointment,
   getAppointmentById,
   updateAppointment,
   cancelAppointment,
+  recalculateAllCommissions,
 }
