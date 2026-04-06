@@ -698,8 +698,8 @@ export default function OwnerInventoryPage() {
         aria-label={`Sort by ${label}`}
         onClick={() => onToggleSort(field)}
       >
-        <span className={`inventory-sortTriangle up ${sortBy === field && sortOrder === 'asc' ? 'is-active' : ''}`.trim()} aria-hidden="true" />
-        <span className={`inventory-sortTriangle down ${sortBy === field && sortOrder === 'desc' ? 'is-active' : ''}`.trim()} aria-hidden="true" />
+        <span className={`inventory-sortTriangle up ${sortBy === field && sortOrder === 'asc' ? 'is-active' : ''}`.trim()} aria-hidden="true">▲</span>
+        <span className={`inventory-sortTriangle down ${sortBy === field && sortOrder === 'desc' ? 'is-active' : ''}`.trim()} aria-hidden="true">▼</span>
       </button>
     )
   }

@@ -26,12 +26,12 @@
 
 .products-page .portal-table th:nth-child(1),
 .products-page .portal-table td:nth-child(1) {
-  width: 22%;
+  width: 20%;
 }
 
 .products-page .portal-table th:nth-child(2),
 .products-page .portal-table td:nth-child(2) {
-  width: 16%;
+  width: 14%;
 }
 
 .products-page .portal-table th:nth-child(3),
@@ -50,12 +50,7 @@
 
 .products-page .portal-table th:nth-child(7),
 .products-page .portal-table td:nth-child(7) {
-  width: 9%;
-}
-
-.products-page .portal-table th:nth-child(8),
-.products-page .portal-table td:nth-child(8) {
-  width: 18%;
+  width: 20%;
 }
 
 .products-page .portal-table th {
@@ -118,19 +113,18 @@
 }
 
 .products-page .portal-table th:nth-child(7),
-.products-page .portal-table th:nth-child(8),
 .products-page .portal-table td:nth-child(7),
-.products-page .portal-table td:nth-child(8) {
+.products-page .portal-table td:nth-child(7) {
   text-align: center;
 }
 
-.products-page .portal-table td:nth-child(8) .portal-rowActions {
+.products-page .portal-table td:nth-child(7) .portal-rowActions {
   justify-content: center;
   gap: 8px;
   flex-wrap: nowrap;
 }
 
-.products-page .portal-table td:nth-child(8) .portal-ghostBtn {
+.products-page .portal-table td:nth-child(7) .portal-ghostBtn {
   min-width: 70px;
   padding: 7px 10px;
 }
