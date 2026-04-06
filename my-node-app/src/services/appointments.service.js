@@ -119,7 +119,14 @@ async function applyCommissionForCompletedBooking(bookingId, staffId) {
   }
 }
 
-async function listAppointments() {
+async function listAppointments({ staffId } = {}) {
+  const params = {}
+  let staffWhere = ''
+  if (staffId) {
+    staffWhere = 'WHERE bs_ref.StaffId = @staffId'
+    params.staffId = staffId
+  }
+
   const result = await query(
     `SELECT 
     b.BookingId,
@@ -170,7 +177,9 @@ OUTER APPLY (
 ) bs_ref
 LEFT JOIN Staff st ON st.StaffId = bs_ref.StaffId
 LEFT JOIN Users su ON su.UserId = st.UserId
-ORDER BY b.BookingTime DESC`
+${staffWhere}
+ORDER BY b.BookingTime DESC`,
+    params
   );
 
   // Phải map qua toAppointmentListItem để Frontend nhận đúng format
@@ -606,6 +615,33 @@ async function recalculateAllCommissions() {
     return { success: false, error: err.message }
   }
 }
+async function listAppointmentMeta({ staffId } = {}) {
+  // Return quick lookup lists used by staff UI: recent customers and available services
+  try {
+    const customersRes = await query(
+      `SELECT DISTINCT b.CustomerUserId AS Id, u.Name, u.Phone
+       FROM Bookings b
+       LEFT JOIN Users u ON u.UserId = b.CustomerUserId
+       JOIN BookingServices bs ON bs.BookingId = b.BookingId
+       WHERE bs.StaffId = @staffId
+       ORDER BY b.BookingTime DESC`,
+      { staffId }
+    )
+
+    const customers = (customersRes.recordset || []).map(r => ({ id: String(r.Id || ''), name: r.Name || '', phone: r.Phone || '' }))
+
+    const servicesRes = await query(
+      `SELECT ServiceId AS Id, Name, Price, DurationMinutes FROM Services WHERE IsActive = 1 OR IsActive IS NULL ORDER BY Name`,
+      {}
+    )
+    const services = (servicesRes.recordset || []).map(r => ({ id: String(r.Id || ''), name: r.Name || '', price: Number(r.Price || 0), durationMinutes: Number(r.DurationMinutes || 0) }))
+
+    return { customers, services }
+  } catch (err) {
+    console.error('[appointments.service] listAppointmentMeta error:', err.message)
+    return { customers: [], services: [] }
+  }
+}
 
 module.exports = {
   listAppointments,
@@ -614,4 +650,5 @@ module.exports = {
   updateAppointment,
   cancelAppointment,
   recalculateAllCommissions,
+  listAppointmentMeta,
 }

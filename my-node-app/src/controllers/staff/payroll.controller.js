@@ -21,6 +21,24 @@ const getPayrollOverview = asyncHandler(async(req, res) => {
     res.json({ ok: true, data })
 })
 
+const getPayrollDebug = asyncHandler(async (req, res) => {
+    const staffId = await resolveStaffId(req)
+    if (!staffId) {
+        res.status(401).json({ ok: false, error: 'Unauthorized' })
+        return
+    }
+
+    const month = String(req.query.month || '').trim() // expected YYYY-MM
+    if (!month) {
+        res.status(400).json({ ok: false, error: 'Missing month (YYYY-MM)' })
+        return
+    }
+
+    const data = await payrollService.getPayrollDebug(staffId, month)
+    res.json({ ok: true, data })
+})
+
 module.exports = {
     getPayrollOverview,
+    getPayrollDebug,
 }

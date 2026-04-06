@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator
 import { Colors } from '@/constants/theme';
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { get, post } from '../api';
+import { get, post } from '@/services/apiClient';
 import { subscribeStaffDataUpdates } from '../../lib/realtime';
 
 import Card from '@/components/ui/card';
@@ -50,14 +50,30 @@ export default function ScheduleScreen() {
 
   const weekDates = useMemo(() => getWeekDates(), [getWeekDates]);
 
+  function toLocalIso(d: Date | undefined) {
+    if (!d) return ''
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+
   const loadSchedule = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
     try {
-      const weekStart = weekDates[0]?.toISOString().split('T')[0];
+      const weekStart = toLocalIso(weekDates[0]);
       const res = await get(`/staff/schedule?weekStart=${weekStart}`);
-      setScheduleData(Array.isArray(res?.data) ? res.data : []);
+      // If server returns 304 Not Modified, keep previously-loaded schedule data
+      if (res?.notModified) {
+        return;
+      }
+
+      if (Array.isArray(res?.data)) {
+        setScheduleData(res.data);
+      }
     } catch {
-      setScheduleData([]);
+      // preserve existing scheduleData on transient failures
+      // console.warn can be added for debugging
     } finally {
       if (showSpinner) setLoading(false);
     }
@@ -85,7 +101,7 @@ export default function ScheduleScreen() {
   }, [loadSchedule]);
 
   const getScheduleForDate = (date: Date) => {
-    const s = date.toISOString().split('T')[0];
+    const s = toLocalIso(date);
     return scheduleData.find((x) => x.date === s);
   };
 
@@ -101,7 +117,7 @@ export default function ScheduleScreen() {
   };
 
   const handleRegisterSubmit = async (date: Date | undefined, payload: { note?: string; type?: string }) => {
-    const dateStr = date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+    const dateStr = date ? toLocalIso(date) : toLocalIso(new Date());
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -200,7 +216,7 @@ export default function ScheduleScreen() {
                       ]}>
                         <Feather name={sh.type === 'leave' || sh.type === 'leave-request' ? 'x-circle' : 'clock'} size={16} color="#6b7280" />
                         <View style={{ marginLeft: 8 }}>
-                          <Text style={styles.shiftTime}>{sh.type === 'leave-request' ? 'Đơn nghỉ đã gửi' : sh.type === 'leave' ? 'Nghỉ' : sh.time}</Text>
+                          <Text style={styles.shiftTime}>{sh.type === 'leave-request' ? 'Đang chờ duyệt' : sh.type === 'leave' ? 'Nghỉ' : sh.time}</Text>
                           <Text style={styles.shiftNote}>{sh?.meta?.note || (sh.type === 'assigned' ? 'Ca làm việc' : 'Xin nghỉ')}</Text>
                         </View>
                       </View>

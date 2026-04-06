@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { io, Socket } from 'socket.io-client'
-import { API_BASE } from '../app/api'
+import { API_BASE } from '@/services/apiClient'
 
 type StaffUpdatePayload = {
   source?: string

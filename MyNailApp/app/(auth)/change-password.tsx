@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native'
 import { useRouter } from 'expo-router'
-import { put } from './api'
+import { put } from '@/services/apiClient'
 
 export default function ChangePasswordScreen() {
   const router = useRouter()

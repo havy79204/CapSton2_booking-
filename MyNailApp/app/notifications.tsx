@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react'
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native'
 import { useFocusEffect } from 'expo-router'
-import { get, post } from './api'
+import { get, post } from '@/services/apiClient'
 import { subscribeStaffDataUpdates } from '../lib/realtime'
 
 const LIVE_REFRESH_MS = 5000
