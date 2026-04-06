@@ -19,7 +19,6 @@ try {
 
 const fetch = fetchFn
 const GEMINI_KEY = String(process.env.GEMINI_API_KEY || '').trim()
-const REPLICATE_API_TOKEN = String(process.env.REPLICATE_API_TOKEN || '').trim()
 const ALLOW_DETECTION_FALLBACK = !['0', 'false', 'off', 'no'].includes(String(process.env.AI_TRYON_ALLOW_FALLBACK || '1').trim().toLowerCase())
 const { generateWithControlNet } = require('./controlNet.adapter')
 let geminiModelCache = { at: 0, data: [] }
@@ -722,18 +721,6 @@ async function tryGenerateWithGemini({ imageDataUrl, prompt, templateImageDataUr
     return { imageDataUrl: null, errors }
 }
 
-function getReplicateModelCandidates() {
-    const fromEnv = String(process.env.REPLICATE_IMAGE_MODELS || '').trim()
-    if (fromEnv) {
-        return fromEnv.split(',').map((x) => x.trim()).filter(Boolean)
-    }
-
-    return [
-        'black-forest-labs/flux-kontext-pro',
-        'black-forest-labs/flux-kontext-max',
-        'bytedance/seededit-3.0',
-    ]
-}
 
 async function maybeUrlToDataUrl(value, defaultMime = 'image/png') {
     if (!value) return null
@@ -791,129 +778,10 @@ function collectImageLikeValues(payload, out = [], depth = 0) {
     return out
 }
 
-function buildReplicateInputCandidates({ imageDataUrl, templateImageDataUrl, prompt }) {
-    const quality = String(process.env.AI_TRYON_REPLICATE_QUALITY || 'balanced').trim().toLowerCase()
-    const isHigh = quality === 'high' || quality === 'ultra'
 
-    const base = {
-        prompt: isHigh ?
-            `${prompt}\nPrioritize premium salon realism, sharp fine detail on nail edges, stable anatomy, natural skin texture.` : prompt,
-        num_outputs: 1,
-        output_format: 'png',
-        output_quality: isHigh ? 100 : 95,
-        guidance: isHigh ? 5.8 : 4,
-        num_inference_steps: isHigh ? 38 : 28,
-        steps: isHigh ? 38 : 28,
-        guidance_scale: isHigh ? 6 : 4.5,
-        cfg_scale: isHigh ? 6 : 4.5,
-    }
 
-    const source = String(imageDataUrl || '').trim()
-    const style = String(templateImageDataUrl || '').trim()
 
-    return [{
-            ...base,
-            input_image: source,
-            image_prompt: style || undefined,
-            prompt_strength: isHigh ? 0.84 : 0.8,
-        },
-        {
-            ...base,
-            image: source,
-            reference_image: style || undefined,
-            strength: isHigh ? 0.74 : 0.78,
-            image_guidance: isHigh ? 1.7 : 1.4,
-            prompt_upsampling: isHigh,
-        },
-        {
-            ...base,
-            image: source,
-            style_image: style || undefined,
-            strength: isHigh ? 0.74 : 0.78,
-            image_guidance: isHigh ? 1.7 : 1.4,
-            prompt_upsampling: isHigh,
-        },
-    ]
-}
-
-async function parseReplicateOutputToDataUrl(output) {
-    const candidates = collectImageLikeValues(output, [])
-    for (const c of candidates) {
-        const out = await maybeUrlToDataUrl(c)
-        if (out) return out
-    }
-
-    return null
-}
-
-function classifyReplicateError(error) {
-    const text = String(error ?.message || error || '')
-    const m = text.match(/status\s+(\d{3})/i)
-    const code = m ? Number(m[1]) : 0
-    const retryAfter = Number(text.match(/"retry_after"\s*:\s*(\d+)/i) ?.[1] || 0)
-
-    return {
-        code,
-        retryAfter,
-        isBilling: code === 402 || /insufficient credit|billing/i.test(text),
-        isRateLimit: code === 429 || /throttled|rate limit/i.test(text),
-        text,
-    }
-}
-
-async function tryGenerateWithReplicate({ imageDataUrl, prompt, templateImageDataUrl = '' }) {
-    if (!REPLICATE_API_TOKEN) return { imageDataUrl: null, errors: ['Missing REPLICATE_API_TOKEN'] }
-
-    const parsed = parseImageDataUrl(imageDataUrl)
-    if (!parsed) return { imageDataUrl: null, errors: ['Invalid imageDataUrl'] }
-    if (templateImageDataUrl && !parseImageDataUrl(templateImageDataUrl)) {
-        return { imageDataUrl: null, errors: ['Invalid templateImageDataUrl'] }
-    }
-
-    let Replicate
-    try {
-        Replicate = require('replicate')
-    } catch (error) {
-        return { imageDataUrl: null, errors: [`replicate-sdk:${String(error?.message || error)}`] }
-    }
-
-    const client = new Replicate({ auth: REPLICATE_API_TOKEN })
-    const models = getReplicateModelCandidates()
-    const inputCandidates = buildReplicateInputCandidates({ imageDataUrl, templateImageDataUrl, prompt })
-    const errors = []
-    let sawBillingIssue = false
-
-    for (const model of models) {
-        if (sawBillingIssue) break
-        for (let i = 0; i < inputCandidates.length; i += 1) {
-            const input = inputCandidates[i]
-            try {
-                const output = await client.run(model, { input })
-                const outputDataUrl = await parseReplicateOutputToDataUrl(output)
-                if (outputDataUrl) {
-                    return { imageDataUrl: outputDataUrl, errors, model }
-                }
-                errors.push(`${model}:variant-${i}:no-image-output`)
-            } catch (error) {
-                const meta = classifyReplicateError(error)
-                if (meta.isBilling) {
-                    errors.push('billing-required')
-                    sawBillingIssue = true
-                    break
-                }
-
-                if (meta.isRateLimit) {
-                    errors.push('rate-limited')
-                    break
-                }
-
-                errors.push(`${model}:variant-${i}:${meta.text}`)
-            }
-        }
-    }
-
-    return { imageDataUrl: null, errors }
-}
+// Replicate image generation removed per project decision (use Gemini + ControlNet/local overlay).
 
 function normalizeDetection(raw) {
     const nails = normalizeNails(raw)
@@ -1187,7 +1055,6 @@ async function generateNailTryOnImage({ imageDataUrl, handHint = '', design = {}
     const warnings = []
     const overlayReliable = isOverlayPlanReliable(preview.analysis, preview.overlayPlan)
     const enableOverlayReinforcement = ['1', 'true', 'yes', 'on'].includes(String(process.env.AI_TRYON_ENABLE_OVERLAY_REINFORCEMENT || '0').trim().toLowerCase())
-    const enableReplicateRefine = ['1', 'true', 'yes', 'on'].includes(String(process.env.AI_TRYON_REPLICATE_REFINE || '0').trim().toLowerCase())
     const similarityStrength = Number.isFinite(Number(process.env.AI_TRYON_SIMILARITY_STRENGTH)) ?
         Math.max(0.5, Math.min(1, Number(process.env.AI_TRYON_SIMILARITY_STRENGTH))) :
         0.92
@@ -1245,35 +1112,8 @@ async function generateNailTryOnImage({ imageDataUrl, handHint = '', design = {}
         }
     }
 
-    if (!generatedImageDataUrl || (REPLICATE_API_TOKEN && enableReplicateRefine)) {
-        try {
-            const replicateBaseImage = generatedImageDataUrl || imageDataUrl
-            const replicateResult = await tryGenerateWithReplicate({
-                imageDataUrl: replicateBaseImage,
-                prompt,
-                templateImageDataUrl: resolvedTemplateImageDataUrl,
-            })
-            if (replicateResult ?.imageDataUrl) {
-                generatedImageDataUrl = replicateResult.imageDataUrl
-                provider = provider === 'none' ?
-                    'replicate-image-generation' :
-                    `${provider}+replicate-refine`
-                warnings.push(`Replicate: success via ${String(replicateResult.model || 'unknown-model')}.`)
-            } else if (Array.isArray(replicateResult ?.errors) && replicateResult.errors.length) {
-                if (replicateResult.errors.includes('billing-required')) {
-                    warnings.push('Replicate: skipped due to insufficient credit (402).')
-                } else if (replicateResult.errors.includes('rate-limited')) {
-                    warnings.push('Replicate: skipped due to rate limit (429), please retry shortly.')
-                } else {
-                    warnings.push(`ReplicateDetail: ${replicateResult.errors.slice(0, 4).join(' | ')}`)
-                }
-            }
-        } catch (error) {
-            warnings.push(`Replicate: ${String(error?.message || error)}`)
-        }
-    } else if (generatedImageDataUrl && REPLICATE_API_TOKEN && !enableReplicateRefine) {
-        warnings.push('Replicate: refine is off by default (set AI_TRYON_REPLICATE_REFINE=true to enable).')
-    }
+    // Replicate/Flux image refine removed: using Gemini + ControlNet + local-overlay only.
+    // If you need a post-refinement step, implement a Gemini-driven enhancer or keep client-side overlay reinforcement.
 
     if (!generatedImageDataUrl && overlayReliable) {
         try {
