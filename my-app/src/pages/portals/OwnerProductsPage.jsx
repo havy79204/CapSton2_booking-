@@ -99,6 +99,7 @@ export default function OwnerProductsPage() {
     categoryId: '',
     kind: '',
     status: '',
+    supplier: 'Default',
     sellPriceVnd: '0',
     importPriceVnd: '',
     images: [],
@@ -227,6 +228,7 @@ export default function OwnerProductsPage() {
         categoryId: String(saved.form.categoryId || ''),
         kind: String(saved.form.kind || ''),
         status: String(saved.form.status || ''),
+        supplier: String(saved.form.supplier || 'Default'),
         sellPriceVnd: String(saved.form.sellPriceVnd || '0'),
         importPriceVnd: String(saved.form.importPriceVnd || ''),
         images: Array.isArray(saved.form.images) ? saved.form.images.filter(Boolean).slice(0, 8) : [],
@@ -421,7 +423,17 @@ export default function OwnerProductsPage() {
   function openCreate() {
     setEditing(null)
     setError('')
-    setForm({ name: '', categoryId: '', kind: '', status: '', sellPriceVnd: '0', importPriceVnd: '', images: [], description: '' })
+    setForm({
+      name: '',
+      categoryId: '',
+      kind: '',
+      status: '',
+      supplier: 'Default',
+      sellPriceVnd: '0',
+      importPriceVnd: '',
+      images: [],
+      description: '',
+    })
     setSelectedImageIdx(-1)
     setOpen(true)
   }
@@ -443,6 +455,7 @@ export default function OwnerProductsPage() {
       categoryId: fallbackCategoryId,
       kind: item?.kind || item?.categoryName || '',
       status: item?.status || '',
+      supplier: item?.supplier || 'Default',
       sellPriceVnd: String(item?.price ?? '0'),
       importPriceVnd: '',
       images: Array.isArray(item?.images) ? item.images : item?.imageUrl ? [item.imageUrl] : [],
@@ -493,6 +506,7 @@ export default function OwnerProductsPage() {
         name: normalizedName,
         ...(form.categoryId ? { categoryId: form.categoryId } : {}),
         status: form.status,
+        supplier: String(form.supplier || 'Default').trim() || 'Default',
         price: String(price),
         images: Array.isArray(form.images) ? form.images : [],
         description: form.description,
@@ -798,7 +812,6 @@ export default function OwnerProductsPage() {
                     {renderSortToggle('rating', 'rating')}
                   </div>
                 </th>
-                <th className="products-statusCol">Status</th>
                 <th className="products-actionsCol">Actions</th>
               </tr>
             </thead>
@@ -813,9 +826,6 @@ export default function OwnerProductsPage() {
                   <td>{p.stock ?? 0}</td>
                   <td>{Number(p.soldCount ?? 0)}</td>
                   <td>{formatAverageRating(p.averageRating)}</td>
-                  <td>
-                    <span className="portal-invPill">{p.status || '-'}</span>
-                  </td>
                   <td className="products-actionsCell">
                     <div className="portal-rowActions">
                       <button type="button" className="portal-ghostBtn" onClick={() => openEdit(p)}>
@@ -830,7 +840,7 @@ export default function OwnerProductsPage() {
               ))}
               {pagedItems.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="products-emptyRow">No products found</td>
+                  <td colSpan={7} className="products-emptyRow">No products found</td>
                 </tr>
               ) : null}
             </tbody>
@@ -926,11 +936,6 @@ export default function OwnerProductsPage() {
                   </option>
                 ))}
               </select>
-              {form.categoryId && categoriesById.get(String(form.categoryId))?.description ? (
-                <div className="portal-pageSubtitle" style={{ marginTop: 6 }}>
-                  {categoriesById.get(String(form.categoryId))?.description}
-                </div>
-              ) : null}
             </label>
 
             <label className="portal-field" style={{ marginTop: 12 }}>
@@ -972,6 +977,16 @@ export default function OwnerProductsPage() {
               />
             </label>
           </div>
+
+          <label className="portal-field" style={{ marginTop: 12 }}>
+            <span className="portal-label">Supplier</span>
+            <input
+              className="portal-input"
+              placeholder="Default"
+              value={form.supplier || ''}
+              onChange={(e) => setForm((p) => ({ ...p, supplier: e.target.value }))}
+            />
+          </label>
 
           <label className="portal-field" style={{ marginTop: 12 }}>
             <span className="portal-label">Images</span>

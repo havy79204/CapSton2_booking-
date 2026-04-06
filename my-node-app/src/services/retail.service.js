@@ -74,6 +74,9 @@ async function getSchemaInfo() {
       hasSalonReviews,
       salonReviewsHasProductId,
       salonReviewsHasRating,
+      productsHasSupplier,
+      hasInventoryLots,
+      inventoryLotsHasSupplier,
     ] = await Promise.all([
       columnExists('Products', 'CategoryId'),
       columnExists('InventoryItems', 'CategoryId'),
@@ -87,6 +90,9 @@ async function getSchemaInfo() {
       tableExists('SalonReviews'),
       columnExists('SalonReviews', 'ProductId'),
       columnExists('SalonReviews', 'Rating'),
+      columnExists('Products', 'Supplier'),
+      tableExists('InventoryLots'),
+      columnExists('InventoryLots', 'Supplier'),
     ])
 
     const hasProductImages = await tableExists('ProductImages')
@@ -105,6 +111,9 @@ async function getSchemaInfo() {
       hasSalonReviews,
       salonReviewsHasProductId,
       salonReviewsHasRating,
+      productsHasSupplier,
+      hasInventoryLots,
+      inventoryLotsHasSupplier,
     }
   })()
   return _schemaInfoPromise
@@ -571,6 +580,27 @@ async function getProduct(productId) {
             )`
           : 'CAST(NULL AS FLOAT)'} AS AverageRating,
         p.CategoryId,
+        ${schema.productsHasSupplier
+          ? 'LTRIM(RTRIM(CONVERT(NVARCHAR(120), p.Supplier)))'
+          : 'CAST(NULL AS NVARCHAR(120))'} AS Supplier,
+        ${schema.hasInventoryLots && schema.inventoryLotsHasSupplier
+          ? `(
+              SELECT TOP 1 LTRIM(RTRIM(CONVERT(NVARCHAR(120), l.Supplier)))
+              FROM InventoryLots l
+              WHERE l.InventoryItemId = CONCAT('retail_', p.ProductId)
+                 OR (
+                   ${schema.hasProductVariants
+                     ? `EXISTS (
+                         SELECT 1
+                         FROM ProductVariants pv
+                         WHERE pv.ProductId = p.ProductId
+                           AND l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+                       )`
+                     : '1 = 0'}
+                 )
+              ORDER BY l.ReceivedAt DESC, l.LotId DESC
+            )`
+          : 'CAST(NULL AS NVARCHAR(120))'} AS LotSupplier,
         c.Name AS CategoryName,
         c.Description AS CategoryDescription
      FROM Products p
@@ -611,6 +641,7 @@ async function getProduct(productId) {
     soldCount: Number(row.SoldCount || 0),
     averageRating: row.AverageRating === null || row.AverageRating === undefined ? null : Number(row.AverageRating),
     status: row.Status ?? null,
+    supplier: row.Supplier || row.LotSupplier || 'Default',
     kind: categoryName,
     categoryId,
     category: {
@@ -894,6 +925,8 @@ async function updateRetailProduct(productId, payload) {
   const status = payload?.status !== undefined ? normalizeRetailStatus(payload?.status, { required: true }) : undefined
   const sellPrice = payload?.price !== undefined ? parseMoneyVnd(payload.price) : undefined
   const importPrice = payload?.importPriceVnd !== undefined ? parseMoneyVnd(payload.importPriceVnd) : undefined
+  const supplier = payload?.supplier !== undefined ? parseOptionalString(payload?.supplier) : undefined
+
   if (sellPrice !== undefined && (sellPrice === null || !Number.isFinite(sellPrice) || sellPrice <= 0)) {
     const err = new Error('Invalid price')
     err.status = 400
@@ -916,6 +949,11 @@ async function updateRetailProduct(productId, payload) {
     await ensureRetailProductNameUnique(name, productId)
   }
 
+  const extraSetClauses = []
+  if (schema.productsHasSupplier && supplier !== undefined) {
+    extraSetClauses.push('Supplier = @supplier')
+  }
+
   await query(
     `UPDATE Products
      SET
@@ -925,6 +963,7 @@ async function updateRetailProduct(productId, payload) {
        ImageUrl = CASE WHEN @setImage = 1 THEN @imageUrl ELSE ImageUrl END,
        Status = COALESCE(@status, Status),
        Price = COALESCE(@price, Price)
+       ${extraSetClauses.length ? `,\n       ${extraSetClauses.join(',\n       ')}` : ''}
      WHERE ProductId = @id;`,
     {
       id: productId,
@@ -935,6 +974,7 @@ async function updateRetailProduct(productId, payload) {
       imageUrl: nextImages ? primaryImage : null,
       status: status === undefined ? null : status,
       price: sellPrice !== undefined ? sellPrice : null,
+      supplier: supplier === undefined ? null : supplier,
     }
   )
 
@@ -1112,6 +1152,27 @@ async function listRetailProducts() {
             )`
           : 'CAST(NULL AS FLOAT)'} AS AverageRating,
         p.CategoryId,
+        ${schema.productsHasSupplier
+          ? 'LTRIM(RTRIM(CONVERT(NVARCHAR(120), p.Supplier)))'
+          : 'CAST(NULL AS NVARCHAR(120))'} AS Supplier,
+        ${schema.hasInventoryLots && schema.inventoryLotsHasSupplier
+          ? `(
+              SELECT TOP 1 LTRIM(RTRIM(CONVERT(NVARCHAR(120), l.Supplier)))
+              FROM InventoryLots l
+              WHERE l.InventoryItemId = CONCAT('retail_', p.ProductId)
+                 OR (
+                   ${schema.hasProductVariants
+                     ? `EXISTS (
+                         SELECT 1
+                         FROM ProductVariants pv
+                         WHERE pv.ProductId = p.ProductId
+                           AND l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+                       )`
+                     : '1 = 0'}
+                 )
+              ORDER BY l.ReceivedAt DESC, l.LotId DESC
+            )`
+          : 'CAST(NULL AS NVARCHAR(120))'} AS LotSupplier,
         c.Name AS CategoryName,
         c.Description AS CategoryDescription
      FROM Products p
@@ -1134,6 +1195,7 @@ async function listRetailProducts() {
     stock: Number(row.Stock || 0),
     soldCount: Number(row.SoldCount || 0),
     averageRating: row.AverageRating === null || row.AverageRating === undefined ? null : Number(row.AverageRating),
+    supplier: row.Supplier || row.LotSupplier || 'Default',
     status: (() => {
       const raw = String(row.Status || '').trim().toLowerCase()
       if (!raw) return 'active'
@@ -1196,6 +1258,7 @@ async function createRetailProduct(payload) {
   const nextImages = incomingImages.length ? incomingImages : (imageUrl ? [imageUrl] : [])
   const primaryImage = nextImages[0] || null
   const status = normalizeRetailStatus(payload?.status, { required: true })
+  const supplier = parseOptionalString(payload?.supplier)
 
   const sellPrice = payload?.price !== undefined ? parseMoneyVnd(payload.price) : parseMoneyVnd(payload?.sellPriceVnd)
   const importPrice = parseMoneyVnd(payload?.importPriceVnd)
@@ -1220,9 +1283,18 @@ async function createRetailProduct(payload) {
     err.status = 400
     throw err
   }
+
+  const insertColumns = ['ProductId', 'Name', 'Price', 'Description', 'ImageUrl', 'Stock', 'Status', 'CategoryId']
+  const insertValues = ['@id', '@name', '@price', '@description', '@imageUrl', '@stock', '@status', '@categoryId']
+
+  if (schema.productsHasSupplier && supplier !== undefined) {
+    insertColumns.push('Supplier')
+    insertValues.push('@supplier')
+  }
+
   await query(
-    `INSERT INTO Products (ProductId, Name, Price, Description, ImageUrl, Stock, Status, CategoryId)
-     VALUES (@id, @name, @price, @description, @imageUrl, @stock, @status, @categoryId);`,
+    `INSERT INTO Products (${insertColumns.join(', ')})
+     VALUES (${insertValues.join(', ')});`,
     {
       id,
       name,
@@ -1232,6 +1304,7 @@ async function createRetailProduct(payload) {
       stock: 0,
       status,
       categoryId,
+      supplier,
     }
   )
 
