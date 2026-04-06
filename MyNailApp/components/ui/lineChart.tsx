@@ -27,7 +27,7 @@ export default function LineChart({ data, height = 160 }: { data: Point[]; heigh
         ))}
       </View>
 
-      <View style={styles.chartArea} pointerEvents="none">
+      <View style={[styles.chartArea, { pointerEvents: 'none' }]}>
         {/* grid horizontal lines */}
         {[0, 1 / 4, 2 / 4, 3 / 4, 1].map((t, idx) => (
           <View key={idx} style={[styles.gridLine, { top: t * (height - 24) }]} />

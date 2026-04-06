@@ -19,8 +19,24 @@ const deleteShift = asyncHandler(async (req, res) => {
   res.json({ ok: true, data });
 });
 
+const approveShift = asyncHandler(async (req, res) => {
+  const { staffId, weekStartDate, dayIndex, date } = req.body || {}
+  const data = await scheduleService.approveLeave({ staffId, weekStartDate, dayIndex })
+  emitStaffDataUpdated({ source: 'schedule', action: 'update', staffId: String(staffId || ''), date: String(date || '') })
+  res.json({ ok: true, data })
+})
+
+const rejectShift = asyncHandler(async (req, res) => {
+  const { staffId, weekStartDate, dayIndex, date } = req.body || {}
+  const data = await scheduleService.rejectLeave({ staffId, weekStartDate, dayIndex })
+  emitStaffDataUpdated({ source: 'schedule', action: 'delete', staffId: String(staffId || ''), date: String(date || '') })
+  res.json({ ok: true, data })
+})
+
 module.exports = {
   getSchedule,
   postShift,
   deleteShift, 
+  approveShift,
+  rejectShift,
 };

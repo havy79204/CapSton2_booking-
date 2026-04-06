@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityInd
 import { useRouter } from 'expo-router'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as ImagePicker from 'expo-image-picker'
-import { get, put, post } from './api'
+import { get, put, post } from '@/services/apiClient'
 
 export default function EditProfileScreen() {
   const router = useRouter()
@@ -81,16 +81,11 @@ export default function EditProfileScreen() {
       }
     }
     load()
-    return () => {
-      mounted = false
-    }
+    return () => { mounted = false }
   }, [])
 
   async function handleSave() {
-    if (!name.trim()) {
-      Alert.alert('Lỗi', 'Tên không được để trống')
-      return
-    }
+    if (!name.trim()) { Alert.alert('Lỗi', 'Tên không được để trống'); return }
 
     setSaving(true)
     try {
@@ -100,59 +95,35 @@ export default function EditProfileScreen() {
         latestUser = avatarRes?.data || null
       }
 
-      const res = await put('/auth/me', {
-        name: name.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-      })
+      const res = await put('/auth/me', { name: name.trim(), email: email.trim(), phone: phone.trim() })
 
       const user = { ...(latestUser || {}), ...(res?.data || {}) }
-      if (user?.avatarUrl) {
-        setAvatarUrl(String(user.avatarUrl))
-      }
+      if (user?.avatarUrl) setAvatarUrl(String(user.avatarUrl))
       setPendingAvatarDataUrl('')
       await AsyncStorage.setItem('@mynailapp:user', JSON.stringify(user))
       Alert.alert('Thành công', 'Đã cập nhật thông tin')
       router.back()
     } catch (e: any) {
       Alert.alert('Lỗi', String(e?.message || 'Không thể cập nhật thông tin'))
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
   }
 
-  if (loading) {
-    return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color="#8b5cf6" />
-      </View>
-    )
-  }
+  if (loading) return (<View style={styles.loadingWrap}><ActivityIndicator size="large" color="#8b5cf6" /></View>)
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Chỉnh sửa thông tin</Text>
       <View style={styles.avatarRow}>
-        {avatarUrl ? (
-          <Image source={{ uri: avatarUrl }} style={styles.avatarPreview} />
-        ) : (
-          <View style={[styles.avatarPreview, styles.avatarPlaceholder]}><Text style={{ color: '#6b7280' }}>No Avatar</Text></View>
-        )}
-        <TouchableOpacity style={styles.avatarButton} onPress={pickAvatarFromDevice} disabled={saving}>
-          <Text style={styles.avatarButtonText}>Chọn ảnh</Text>
-        </TouchableOpacity>
+        {avatarUrl ? (<Image source={{ uri: avatarUrl }} style={styles.avatarPreview} />) : (<View style={[styles.avatarPreview, styles.avatarPlaceholder]}><Text style={{ color: '#6b7280' }}>No Avatar</Text></View>)}
+        <TouchableOpacity style={styles.avatarButton} onPress={pickAvatarFromDevice} disabled={saving}><Text style={styles.avatarButtonText}>Chọn ảnh</Text></TouchableOpacity>
       </View>
       <TextInput placeholder="Họ tên" style={styles.input} value={name} onChangeText={setName} />
       <TextInput placeholder="Email" style={styles.input} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
       <TextInput placeholder="Số điện thoại" style={styles.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
 
-      <TouchableOpacity style={styles.button} onPress={handleSave} disabled={saving}>
-        {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Lưu thay đổi</Text>}
-      </TouchableOpacity>
+      <TouchableOpacity style={styles.button} onPress={handleSave} disabled={saving}>{saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Lưu thay đổi</Text>}</TouchableOpacity>
 
-      <TouchableOpacity style={{ marginTop: 12, alignSelf: 'center' }} onPress={() => router.back()}>
-        <Text style={{ color: '#6b7280', fontWeight: '600' }}>Hủy</Text>
-      </TouchableOpacity>
+      <TouchableOpacity style={{ marginTop: 12, alignSelf: 'center' }} onPress={() => router.back()}><Text style={{ color: '#6b7280', fontWeight: '600' }}>Hủy</Text></TouchableOpacity>
     </ScrollView>
   )
 }

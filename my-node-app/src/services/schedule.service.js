@@ -478,6 +478,59 @@ module.exports = {
     requestStaffLeave,
 };
 
+async function approveLeave({ staffId, weekStartDate, dayIndex } = {}) {
+    if (!staffId || !weekStartDate || (dayIndex === undefined || dayIndex === null)) {
+        const err = new Error('Missing parameters')
+        err.status = 400
+        throw err
+    }
+
+    const existing = await query(
+        `SELECT TOP 1 ShiftId, Note
+         FROM StaffShifts
+         WHERE StaffId = @staffId AND WeekStartDate = @weekStartDate AND DayIndex = @dayIndex
+           AND UPPER(ISNULL(Note, '')) LIKE 'LEAVE_REQUEST%'
+        `, { staffId, weekStartDate, dayIndex }
+    )
+
+    const row = existing.recordset?.[0]
+    if (!row || !row.ShiftId) {
+        const err = new Error('Leave request not found')
+        err.status = 404
+        throw err
+    }
+
+    // remove LEAVE_REQUEST prefix and trim
+    const rawNote = String(row.Note || '')
+    const newNote = rawNote.replace(/^LEAVE_REQUEST(\[(morning|afternoon|evening|full)\])?\s*:?\s*/i, '') || ''
+
+    await query(
+        `UPDATE StaffShifts SET Note = @note WHERE ShiftId = @shiftId`,
+        { note: newNote, shiftId: row.ShiftId }
+    )
+
+    return { approved: 1 }
+}
+
+async function rejectLeave({ staffId, weekStartDate, dayIndex } = {}) {
+    if (!staffId || !weekStartDate || (dayIndex === undefined || dayIndex === null)) {
+        const err = new Error('Missing parameters')
+        err.status = 400
+        throw err
+    }
+
+    const res = await query(
+        `DELETE FROM StaffShifts WHERE StaffId = @staffId AND WeekStartDate = @weekStartDate AND DayIndex = @dayIndex AND UPPER(ISNULL(Note,'')) LIKE 'LEAVE_REQUEST%'`,
+        { staffId, weekStartDate, dayIndex }
+    )
+
+    return { deleted: (res.rowsAffected && res.rowsAffected[0]) || 0 }
+}
+
+// export the new functions
+module.exports.approveLeave = approveLeave
+module.exports.rejectLeave = rejectLeave
+
 async function getStaffScheduleFromShifts({ staffId, weekStartQuery } = {}) {
     if (!staffId) {
         const err = new Error('Missing staffId')
@@ -620,6 +673,26 @@ async function requestStaffLeave({ staffId, date, note, shiftType } = {}) {
     const weekStartIso = toIsoDate(weekStart)
     const leaveShift = resolveLeaveShift(shiftType)
     const safeNote = `LEAVE_REQUEST[${leaveShift.shiftType}]${note ? `: ${String(note).trim()}` : ''}`
+
+    // Disallow leave requests for the current week
+    const thisWeekStart = mondayOf(today)
+    if (thisWeekStart && toIsoDate(thisWeekStart) === weekStartIso) {
+        const err = new Error('Cannot request leave for the current week')
+        err.status = 400
+        throw err
+    }
+
+    // Disallow leave requests on dates that already have an assigned shift
+    const shiftDateIso = toIsoDate(leaveDate)
+    const assignedCheck = await query(
+        `SELECT TOP 1 1 AS ok FROM StaffAvailability WHERE StaffId = @staffId AND WeekStartDate = @shiftDate`,
+        { staffId, shiftDate: shiftDateIso }
+    )
+    if (assignedCheck.recordset && assignedCheck.recordset.length) {
+        const err = new Error('Cannot request leave for a date that already has a scheduled shift')
+        err.status = 409
+        throw err
+    }
 
   const existing = await query(
     `SELECT TOP 1 ShiftId

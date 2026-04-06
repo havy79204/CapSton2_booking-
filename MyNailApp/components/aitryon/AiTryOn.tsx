@@ -5,7 +5,7 @@ import { Feather } from '@expo/vector-icons';
 import Card from '@/components/ui/card';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { API_BASE, get, post } from '@/app/api';
+import { API_BASE, get, post } from '@/services/apiClient';
 import Svg, { Polygon, Text as SvgText } from 'react-native-svg';
 
 type TryOnService = {

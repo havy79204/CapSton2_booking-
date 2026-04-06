@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Modal, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { del, get, post, put } from '../api';
+import { del, get, post, put } from '@/services/apiClient';
 import Card from '@/components/ui/card';
 import { Feather } from '@expo/vector-icons';
 import { useToast } from '@/components/ui/Toast';

@@ -7,6 +7,12 @@ const getTryOnServices = asyncHandler(async(req, res) => {
     res.json({ ok: true, data })
 })
 
+const getTryOnTemplates = asyncHandler(async(req, res) => {
+    const limit = Math.min(Math.max(Number(req.query ?.limit || 200), 1), 1000)
+    const data = await aiTryOnService.listTryOnTemplates({ limit })
+    res.json({ ok: true, data })
+})
+
 const postAnalyzeHand = asyncHandler(async(req, res) => {
     const { imageDataUrl, handHint } = req.body || {}
     const data = await aiTryOnService.analyzeHandAndNails({ imageDataUrl, handHint })
@@ -40,4 +46,5 @@ module.exports = {
     postAnalyzeHand,
     postPreviewTryOn,
     postGenerateTryOn,
+    getTryOnTemplates,
 }

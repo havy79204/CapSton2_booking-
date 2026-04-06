@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useRouter } from 'expo-router'
-import { post, API_BASE } from './api'
+import { post, API_BASE } from '@/services/apiClient'
 
 export default function LoginScreen() {
   const router = useRouter()
@@ -31,7 +31,6 @@ export default function LoginScreen() {
       if (res && res.success) {
         await AsyncStorage.setItem('@mynailapp:token', res.token)
         await AsyncStorage.setItem('@mynailapp:user', JSON.stringify(res.user || {}))
-        // navigate to dashboard route
         router.replace('/(tabs)/appointments')
       } else {
         Alert.alert('Đăng nhập thất bại', (res && res.message) || 'Sai tài khoản hoặc mật khẩu')
@@ -48,27 +47,18 @@ export default function LoginScreen() {
     setLoading(true)
     try {
       const res = await post('/auth/quick-login', { roleId: 2 })
-      console.log('quick-login response', res)
       if (res && (res.ok || res.success) && (res.data || res.user || res.token)) {
-        // support multiple response shapes: {ok,data:{user,token}} or {success,token,user}
         const payload = res.data || { user: res.user, token: res.token }
         const token = payload.token
         const user = payload.user
         if (token) await AsyncStorage.setItem('@mynailapp:token', token)
         if (user) await AsyncStorage.setItem('@mynailapp:user', JSON.stringify(user || {}))
-        console.log('stored token, navigating home')
-        try {
-          // notify layout about auth change so it updates immediately
-          // @ts-ignore
-          globalThis.__notifyAuthChanged && globalThis.__notifyAuthChanged(true)
-        } catch {}
+        try { globalThis.__notifyAuthChanged && globalThis.__notifyAuthChanged(true) } catch {}
         router.replace('/')
       } else {
-        console.warn('quick-login failed response', res)
         Alert.alert('Lỗi', 'Quick login không thành công')
       }
     } catch (e) {
-      console.error('quick-login error', e)
       Alert.alert('Lỗi', 'Không thể kết nối đến server')
     } finally {
       setLoading(false)

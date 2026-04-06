@@ -186,10 +186,46 @@ async function getPayrollOverview(staffId) {
     },
     history,
     chartSeries,
+    // Backwards-compatible simple series used by some frontends: { label, value }
+    chartSeriesSimple: chartSeries.map((s) => ({ label: s.monthKey, value: Number(s.totalIncome || 0) })),
     tipLogs,
   }
 }
 
 module.exports = {
   getPayrollOverview,
+}
+
+// Debug helper: return detailed booking/service rows for given staff and month (month format: YYYY-MM)
+async function getPayrollDebug(staffId, monthKey) {
+  if (!staffId) return { rows: [] }
+  // Parse monthKey 'YYYY-MM' into start/end
+  const parts = String(monthKey || '').split('-')
+  if (parts.length !== 2) return { rows: [] }
+  const y = Number(parts[0])
+  const m = Number(parts[1]) - 1
+  if (Number.isNaN(y) || Number.isNaN(m)) return { rows: [] }
+  const start = new Date(y, m, 1)
+  const end = new Date(y, m + 1, 1)
+
+  const rowsRes = await query(
+    `SELECT
+       b.BookingId,
+       b.BookingTime,
+       b.Status,
+       bs.BookingServiceId,
+       bs.ServiceId,
+       COALESCE(bs.Price, sv.Price, 0) AS Price,
+       bs.CommissionAmount,
+       bs.StaffId
+     FROM BookingServices bs
+     LEFT JOIN Bookings b ON b.BookingId = bs.BookingId
+     LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+     WHERE bs.StaffId = @staffId
+       AND b.BookingTime >= @startAt AND b.BookingTime < @endAt
+     ORDER BY b.BookingTime ASC`,
+    { staffId, startAt: start, endAt: end }
+  )
+
+  return { rows: rowsRes.recordset || [] }
 }

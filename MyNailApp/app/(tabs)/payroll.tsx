@@ -1,11 +1,12 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Platform } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Card from '@/components/ui/card';
-import { get } from '../api';
+import { get } from '@/services/apiClient';
 import { subscribeStaffDataUpdates } from '../../lib/realtime';
 
 const LIVE_REFRESH_MS = 5000;
+const CHART_PIXELS = 140
 
 type MonthMetrics = {
   monthKey: string;
@@ -23,6 +24,7 @@ type PayrollResponse = {
   currentMonth: MonthMetrics;
   history: MonthMetrics[];
   chartSeries?: { monthKey: string; totalIncome: number }[];
+  chartSeriesSimple?: { label: string; value: number }[];
   tipLogs: { date: string; amount: number; note: string }[];
   tiers: { lowerBound: number; upperBound: number; rate: number }[];
 };
@@ -52,6 +54,9 @@ function formatCompactVnd(value: number) {
 }
 
 export default function PayrollScreen() {
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [barsWidth, setBarsWidth] = useState(0)
+  const isWeb = Platform.OS === 'web'
   const [tab, setTab] = useState<'overview' | 'history' | 'tips'>('overview');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<PayrollResponse | null>(null);
@@ -91,18 +96,37 @@ export default function PayrollScreen() {
   const tipLogs = data?.tipLogs || [];
 
   const chartData = useMemo(() => {
-    const source = chartSeries.length > 0
-      ? chartSeries
-      : (history.length > 0 ? [...history].reverse().concat([current]).slice(-6) : [current]);
-    const maxVal = Math.max(1, ...source.map((m) => Number(m.totalIncome || 0)));
+    // Accept multiple backend shapes: chartSeries [{monthKey,totalIncome}],
+    // chartSeriesSimple [{label,value}], or fallback to history+current.
+    let rawSource: any[] = []
+    if (Array.isArray(chartSeries) && chartSeries.length > 0) rawSource = chartSeries
+    else if (data?.chartSeriesSimple && Array.isArray(data.chartSeriesSimple) && data.chartSeriesSimple.length > 0) rawSource = data.chartSeriesSimple
+    else if (history.length > 0) rawSource = [...history].reverse().concat([current]).slice(-6)
+    else rawSource = [current]
 
-    return source.map((m, idx) => ({
-      key: `${m.monthKey || 'unknown'}-${idx}`,
-      monthLabel: formatMonthLabel(m.monthKey),
-      value: Number(m.totalIncome || 0),
-      ratio: Number(m.totalIncome || 0) / maxVal,
-    }));
-  }, [history, current]);
+    // Normalize to {monthKey, totalIncome}
+    const source = rawSource.map((s, idx) => ({
+      monthKey: String(s.monthKey ?? s.label ?? (s[0] || '')).slice(0, 7),
+      totalIncome: Number(s.totalIncome ?? s.value ?? s.totalIncome ?? 0),
+    }))
+
+    const maxVal = Math.max(1, ...source.map((m) => Number(m.totalIncome || 0)))
+    // Use a fixed pixel chart height for reliable web rendering
+    const CHART_PIXELS = 140
+
+    return source.map((m, idx) => {
+      const value = Number(m.totalIncome || 0)
+      const ratio = value / maxVal
+      const pixelHeight = Math.max(6, Math.round(ratio * CHART_PIXELS))
+      return {
+        key: `${m.monthKey || 'unknown'}-${idx}`,
+        monthLabel: formatMonthLabel(m.monthKey),
+        value,
+        ratio,
+        pixelHeight,
+      }
+    })
+  }, [history, current, chartSeries, data]);
 
   const chartMax = useMemo(
     () => Math.max(1, ...chartData.map((x) => Number(x.value || 0))),
@@ -173,17 +197,43 @@ export default function PayrollScreen() {
                   <View key={`grid-${tick.ratio}`} style={[styles.chartGridLine, { top: `${(1 - tick.ratio) * 100}%` }]} />
                 ))}
 
-                <View style={styles.chartBarsRow}>
-                  {chartData.map((c) => (
-                    <View key={c.key} style={{ width: `${100 / chartData.length - 3}%`, alignItems: 'center' }}>
-                      <View style={[styles.bar, { height: `${Math.max(6, c.ratio * 100)}%` }]} />
-                      <Text style={styles.barLabel}>{c.monthLabel}</Text>
-                    </View>
-                  ))}
+                <View style={styles.chartBarsRow} onLayout={(e) => setBarsWidth(e.nativeEvent.layout.width)}>
+                  {chartData.map((c, idx) => {
+                    const mouseHandlers = isWeb ? ({ onMouseEnter: () => setSelectedKey(c.key), onMouseLeave: () => setSelectedKey(null) } as any) : {}
+                    return (
+                      <TouchableOpacity
+                        key={c.key}
+                        activeOpacity={0.8}
+                        onPress={() => setSelectedKey(c.key)}
+                        {...mouseHandlers}
+                        style={{ width: `${100 / chartData.length - 3}%`, alignItems: 'center' }}
+                      >
+                        <View style={[styles.bar, { height: c.pixelHeight }]} />
+                        <Text style={styles.barLabel}>{c.monthLabel}</Text>
+                      </TouchableOpacity>
+                    )
+                  })}
+
+                  {/* tooltip for hover/selection */}
+                  {selectedKey && (() => {
+                    const selIdx = chartData.findIndex((x) => x.key === selectedKey)
+                    if (selIdx === -1 || barsWidth <= 0) return null
+                    const barCenter = Math.round((selIdx + 0.5) * (barsWidth / chartData.length))
+                    const sel = chartData[selIdx]
+                    const tooltipLeft = Math.max(8, Math.min(barsWidth - 120, barCenter - 60))
+                    const tooltipTop = Math.max(8, CHART_PIXELS - (sel.pixelHeight || 6) - 40)
+                    return (
+                      <View style={[styles.tooltip, { left: tooltipLeft, top: tooltipTop, pointerEvents: 'none' }]}> 
+                        <Text style={styles.tooltipText}>{Number(sel.value || 0).toLocaleString('vi-VN')}đ</Text>
+                      </View>
+                    )
+                  })()}
                 </View>
               </View>
             </View>
           </Card>
+
+          {/* debug block removed */}
 
           <Card>
             <Text style={{ fontWeight: '700', marginBottom: 8 }}>Thống kê làm việc tháng</Text>
@@ -242,8 +292,12 @@ const styles = StyleSheet.create({
   yAxisCol: { width: 44, justifyContent: 'space-between', paddingBottom: 18, paddingTop: 2 },
   yAxisLabel: { fontSize: 10, color: '#6b7280' },
   chartCol: { flex: 1, position: 'relative', justifyContent: 'flex-end', paddingBottom: 18 },
-  chartGridLine: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: '#e5e7eb' },
+  
+  chartGridLine: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: '#e5e7eb', zIndex: 0 },
   chartBarsRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height: '100%' },
-  bar: { width: '100%', backgroundColor: '#ec4899', borderRadius: 6 },
-  barLabel: { fontSize: 11, color: '#6b7280', marginTop: 6 },
+  bar: { width: '100%', backgroundColor: '#ec4899', borderRadius: 6, zIndex: 2, minHeight: 6, alignSelf: 'stretch' },
+    barLabel: { fontSize: 11, color: '#6b7280', marginTop: 6 },
+    point: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#fff', borderWidth: 3, borderColor: '#ec4899' },
+    tooltip: { position: 'absolute', backgroundColor: '#111827', paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6, zIndex: 10 },
+    tooltipText: { color: '#fff', fontSize: 12, fontWeight: '700' },
 });

@@ -1,23 +1,18 @@
 import Constants from 'expo-constants'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+let extras: any = {}
+try {
+  // require app.json at bundle time — works in web and dev
+  // @ts-ignore
+  const appJson = require('../app.json')
+  if (appJson && appJson.expo && appJson.expo.extra) extras = appJson.expo.extra
+} catch {
+  // ignore
+}
 
-// Set `extra.API_BASE` in app.json to your backend base (including /api),
-// e.g. "http://192.168.1.10:5000/api". If not set, the code will attempt
-// to auto-derive your machine IP from Expo debugger host (development). If
-// that fails, it will fall back to localhost.
-
-// Try reading extras from Expo Constants first; if not available (web/dev),
-// fall back to reading app.json directly so `extra.API_BASE` works reliably.
-let extras = (Constants.expoConfig && Constants.expoConfig.extra) || (Constants.manifest && Constants.manifest.extra) || {}
-if (!extras || !extras.API_BASE) {
-  try {
-    // require app.json at bundle time — works in web and dev
-    // @ts-ignore
-    const appJson = require('../app.json')
-    if (appJson && appJson.expo && appJson.expo.extra) extras = appJson.expo.extra
-  } catch {
-    // ignore
-  }
+// If on-disk app.json didn't provide extras, fall back to Expo runtime manifest
+if ((!extras || !extras.API_BASE) && (Constants.expoConfig || Constants.manifest)) {
+  extras = (Constants.expoConfig && Constants.expoConfig.extra) || (Constants.manifest && Constants.manifest.extra) || extras || {}
 }
 
 function deriveIpFromDebuggerHost() {
@@ -30,7 +25,6 @@ function deriveIpFromDebuggerHost() {
 const autoBase = (() => {
   if (extras.API_BASE) return String(extras.API_BASE)
   const ip = deriveIpFromDebuggerHost()
-  // If running in browser, prefer the page hostname as a fallback
   const isWeb = typeof window !== 'undefined' && typeof navigator !== 'undefined'
   if (!ip && isWeb && window.location && window.location.hostname) {
     const host = window.location.hostname
@@ -44,6 +38,15 @@ const autoBase = (() => {
 
 export const API_BASE = String(autoBase)
 
+// DEBUG: show resolved API config at runtime to help diagnose which source is used
+try {
+  const dbgHost = (Constants.manifest && Constants.manifest.debuggerHost) || ''
+  // eslint-disable-next-line no-console
+  console.log('[apiClient] extras:', extras, 'debuggerHost:', dbgHost, 'resolved API_BASE:', API_BASE)
+} catch (e) {
+  // ignore
+}
+
 async function request(path: string, opts: any = {}): Promise<any> {
   const url = String(path).startsWith('http') ? String(path) : `${API_BASE}${String(path).startsWith('/') ? '' : '/'}${path}`
   const token = await AsyncStorage.getItem('@mynailapp:token')
@@ -54,12 +57,15 @@ async function request(path: string, opts: any = {}): Promise<any> {
 
   const res = await fetch(url, mergedOpts)
 
+  if (res.status === 304) {
+    return { notModified: true }
+  }
+
   const text = await res.text()
   let body: any = null
   try { body = text ? JSON.parse(text) : null } catch { body = text }
 
   if (!res.ok) {
-    // If unauthorized, clear local auth and trigger redirect to login (best-effort)
     if (res.status === 401) {
       try {
         await AsyncStorage.removeItem('@mynailapp:token')

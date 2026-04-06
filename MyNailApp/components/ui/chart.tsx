@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import Svg, { Circle, G } from 'react-native-svg';
 
 type BarData = { label: string; value: number };
@@ -15,10 +15,22 @@ export function BarChart({ data, height = 120 }: { data: BarData[]; height?: num
   const max = Math.max(...safeData.map((d) => Number(d.value || 0)), 1);
   const chartHeight = Math.max(64, height - 24);
   const yTicks = [1, 0.75, 0.5, 0.25, 0];
+  const isWeb = Platform.OS === 'web'
+
+  const [containerWidth, setContainerWidth] = useState(0)
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null)
+
+  const gap = 12
+  const barWidth = useMemo(() => {
+    if (!containerWidth || safeData.length === 0) return 28
+    const totalGap = gap * (safeData.length - 1)
+    const available = Math.max(0, containerWidth - totalGap)
+    return Math.max(24, Math.floor(available / safeData.length))
+  }, [containerWidth, safeData.length])
 
   return (
-    <View style={[styles.barRoot, { height }]}>
-      <View style={[styles.yAxis, { height: chartHeight }]}>
+    <View style={[styles.barRoot, { height }]}> 
+      <View style={[styles.yAxis, { height: chartHeight }]}> 
         {yTicks.map((tick) => (
           <Text key={`tick-${tick}`} style={styles.yAxisLabel}>{formatAxisValue(max * tick)}</Text>
         ))}
@@ -26,7 +38,7 @@ export function BarChart({ data, height = 120 }: { data: BarData[]; height?: num
 
       <View style={styles.barMain}>
         <View style={styles.barPlot}>
-          <View style={[styles.gridLayer, { height: chartHeight }]}>
+          <View style={[styles.gridLayer, { height: chartHeight }]}> 
             {yTicks.map((tick) => (
               <View
                 key={`grid-${tick}`}
@@ -35,13 +47,31 @@ export function BarChart({ data, height = 120 }: { data: BarData[]; height?: num
             ))}
           </View>
 
-          <View style={[styles.barContainer, { height: chartHeight }]}>
-            {safeData.map((d, i) => (
-              <View key={i} style={styles.barColumn}>
-                <View style={[styles.bar, { height: Math.max(4, (Number(d.value || 0) / max) * chartHeight) }]} />
-                <Text style={styles.barLabel}>{d.label}</Text>
-              </View>
-            ))}
+          <View
+            style={[styles.barContainer, { height: chartHeight }]}
+            onLayout={(e: any) => setContainerWidth(e.nativeEvent.layout.width)}
+          >
+            {safeData.map((d, i) => {
+              const h = Math.max(6, (Number(d.value || 0) / max) * chartHeight)
+              const mouseProps = isWeb ? ({ onMouseEnter: () => setHoverIdx(i), onMouseLeave: () => setHoverIdx(null) } as any) : {}
+              return (
+                <TouchableOpacity
+                  key={i}
+                  activeOpacity={0.9}
+                  onPress={() => setHoverIdx(i)}
+                  {...mouseProps}
+                  style={[styles.barColumn, { width: barWidth, marginRight: i === safeData.length - 1 ? 0 : gap }]}
+                >
+                  <View style={[styles.bar, { height: h, width: barWidth }]} />
+                  <Text style={styles.barLabel}>{d.label}</Text>
+                  {hoverIdx === i && (
+                    <View style={[styles.tooltip, { top: Math.max(6, chartHeight - h - 40), left: Math.max(0, (barWidth - 80) / 2) }]}> 
+                      <Text style={styles.tooltipText}>{Number(d.value || 0).toLocaleString('vi-VN')}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              )
+            })}
           </View>
         </View>
       </View>
@@ -153,13 +183,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#e5e7eb',
   },
   barColumn: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'flex-end',
     paddingHorizontal: 2,
   },
   bar: {
-    width: 14,
     backgroundColor: '#f472b6',
     borderRadius: 8,
   },
@@ -168,6 +196,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b7280',
   },
+  tooltip: { position: 'absolute', backgroundColor: '#111827', paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6, zIndex: 20 },
+  tooltipText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   legendContainer: {
     flexDirection: 'row',
     alignItems: 'center',

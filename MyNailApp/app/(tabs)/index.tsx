@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { ScrollView, View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { get } from '../api';
+import { get } from '@/services/apiClient';
 import Card from '@/components/ui/card';
 import Avatar from '@/components/ui/avatar';
 import { BarChart, DonutLegend } from '@/components/ui/chart';
