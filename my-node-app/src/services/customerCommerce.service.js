@@ -2474,17 +2474,26 @@ async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInpu
     throw err
   }
 
+  // Insert review into unified SalonReviews table so reviews are available
+  // for services, products, orders and bookings.
+  const reviewId = `REV-${newId()}`
+
   await query(
-    `INSERT INTO BookingReviews (BookingId, Rating, Comment, CreatedAt)
-     VALUES (@bookingId, @rating, @comment, GETUTCDATE())`,
+    `INSERT INTO [SalonReviews] (
+       [ReviewId], [UserId], [ServiceId], [ProductId], [OrderId], [BookingId], [OrderItemId], [BookingServiceId], [Rating], [Comment], [CreatedAt]
+     ) VALUES (
+       @reviewId, @userId, NULL, NULL, NULL, @bookingId, NULL, NULL, @rating, @comment, SYSUTCDATETIME()
+     )`,
     {
+      reviewId,
+      userId: booking.CustomerUserId,
       bookingId,
       rating,
       comment: comment || null,
     }
   )
 
-  return { BookingId: bookingId, Rating: rating, Comment: comment || null }
+  return { ReviewId: reviewId, BookingId: bookingId, Rating: rating, Comment: comment || null }
 }
 
 module.exports = {

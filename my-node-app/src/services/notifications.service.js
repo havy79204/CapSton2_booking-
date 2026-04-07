@@ -1729,7 +1729,7 @@ async function dispatchOwnerInsights(options = {}) {
            bs.StaffId,
            AVG(CAST(br.Rating AS FLOAT)) AS AvgRating,
            COUNT(1) AS ReviewCount
-         FROM BookingReviews br
+         FROM [SalonReviews] br
          INNER JOIN BookingServices bs ON bs.BookingId = br.BookingId
          INNER JOIN Bookings b ON b.BookingId = br.BookingId
          WHERE bs.StaffId IS NOT NULL
@@ -1738,8 +1738,8 @@ async function dispatchOwnerInsights(options = {}) {
          GROUP BY bs.StaffId
          HAVING AVG(CAST(br.Rating AS FLOAT)) < 3.5 AND COUNT(1) >= 3
          ORDER BY AVG(CAST(br.Rating AS FLOAT)) ASC, COUNT(1) DESC`,
-        {},
-      )
+          {},
+        )
 
       const rows = lowRatingRes.recordset || []
       if (rows.length > 0) {
