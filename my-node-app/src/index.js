@@ -1,20 +1,32 @@
-const { env } = require('./config/config')
+﻿const { env } = require('./config/config')
 const http = require('http')
 const { createApp } = require('./app')
 const { getPool } = require('./config/db')
 const { initSocketServer } = require('./realtime/socket')
 const { dispatchDueNotificationEmails, dispatchOwnerInsights } = require('./services/notifications.service')
 
-function printDbHint(err) {
-  if (!err) return
-  const code = err.code || err?.originalError?.code
-  if (code !== 'ELOGIN') return
+const os = require('os')
 
-  console.error(
-    [
-      '',
-      'Database login failed (SQL Server):',
-      `- server: ${env.db.server}${env.db.instanceName ? `\\${env.db.instanceName}` : ''}`,
+function getLocalIp() {
+    const ifaces = os.networkInterfaces()
+    for (const name of Object.keys(ifaces)) {
+        for (const iface of ifaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) return iface.address
+        }
+    }
+    return 'localhost'
+}
+
+function printDbHint(err) {
+    if (!err) return
+    const code = err.code || err?.originalError?.code
+    if (code !== 'ELOGIN') return
+
+    console.error(
+            [
+                '',
+                'Database login failed (SQL Server):',
+                `- server: ${env.db.server}${env.db.instanceName ? `\\${env.db.instanceName}` : ''}`,
       `- database: ${env.db.database}`,
       `- user: ${env.db.user}`,
       '',
@@ -29,8 +41,10 @@ async function main() {
   const server = http.createServer(app)
   initSocketServer(server)
 
-  server.listen(env.port, () => {
-    console.log(`API listening on http://localhost:${env.port}`)
+  // Bind to all interfaces so devices on the same LAN can reach this server.
+  server.listen(env.port, '0.0.0.0', () => {
+    const localIp = getLocalIp()
+    console.log(`API listening on http://0.0.0.0:${env.port} (LAN: http://${localIp}:${env.port})`)
   })
 
   const reminderIntervalMs = 60 * 1000
@@ -71,3 +85,5 @@ main().catch((err) => {
   printDbHint(err)
   process.exit(1)
 })
+
+

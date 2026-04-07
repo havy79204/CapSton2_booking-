@@ -1,32 +1,38 @@
 {
-  "name": "cap2",
-  "version": "1.0.0",
-  "description": "",
-  "main": "src/index.js",
-  "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "@google/generative-ai": "^0.24.1",
-    "bcryptjs": "^2.4.3",
-    "cors": "^2.8.6",
-    "dotenv": "^17.3.1",
-    "exceljs": "^4.4.0",
-    "express": "^5.2.1",
-    "helmet": "^8.1.0",
-    "jsonwebtoken": "^9.0.3",
-    "morgan": "^1.10.1",
-    "mssql": "^12.2.0",
-    "node-fetch": "^3.3.2",
-    "nodemailer": "^6.9.4",
-    "socket.io": "^4.8.3",
-    "xlsx": "^0.18.5"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.14"
-  }
+    "name": "cap2",
+    "version": "1.0.0",
+    "description": "",
+    "main": "src/index.js",
+    "scripts": {
+        "guard:optional-chaining": "node -e \"const fs=require('fs');const path=require('path');const root=path.join(process.cwd(),'src');const bad=[];const walk=(d)=>{for(const n of fs.readdirSync(d)){const p=path.join(d,n);const s=fs.statSync(p);if(s.isDirectory())walk(p);else if(/\\.js$/i.test(n)){const c=fs.readFileSync(p,'utf8');if(/\\?\\s+\\./.test(c)) bad.push(path.relative(process.cwd(),p));}}};walk(root);if(bad.length){console.error('Malformed optional chaining found in:');for(const f of bad)console.error('- '+f);process.exit(1);}console.log('Optional chaining guard passed.');\"",
+        "predev": "npm run guard:optional-chaining",
+        "prestart": "npm run guard:optional-chaining",
+        "start": "node src/index.js",
+        "dev": "nodemon src/index.js"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "@google/generative-ai": "^0.24.1",
+        "bcryptjs": "^2.4.3",
+        "cors": "^2.8.6",
+        "dotenv": "^17.4.0",
+        "exceljs": "^4.4.0",
+        "express": "^5.2.1",
+        "helmet": "^8.1.0",
+        "jsonwebtoken": "^9.0.3",
+        "morgan": "^1.10.1",
+        "mssql": "^12.2.0",
+        "multer": "^2.1.1",
+        "node-fetch": "^3.3.2",
+        "nodemailer": "^6.9.4",
+        "sharp": "^0.34.5",
+        "socket.io": "^4.8.3",
+        "socket.io-client": "^4.8.3",
+        "xlsx": "^0.18.5"
+    },
+    "devDependencies": {
+        "nodemon": "^3.1.14"
+    }
 }
