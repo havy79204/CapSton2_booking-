@@ -16,9 +16,11 @@ import {
 import {
 } from '../lib/mockData';
 import { useProductReviews, useProducts } from '../hooks/useHomepage';
+import { useAuthMe } from '../hooks/useAuthMe';
 import PortalModal from '../components/Layout portal/PortalModal.jsx';
 import { resolveApiImageUrl } from '../lib/api.js';
 import { useCustomerCart } from '../hooks/useCustomerCommerce';
+import { formatVnd } from '../lib/currency';
 import '../styles/ProductDetail.css';
 import '../styles/OwnerServiceDetail.css';
 
@@ -30,10 +32,14 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
   const [cartModalOpen, setCartModalOpen] = useState(false);
   const [cartMessage, setCartMessage] = useState('');
   
-  const productVariants = [];
+  const productVariants = Array.isArray(product?.Variants)
+    ? product.Variants
+    : Array.isArray(product?.ProductVariants)
+      ? product.ProductVariants
+      : [];
   
   const [selectedVariant, setSelectedVariant] = useState(
-    productVariants.length > 0 ? productVariants[0] : null
+    productVariants.find((v) => Number(v?.Stock || 0) > 0) || productVariants[0] || null
   );
 
   const galleryImages = (() => {
@@ -232,7 +238,7 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
 
             <div className="product-price-section">
               <div className="price-details">
-                <span className="product-price">${totalPrice.toFixed(2)}</span>
+                <span className="product-price">{formatVnd(totalPrice)}</span>
               </div>
               <div className="product-stock-info">
                 <IoCubeOutline />
@@ -334,12 +340,20 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
   );
 };
 
-const ReviewSection = ({ productId, reviews, onSubmitReview, submitting, allowWrite = true }) => {
+const ReviewSection = ({ productId, reviews, onSubmitReview, onDeleteReview, currentUserId = '', submitting, allowWrite = true }) => {
   const [newReview, setNewReview] = useState({
     rating: 5,
     comment: '',
   });
+  const [reviewImageDataUrls, setReviewImageDataUrls] = useState([]);
   const [hoveredRating, setHoveredRating] = useState(0);
+  const [activeOwnMenuReviewId, setActiveOwnMenuReviewId] = useState('');
+  const [reviewToDelete, setReviewToDelete] = useState(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [messageModalOpen, setMessageModalOpen] = useState(false);
+  const [messageModalTitle, setMessageModalTitle] = useState('Notice');
+  const [messageModalText, setMessageModalText] = useState('');
+  const [editingReviewId, setEditingReviewId] = useState('');
 
   const handleRatingClick = (rating) => {
     setNewReview((prev) => ({ ...prev, rating }));
@@ -347,6 +361,36 @@ const ReviewSection = ({ productId, reviews, onSubmitReview, submitting, allowWr
 
   const handleCommentChange = (event) => {
     setNewReview((prev) => ({ ...prev, comment: event.target.value }));
+  };
+
+  const handleReviewImageChange = async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    const toDataUrl = (file) =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+    try {
+      const dataUrls = await Promise.all(files.map((file) => toDataUrl(file)));
+      setReviewImageDataUrls((prev) => {
+        const merged = [...prev, ...dataUrls.filter(Boolean)];
+        const unique = Array.from(new Set(merged));
+        return unique.slice(0, 3);
+      });
+    } catch {
+      alert('Failed to read selected image files');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const removeSelectedReviewImage = (indexToRemove) => {
+    setReviewImageDataUrls((prev) => prev.filter((_, index) => index !== indexToRemove));
   };
 
   const handleSubmitReview = (event) => {
@@ -359,15 +403,24 @@ const ReviewSection = ({ productId, reviews, onSubmitReview, submitting, allowWr
 
     onSubmitReview({
       productId,
+      reviewId: editingReviewId || undefined,
       rating: newReview.rating,
       comment: newReview.comment,
+      images: reviewImageDataUrls,
     })
       .then(() => {
+        const isEditing = Boolean(editingReviewId);
         setNewReview({ rating: 5, comment: '' });
-        alert('Review submitted successfully!');
+        setReviewImageDataUrls([]);
+        setEditingReviewId('');
+        setMessageModalTitle(isEditing ? 'Review Updated' : 'Review Submitted');
+        setMessageModalText(isEditing ? 'Your review has been updated successfully.' : 'Your review has been submitted successfully.');
+        setMessageModalOpen(true);
       })
       .catch((err) => {
-        alert(err?.message || 'Failed to submit review');
+        setMessageModalTitle('Error');
+        setMessageModalText(err?.message || 'Failed to submit review');
+        setMessageModalOpen(true);
       });
   };
 
@@ -415,10 +468,79 @@ const ReviewSection = ({ productId, reviews, onSubmitReview, submitting, allowWr
     return '';
   };
 
+  const getReviewImages = (review) => {
+    if (Array.isArray(review?.ReviewImages) && review.ReviewImages.length > 0) {
+      return review.ReviewImages;
+    }
+
+    const raw = review?.ImageUrl;
+    if (!raw) return [];
+
+    if (Array.isArray(raw)) {
+      return raw.map((x) => resolveApiImageUrl(x)).filter(Boolean);
+    }
+
+    const text = String(raw).trim();
+    if (!text) return [];
+
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed.map((x) => resolveApiImageUrl(x)).filter(Boolean);
+    } catch {
+      // Ignore and fallback to single value handling.
+    }
+
+    return [resolveApiImageUrl(text)].filter(Boolean);
+  };
+
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     const options = { year: 'numeric', month: 'long', day: 'numeric' };
     return date.toLocaleDateString('en-US', options);
+  };
+
+  const askDeleteReview = (review) => {
+    setActiveOwnMenuReviewId('');
+    setReviewToDelete(review || null);
+    setDeleteModalOpen(true);
+  };
+
+  const confirmDeleteReview = async () => {
+    const review = reviewToDelete;
+    setDeleteModalOpen(false);
+    setReviewToDelete(null);
+
+    const rid = String(review?.ReviewId || '').trim();
+    if (!rid || !onDeleteReview) return;
+
+    try {
+      await onDeleteReview(rid);
+      if (editingReviewId && editingReviewId === rid) {
+        setEditingReviewId('');
+        setNewReview({ rating: 5, comment: '' });
+        setReviewImageDataUrls([]);
+      }
+      setMessageModalTitle('Deleted');
+      setMessageModalText('Your review has been deleted.');
+      setMessageModalOpen(true);
+    } catch (err) {
+      setMessageModalTitle('Error');
+      setMessageModalText(err?.message || 'Failed to delete review');
+      setMessageModalOpen(true);
+    }
+  };
+
+  const startEditReview = (review) => {
+    const rid = String(review?.ReviewId || '').trim();
+    setActiveOwnMenuReviewId('');
+    if (!rid) return;
+
+    setEditingReviewId(rid);
+    setNewReview({
+      rating: Number(review?.Rating || 5),
+      comment: String(review?.Comment || ''),
+    });
+    setReviewImageDataUrls([]);
   };
 
   return (
@@ -452,8 +574,41 @@ const ReviewSection = ({ productId, reviews, onSubmitReview, submitting, allowWr
                 />
               </div>
 
+              <div className="form-group">
+                <label htmlFor="review-images">Review Images (Optional, up to 3)</label>
+                <input
+                  id="review-images"
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  multiple
+                  onChange={handleReviewImageChange}
+                />
+                <p className="review-upload-hint">You can pick multiple times. Maximum 3 images.</p>
+                {reviewImageDataUrls.length > 0 ? (
+                  <div className="review-selected-list">
+                    {reviewImageDataUrls.map((img, index) => (
+                      <div className="review-selected-item" key={`${img.slice(0, 30)}-${index}`}>
+                        <img
+                          src={img}
+                          alt={`Selected review ${index + 1}`}
+                          className="review-selected-thumb"
+                        />
+                        <button
+                          type="button"
+                          className="review-selected-remove"
+                          onClick={() => removeSelectedReviewImage(index)}
+                          aria-label={`Remove selected image ${index + 1}`}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
               <button type="submit" className="submit-review-btn" disabled={submitting}>
-                {submitting ? 'Submitting...' : 'Submit Review'}
+                {submitting ? 'Submitting...' : (editingReviewId ? 'Update Review' : 'Submit Review')}
               </button>
             </form>
           </div>
@@ -467,6 +622,25 @@ const ReviewSection = ({ productId, reviews, onSubmitReview, submitting, allowWr
           ) : (
             reviews.map((review) => (
               <div key={review.ReviewId} className="review-item">
+                {String(review?.UserId || '').trim() === String(currentUserId || '').trim() ? (
+                  <div className="review-own-actions">
+                    <button
+                      type="button"
+                      className="review-own-menu"
+                      onClick={() => setActiveOwnMenuReviewId((prev) => prev === String(review.ReviewId) ? '' : String(review.ReviewId))}
+                      aria-label="Open review menu"
+                      title="Open review menu"
+                    >
+                      ⋮
+                    </button>
+                    {activeOwnMenuReviewId === String(review.ReviewId) ? (
+                      <div className="review-own-dropdown">
+                        <button type="button" className="review-own-dropdown-item" onClick={() => startEditReview(review)}>Edit</button>
+                        <button type="button" className="review-own-dropdown-item is-danger" onClick={() => askDeleteReview(review)}>Delete</button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="review-header">
                   <div className="reviewer-info">
                     <div className="reviewer-avatar">
@@ -485,15 +659,73 @@ const ReviewSection = ({ productId, reviews, onSubmitReview, submitting, allowWr
                       <span className="review-date">{formatDate(review.CreatedAt)}</span>
                     </div>
                   </div>
-                  <div className="review-rating">
-                    {renderStars(review.Rating)}
-                  </div>
+                </div>
+                <div className="review-rating">
+                  {renderStars(review.Rating)}
                 </div>
                 <p className="review-comment">{review.Comment}</p>
+                {(() => {
+                  const reviewImages = getReviewImages(review);
+                  if (!reviewImages.length) return null;
+
+                  return (
+                    <div className="review-image-gallery">
+                      {reviewImages.map((img, index) => (
+                      <a key={`${img}-${index}`} href={img} target="_blank" rel="noreferrer">
+                        <img
+                          src={img}
+                          alt={`Review image ${index + 1}`}
+                          className="review-image-thumb"
+                        />
+                      </a>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             ))
           )}
         </div>
+
+        <PortalModal
+          open={deleteModalOpen}
+          title="Delete Review"
+          onClose={() => {
+            setDeleteModalOpen(false);
+            setReviewToDelete(null);
+          }}
+          footer={
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteModalOpen(false);
+                  setReviewToDelete(null);
+                }}
+                style={{ padding: '8px 14px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteReview}
+                style={{ padding: '8px 14px', borderRadius: '8px', border: 'none', background: '#dc2626', color: '#fff', cursor: 'pointer' }}
+              >
+                Delete
+              </button>
+            </div>
+          }
+        >
+          <p>Do you want to delete this review?</p>
+        </PortalModal>
+
+        <PortalModal
+          open={messageModalOpen}
+          title={messageModalTitle}
+          onClose={() => setMessageModalOpen(false)}
+        >
+          <p>{messageModalText}</p>
+        </PortalModal>
       </div>
     </section>
   );
@@ -607,7 +839,7 @@ const RelatedProductsSection = ({ products, currentProductId, categoryId }) => {
                           <h3>{product.Name}</h3>
                           <p className="product-brief">{product.Description}</p>
                           <div className="product-footer">
-                            <span className="product-price-small">${Number(product.Price || 0).toFixed(2)}</span>
+                            <span className="product-price-small">{formatVnd(product.Price || 0)}</span>
                             <span className="product-stock-small">{product.Stock} in stock</span>
                           </div>
                           <button className="view-details-btn-small">
@@ -650,7 +882,9 @@ const ProductDetail = ({ ownerMode = false }) => {
     loading: reviewsLoading,
     error: reviewsError,
     submitReview,
+    deleteReview,
   } = useProductReviews(id, 50);
+  const { me } = useAuthMe();
   const [product, setProduct] = useState(passedProduct || null);
   const [loading, setLoading] = useState(!passedProduct);
 
@@ -715,6 +949,8 @@ const ProductDetail = ({ ownerMode = false }) => {
         productId={product.ProductId}
         reviews={Array.isArray(productReviews) ? productReviews : []}
         onSubmitReview={submitReview}
+        onDeleteReview={deleteReview}
+        currentUserId={String(me?.UserId || me?.userId || me?.sub || '').trim()}
         submitting={reviewsLoading}
         allowWrite={!isOwnerMode}
       />

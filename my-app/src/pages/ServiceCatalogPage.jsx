@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { IoArrowBack, IoSearchOutline } from 'react-icons/io5';
+import { formatVnd } from '../lib/currency'
 import { useServices } from '../hooks/useHomepage';
 import '../styles/CatalogPage.css';
 
@@ -105,7 +106,7 @@ const ServiceCatalogPage = () => {
                   <h3>{service.Name}</h3>
                   <p>{service.Description}</p>
                   <div className="catalog-meta">
-                    <span className="catalog-price">${Number(service.Price || 0).toFixed(2)}</span>
+                    <span className="catalog-price">{formatVnd(service.Price || 0)}</span>
                     <span className="catalog-duration">{service.DurationMinutes} min</span>
                   </div>
                 </div>

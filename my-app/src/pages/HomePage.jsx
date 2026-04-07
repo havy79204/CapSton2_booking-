@@ -16,6 +16,7 @@ import ChatWidget from '../components/ChatWidget';
 import PortalModal from '../components/Layout portal/PortalModal.jsx';
 import { useServices, useProducts, useReviews, useSalonStats } from '../hooks/useHomepage';
 import { useCustomerCart } from '../hooks/useCustomerCommerce';
+import { formatVnd } from '../lib/currency';
 
 import '../styles/HomePage.css';
 
@@ -83,7 +84,7 @@ const ServicesSection = () => {
                   <h3>{service.Name}</h3>
                   <p>{service.Description}</p>
                   <div className="service-details">
-                    <span className="price">${Number(service.Price || 0).toFixed(2)}</span>
+                    <span className="price">{formatVnd(service.Price || 0)}</span>
                     <span className="duration">{service.DurationMinutes} min</span>
                   </div>
                 </div>
@@ -124,6 +125,9 @@ const ProductsSection = () => {
 
   const handleAddToCart = async (productId) => {
     try {
+      const product = products.find((p) => String(p.ProductId) === String(productId));
+      const productName = String(product?.Name || '').trim();
+
       // Check if product already exists in cart
       const existingItem = cart?.Items?.find(item => String(item.ProductId) === String(productId));
       
@@ -139,12 +143,20 @@ const ProductsSection = () => {
         }
         
         await updateItem(existingItem.CartItemId, { quantity: currentQty + 1 });
-        setCartMessage('Updated quantity in cart successfully!');
+        setCartMessage(
+          productName
+            ? `Added 1 ${productName}. Quantity in cart: ${currentQty + 1}.`
+            : `Added 1 item. Quantity in cart: ${currentQty + 1}.`
+        );
         setCartModalOpen(true);
       } else {
         // Product not in cart - add it with quantity 1
         await addItem({ productId, quantity: 1 });
-        setCartMessage('Added to cart successfully!');
+        setCartMessage(
+          productName
+            ? `Added 1 ${productName} to cart!`
+            : 'Added 1 item to cart!'
+        );
         setCartModalOpen(true);
       }
     } catch (err) {
@@ -198,7 +210,7 @@ const ProductsSection = () => {
                   <h3>{product.Name}</h3>
                   <p>{product.Description}</p>
                   <div className="product-footer">
-                    <span className="price">${product.Price.toFixed(2)}</span>
+                    <span className="price">{formatVnd(product.Price || 0)}</span>
                     <span className="product-stock">{product.Stock} in stock</span>
                   </div>
                 </div>

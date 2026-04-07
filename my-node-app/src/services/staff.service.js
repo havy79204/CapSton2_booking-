@@ -208,6 +208,8 @@ function sortStaffItems(items, sortBy) {
   const sorted = [...items]
   sorted.sort((a, b) => {
     if (sortBy === 'name_desc') return String(b.name || '').localeCompare(String(a.name || ''), 'vi')
+    if (sortBy === 'rating_desc') return Number(b.rating || 0) - Number(a.rating || 0)
+    if (sortBy === 'rating_asc') return Number(a.rating || 0) - Number(b.rating || 0)
     if (sortBy === 'bookings_desc') return Number(b.totalBookings || 0) - Number(a.totalBookings || 0)
     if (sortBy === 'bookings_asc') return Number(a.totalBookings || 0) - Number(b.totalBookings || 0)
     if (sortBy === 'salary_desc') return Number(b.totalSalary || 0) - Number(a.totalSalary || 0)
@@ -276,8 +278,18 @@ function buildStaffTimeRange(options = {}) {
   const periodRaw = String(options.period || 'all').trim().toLowerCase()
   const period = TIME_PERIODS.has(periodRaw) ? periodRaw : 'all'
 
-  const selectedDate = parseDateOnly(options.date) || new Date()
+  const today = new Date()
+  const refDate = parseDateOnly(options.refDate || options.date)
+  const selectedDate = refDate || new Date(today)
   selectedDate.setHours(0, 0, 0, 0)
+
+  const refMonthText = String(options.refMonth || '').trim()
+  const refMonthMatch = refMonthText.match(/^(\d{4})-(\d{2})$/)
+  const refMonthYear = refMonthMatch ? Number(refMonthMatch[1]) : NaN
+  const refMonthNumber = refMonthMatch ? Number(refMonthMatch[2]) : NaN
+
+  const refYearText = String(options.refYear || '').trim()
+  const refYear = /^\d{4}$/.test(refYearText) ? Number(refYearText) : NaN
 
   if (period === 'all') {
     return {
@@ -300,11 +312,21 @@ function buildStaffTimeRange(options = {}) {
     endAt.setTime(startAt.getTime())
     endAt.setDate(endAt.getDate() + 7)
   } else if (period === 'month') {
-    startAt.setDate(1)
+    if (Number.isFinite(refMonthYear) && Number.isFinite(refMonthNumber) && refMonthNumber >= 1 && refMonthNumber <= 12) {
+      startAt.setFullYear(refMonthYear, refMonthNumber - 1, 1)
+    } else {
+      startAt.setDate(1)
+    }
+    startAt.setHours(0, 0, 0, 0)
     endAt.setTime(startAt.getTime())
     endAt.setMonth(endAt.getMonth() + 1)
   } else if (period === 'year') {
-    startAt.setMonth(0, 1)
+    if (Number.isFinite(refYear)) {
+      startAt.setFullYear(refYear, 0, 1)
+    } else {
+      startAt.setMonth(0, 1)
+    }
+    startAt.setHours(0, 0, 0, 0)
     endAt.setTime(startAt.getTime())
     endAt.setFullYear(endAt.getFullYear() + 1)
   }
@@ -532,6 +554,64 @@ async function buildTipAggregationSql(period) {
     ) tipAgg ON tipAgg.StaffId = s.StaffId`
 }
 
+async function buildRatingAggregationSql(period) {
+  const hasSalonReviews = await tableExists('SalonReviews')
+  const hasBookingServices = await tableExists('BookingServices')
+  if (!hasSalonReviews || !hasBookingServices) {
+    return 'LEFT JOIN (SELECT CAST(NULL AS NVARCHAR(50)) AS StaffId, CAST(0 AS FLOAT) AS AverageRating, CAST(0 AS INT) AS RatingCount WHERE 1=0) ratingAgg ON ratingAgg.StaffId = s.StaffId'
+  }
+
+  const [hasRating, hasBookingId, hasBookingServiceId] = await Promise.all([
+    columnExists('SalonReviews', 'Rating'),
+    columnExists('SalonReviews', 'BookingId'),
+    columnExists('SalonReviews', 'BookingServiceId'),
+  ])
+
+  if (!hasRating || (!hasBookingId && !hasBookingServiceId)) {
+    return 'LEFT JOIN (SELECT CAST(NULL AS NVARCHAR(50)) AS StaffId, CAST(0 AS FLOAT) AS AverageRating, CAST(0 AS INT) AS RatingCount WHERE 1=0) ratingAgg ON ratingAgg.StaffId = s.StaffId'
+  }
+
+  const reviewDateColumn = await firstExistingColumn('SalonReviews', ['CreatedAt', 'UpdatedAt'])
+  const reviewRangeCondition = period === 'all' || !reviewDateColumn
+    ? ''
+    : `AND sr.[${reviewDateColumn}] >= @rangeStartAt AND sr.[${reviewDateColumn}] < @rangeEndAt`
+
+  const byServicePredicate = hasBookingServiceId
+    ? 'bs1.BookingServiceId = sr.BookingServiceId'
+    : '1 = 0'
+
+  const byBookingPredicate = hasBookingId
+    ? 'bs2.BookingId = sr.BookingId'
+    : '1 = 0'
+
+  return `
+    LEFT JOIN (
+      SELECT
+        COALESCE(staffByService.StaffId, staffByBooking.StaffId) AS StaffId,
+        AVG(TRY_CONVERT(FLOAT, sr.Rating)) AS AverageRating,
+        COUNT(1) AS RatingCount
+      FROM SalonReviews sr
+      OUTER APPLY (
+        SELECT TOP 1 bs1.StaffId
+        FROM BookingServices bs1
+        WHERE ${byServicePredicate}
+          AND bs1.StaffId IS NOT NULL
+      ) staffByService
+      OUTER APPLY (
+        SELECT TOP 1 bs2.StaffId
+        FROM BookingServices bs2
+        WHERE sr.BookingServiceId IS NULL
+          AND ${byBookingPredicate}
+          AND bs2.StaffId IS NOT NULL
+        ORDER BY bs2.BookingServiceId
+      ) staffByBooking
+      WHERE TRY_CONVERT(FLOAT, sr.Rating) IS NOT NULL
+        AND COALESCE(staffByService.StaffId, staffByBooking.StaffId) IS NOT NULL
+        ${reviewRangeCondition}
+      GROUP BY COALESCE(staffByService.StaffId, staffByBooking.StaffId)
+    ) ratingAgg ON ratingAgg.StaffId = s.StaffId`
+}
+
 function calculateCommission(revenue, tiers = {}) {
   const tierLow = tiers.commissionTierLow !== undefined && tiers.commissionTierLow !== null ? Number(tiers.commissionTierLow) : 500000
   const rateLow = tiers.commissionRateLow !== undefined && tiers.commissionRateLow !== null ? Number(tiers.commissionRateLow) : 0.10
@@ -544,6 +624,47 @@ function calculateCommission(revenue, tiers = {}) {
   if (revenue >= tierLow && revenue < tierHigh) {
     return revenue * rateLow
   }
+  return 0
+}
+
+function normalizeRate(rawRate) {
+  const rate = Number(rawRate)
+  if (!Number.isFinite(rate) || rate <= 0) return 0
+  return rate > 1 ? rate / 100 : rate
+}
+
+function resolveCommissionRateByRevenue(revenue, settingsMap = {}) {
+  const normalizedRevenue = Number(revenue)
+  if (!Number.isFinite(normalizedRevenue) || normalizedRevenue <= 0) return 0
+
+  if (Array.isArray(settingsMap.CommissionTiers) && settingsMap.CommissionTiers.length > 0) {
+    const normalizedTiers = settingsMap.CommissionTiers
+      .map((t) => ({
+        threshold: Number(t?.threshold ?? t?.commissionTierLow ?? 0),
+        rate: normalizeRate(t?.rate ?? t?.commissionRateLow ?? 0),
+      }))
+      .filter((t) => Number.isFinite(t.threshold) && t.threshold >= 0)
+      .sort((a, b) => a.threshold - b.threshold)
+
+    for (let i = normalizedTiers.length - 1; i >= 0; i -= 1) {
+      if (normalizedRevenue >= normalizedTiers[i].threshold) {
+        return normalizedTiers[i].rate
+      }
+    }
+    return 0
+  }
+
+  if (String(settingsMap.CommissionSource || '').trim() === 'policyTable') {
+    return 0
+  }
+
+  const legacyTierLow = Number(settingsMap.CommissionTierLow)
+  const legacyTierHigh = Number(settingsMap.CommissionTierHigh)
+  const legacyRateLow = normalizeRate(settingsMap.CommissionRateLow)
+  const legacyRateHigh = normalizeRate(settingsMap.CommissionRateHigh)
+
+  if (Number.isFinite(legacyTierHigh) && normalizedRevenue >= legacyTierHigh) return legacyRateHigh
+  if (Number.isFinite(legacyTierLow) && normalizedRevenue >= legacyTierLow) return legacyRateLow
   return 0
 }
 
@@ -851,10 +972,11 @@ async function listStaff(options = {}) {
   }
 
   const skillSchema = await getStaffSkillSchema()
-  const [bookingsAggSql, workingHoursAggSql, commissionAggSql, settingsMap] = await Promise.all([
+  const [bookingsAggSql, workingHoursAggSql, commissionAggSql, ratingAggSql, settingsMap] = await Promise.all([
     buildBookingsAggregationSql(period),
     buildWorkingHoursAggregationSql(period),
     buildCommissionAggregationSql(period),
+    buildRatingAggregationSql(period),
     getSettingsMap(),
   ])
 
@@ -871,12 +993,15 @@ async function listStaff(options = {}) {
         r.DisplayName AS RoleName,
         ISNULL(bsAgg.TotalBookings, 0) AS TotalBookings,
         ISNULL(shiftAgg.WorkingHours, 0) AS WorkingHours,
+        ISNULL(ratingAgg.AverageRating, 0) AS AverageRating,
+        ISNULL(ratingAgg.RatingCount, 0) AS RatingCount,
         ISNULL(commAgg.TotalCommissionRevenue, 0) AS TotalCommissionRevenue
       FROM Staff s
       LEFT JOIN Users u ON u.UserId = s.UserId
       LEFT JOIN Roles r ON r.RoleKey = u.RoleKey
       ${bookingsAggSql}
       ${workingHoursAggSql}
+      ${ratingAggSql}
       ${commissionAggSql}
       WHERE UPPER(LTRIM(RTRIM(ISNULL(s.Status, '')))) <> 'INACTIVE'
         AND UPPER(LTRIM(RTRIM(ISNULL(u.Status, '')))) <> 'INACTIVE'
@@ -890,40 +1015,11 @@ async function listStaff(options = {}) {
   const staffIds = baseItems.map((x) => String(x.id || '').trim()).filter(Boolean)
   const skillMap = await getStaffSkillMap(staffIds, skillSchema)
   
-  // Load commission tiers from owner settings (with defaults)
-  let commissionTiers = {}
-  
-  if (Array.isArray(settingsMap.CommissionTiers) && settingsMap.CommissionTiers.length > 0) {
-    // Use new dynamic tiers if available
-    const sortedTiers = settingsMap.CommissionTiers.sort((a, b) => (a.threshold || 0) - (b.threshold || 0))
-    const tier1Threshold = sortedTiers[0].threshold !== undefined && sortedTiers[0].threshold !== null ? Number(sortedTiers[0].threshold) : 500000
-    const tier1Rate = sortedTiers[0].rate !== undefined && sortedTiers[0].rate !== null ? Number(sortedTiers[0].rate) : 0.10
-    const tier2Threshold = sortedTiers.length > 1 && sortedTiers[1].threshold !== undefined && sortedTiers[1].threshold !== null ? Number(sortedTiers[1].threshold) : tier1Threshold
-    const tier2Rate = sortedTiers.length > 1 && sortedTiers[1].rate !== undefined && sortedTiers[1].rate !== null ? Number(sortedTiers[1].rate) : tier1Rate
-    commissionTiers = {
-      commissionTierLow: tier1Threshold,
-      commissionRateLow: tier1Rate,
-      commissionTierHigh: tier2Threshold,
-      commissionRateHigh: tier2Rate,
-    }
-  } else {
-    // Fallback to old format
-    const tierLow = settingsMap.CommissionTierLow !== undefined && settingsMap.CommissionTierLow !== null ? Number(settingsMap.CommissionTierLow) : 500000
-    const rateLow = settingsMap.CommissionRateLow !== undefined && settingsMap.CommissionRateLow !== null ? Number(settingsMap.CommissionRateLow) : 0.10
-    const tierHigh = settingsMap.CommissionTierHigh !== undefined && settingsMap.CommissionTierHigh !== null ? Number(settingsMap.CommissionTierHigh) : 2000000
-    const rateHigh = settingsMap.CommissionRateHigh !== undefined && settingsMap.CommissionRateHigh !== null ? Number(settingsMap.CommissionRateHigh) : 0.15
-    commissionTiers = {
-      commissionTierLow: tierLow,
-      commissionRateLow: rateLow,
-      commissionTierHigh: tierHigh,
-      commissionRateHigh: rateHigh,
-    }
-  }
-  
-  // Calculate commission tiers from completed service revenue.
+  // Calculate commission from completed service revenue using Booking Rules CommissionTiers.
   const itemsWithCommission = baseItems.map((item) => {
     const commissionBaseRevenue = Number(item.totalCommissionRevenue || 0)
-    const totalCommission = calculateCommission(commissionBaseRevenue, commissionTiers)
+    const appliedRate = resolveCommissionRateByRevenue(commissionBaseRevenue, settingsMap)
+    const totalCommission = commissionBaseRevenue * appliedRate
     const totalSalary = (item.workingHours * 25000) + Math.round(totalCommission)
     
     return {

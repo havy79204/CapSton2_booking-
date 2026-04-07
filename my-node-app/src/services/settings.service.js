@@ -2,6 +2,138 @@ const { query } = require('../config/query')
 
 const NOTIFY_STATE_KEYS = ['NotifyNewAppt', 'NotifyLowStock', 'NotifyNewReview', 'NotifyDailyReport']
 
+function normalizeCommissionRate(rawRate) {
+  const rate = Number(rawRate)
+  if (!Number.isFinite(rate) || rate < 0) return 0
+  return rate > 1 ? rate / 100 : rate
+}
+
+function normalizeCommissionTiersInput(rawTiers) {
+  const src = Array.isArray(rawTiers) ? rawTiers : []
+  const normalized = src
+    .map((t) => ({
+      threshold: Number(t?.threshold),
+      rate: normalizeCommissionRate(t?.rate),
+    }))
+    .filter((t) => Number.isFinite(t.threshold) && t.threshold >= 0)
+    .sort((a, b) => a.threshold - b.threshold)
+
+  const dedupByThreshold = new Map()
+  for (const tier of normalized) {
+    dedupByThreshold.set(String(tier.threshold), tier)
+  }
+
+  return [...dedupByThreshold.values()].sort((a, b) => a.threshold - b.threshold)
+}
+
+async function commissionVersioningTablesReady() {
+  const result = await query(
+    `SELECT TABLE_NAME
+     FROM INFORMATION_SCHEMA.TABLES
+     WHERE TABLE_NAME IN ('CommissionPolicies', 'CommissionTiers')`
+  )
+  const names = new Set((result.recordset || []).map((r) => String(r.TABLE_NAME || '').trim()))
+  return names.has('CommissionPolicies') && names.has('CommissionTiers')
+}
+
+async function getActiveCommissionPolicySnapshot() {
+  const policyRes = await query(
+    `SELECT TOP 1
+        Id,
+        EffectiveFrom,
+        EffectiveTo,
+        CreatedAt,
+        CreatedBy,
+        Notes,
+        IsActive
+     FROM CommissionPolicies
+     WHERE IsActive = 1 AND EffectiveTo IS NULL
+     ORDER BY EffectiveFrom DESC, Id DESC`
+  )
+
+  const policy = policyRes.recordset?.[0]
+  if (!policy) {
+    return {
+      policy: null,
+      tiers: [],
+    }
+  }
+
+  const tiersRes = await query(
+    `SELECT Id, PolicyId, MinRevenue, Rate, CreatedAt
+     FROM CommissionTiers
+     WHERE PolicyId = @policyId
+     ORDER BY MinRevenue ASC, Id ASC`,
+    { policyId: policy.Id }
+  )
+
+  const tiers = (tiersRes.recordset || []).map((row) => ({
+    threshold: Number(row.MinRevenue || 0),
+    rate: normalizeCommissionRate(row.Rate),
+  }))
+
+  return {
+    policy,
+    tiers,
+  }
+}
+
+async function createCommissionPolicyVersionFromTiers(rawTiers, { userId } = {}) {
+  const tiers = normalizeCommissionTiersInput(rawTiers)
+  if (tiers.length === 0) return false
+
+  const now = new Date()
+  const createdByNumber = Number(userId)
+  const createdBy = Number.isFinite(createdByNumber) ? createdByNumber : null
+
+  const currentPolicyRes = await query(
+    `SELECT TOP 1 Id
+     FROM CommissionPolicies
+     WHERE IsActive = 1 AND EffectiveTo IS NULL
+     ORDER BY EffectiveFrom DESC, Id DESC`
+  )
+  const currentPolicyId = currentPolicyRes.recordset?.[0]?.Id
+
+  if (currentPolicyId) {
+    await query(
+      `UPDATE CommissionPolicies
+       SET EffectiveTo = @now,
+           IsActive = 0
+       WHERE Id = @policyId`,
+      { now, policyId: currentPolicyId }
+    )
+  }
+
+  const insertPolicyRes = await query(
+    `INSERT INTO CommissionPolicies (EffectiveFrom, EffectiveTo, CreatedAt, CreatedBy, Notes, IsActive)
+     VALUES (@now, NULL, SYSUTCDATETIME(), @createdBy, @notes, 1);
+     SELECT CAST(SCOPE_IDENTITY() AS INT) AS NewPolicyId;`,
+    {
+      now,
+      createdBy,
+      notes: 'Updated from Booking Rules settings',
+    }
+  )
+
+  const newPolicyId = insertPolicyRes.recordset?.[0]?.NewPolicyId
+  if (!newPolicyId) return false
+
+  const valuesSql = tiers.map((_, idx) => `(@policyId, @minRevenue${idx}, @rate${idx})`).join(', ')
+  const params = { policyId: newPolicyId }
+  tiers.forEach((tier, idx) => {
+    params[`minRevenue${idx}`] = tier.threshold
+    params[`rate${idx}`] = tier.rate
+  })
+
+  await query(
+    `INSERT INTO CommissionTiers (PolicyId, MinRevenue, Rate)
+     VALUES ${valuesSql};`,
+    params
+  )
+
+  return true
+}
+
 function parseBool(value, fallback = false) {
   if (value === undefined || value === null) return fallback
   if (typeof value === 'boolean') return value
@@ -156,7 +288,7 @@ async function getSettingsMap({ userId } = {}) {
   }
 
   for (const [key, value] of Object.entries(defaultSettings)) {
-    if (map[key] === undefined || map[key] === null) {
+    if (map[key] === undefined) {
       map[key] = value
     }
   }
@@ -212,6 +344,36 @@ async function getSettingsMap({ userId } = {}) {
     map.CommissionTiers = []
   }
 
+  // Commission source priority:
+  // 1) CommissionPolicies + CommissionTiers tables (versioned source of truth)
+  // 2) Legacy SystemSettings keys (fallback only when versioning tables are absent)
+  try {
+    const hasCommissionVersioningTables = await commissionVersioningTablesReady()
+    if (hasCommissionVersioningTables) {
+      const snapshot = await getActiveCommissionPolicySnapshot()
+      map.CommissionSource = 'policyTable'
+      map.CommissionPolicyId = snapshot.policy?.Id ?? null
+      map.CommissionTiers = snapshot.tiers
+
+      if (snapshot.tiers.length > 0) {
+        map.CommissionTierLow = snapshot.tiers[0].threshold
+        map.CommissionRateLow = snapshot.tiers[0].rate
+        map.CommissionTierHigh = snapshot.tiers.length > 1 ? snapshot.tiers[1].threshold : null
+        map.CommissionRateHigh = snapshot.tiers.length > 1 ? snapshot.tiers[1].rate : null
+      } else {
+        map.CommissionTierLow = null
+        map.CommissionRateLow = null
+        map.CommissionTierHigh = null
+        map.CommissionRateHigh = null
+      }
+    } else {
+      map.CommissionSource = 'settings'
+    }
+  } catch (err) {
+    console.error('[settings.service] Commission versioning source error:', err.message)
+    map.CommissionSource = 'settings'
+  }
+
   const notificationSettings = await getNotificationSettingsByUserId(userId)
   if (notificationSettings) {
     const enableNotifications = parseBool(notificationSettings.EnableNotifications, true)
@@ -232,7 +394,28 @@ async function getSettingsMap({ userId } = {}) {
 async function updateSettingsMap(updates, { userId } = {}) {
   const safeUpdates = updates && typeof updates === 'object' ? updates : {}
 
-  for (const [key, value] of Object.entries(updates || {})) {
+  const shouldHandleCommissionViaPolicyTable = Object.prototype.hasOwnProperty.call(safeUpdates, 'CommissionTiers')
+  if (shouldHandleCommissionViaPolicyTable) {
+    try {
+      const hasCommissionVersioningTables = await commissionVersioningTablesReady()
+      if (hasCommissionVersioningTables) {
+        await createCommissionPolicyVersionFromTiers(safeUpdates.CommissionTiers, { userId })
+      }
+    } catch (err) {
+      console.error('[settings.service] Failed to persist CommissionTiers to policy tables:', err.message)
+    }
+  }
+
+  const sanitizedUpdates = { ...safeUpdates }
+  if (shouldHandleCommissionViaPolicyTable) {
+    delete sanitizedUpdates.CommissionTiers
+    delete sanitizedUpdates.CommissionTierLow
+    delete sanitizedUpdates.CommissionRateLow
+    delete sanitizedUpdates.CommissionTierHigh
+    delete sanitizedUpdates.CommissionRateHigh
+  }
+
+  for (const [key, value] of Object.entries(sanitizedUpdates || {})) {
     await query(
       `MERGE SystemSettings AS t
        USING (SELECT @k AS SettingKey, @v AS SettingValue) AS s

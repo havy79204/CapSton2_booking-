@@ -11,7 +11,6 @@ import {
 } from 'react-icons/io5';
 import { resolveApiImageUrl } from '../lib/api.js';
 import { useServiceReviews, useServices } from '../hooks/useHomepage';
-import PortalModal from '../components/Layout portal/PortalModal.jsx';
 import '../styles/ServiceDetail.css';
 import '../styles/OwnerServiceDetail.css';
 
@@ -130,7 +129,7 @@ const ServiceDetailSection = ({ service, reviews, backTo = null, canBook = true 
               <div className="meta-item">
                 <IoPricetagOutline className="meta-icon" />
                 <span className="meta-label">Price:</span>
-                <span className="meta-value">${service.Price.toFixed(2)}</span>
+                <span className="meta-value">{formatVnd(service.Price || 0)}</span>
               </div>
               <div className="meta-item">
                 <IoTimeOutline className="meta-icon" />
@@ -156,17 +155,13 @@ const ServiceDetailSection = ({ service, reviews, backTo = null, canBook = true 
   );
 };
 
-const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting, allowWrite = true }) => {
+const ReviewSection = ({ serviceId, reviews, onSubmitReview, onDeleteReview, currentUserId = '', submitting, allowWrite = true }) => {
   const [newReview, setNewReview] = useState({
     rating: 5,
     comment: ''
   });
+  const [reviewImageDataUrls, setReviewImageDataUrls] = useState([]);
   const [hoveredRating, setHoveredRating] = useState(0);
-  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
-  const [reviewDataToSubmit, setReviewDataToSubmit] = useState(null);
-  const [notificationOpen, setNotificationOpen] = useState(false);
-  const [notificationTitle, setNotificationTitle] = useState('');
-  const [notificationMessage, setNotificationMessage] = useState('');
 
   const handleRatingClick = (rating) => {
     setNewReview({ ...newReview, rating });
@@ -174,12 +169,6 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting, allowWr
 
   const handleCommentChange = (e) => {
     setNewReview({ ...newReview, comment: e.target.value });
-  };
-
-  const showNotification = (title, message) => {
-    setNotificationTitle(title);
-    setNotificationMessage(message);
-    setNotificationOpen(true);
   };
 
   const handleSubmitReview = (e) => {
@@ -193,24 +182,17 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting, allowWr
     // Show confirmation modal instead of submitting directly
     setReviewDataToSubmit({
       serviceId,
+      reviewId: editingReviewId || undefined,
       rating: newReview.rating,
       comment: newReview.comment
-    });
-    setConfirmModalOpen(true);
-  };
-
-  const confirmSubmitReview = () => {
-    if (!reviewDataToSubmit) return;
-
-    onSubmitReview(reviewDataToSubmit)
+    })
       .then(() => {
+        const isEditing = Boolean(editingReviewId);
         setNewReview({ rating: 5, comment: '' });
-        setConfirmModalOpen(false);
-        setReviewDataToSubmit(null);
-        showNotification('Success', 'Review submitted successfully!');
+        alert('Review submitted successfully!');
       })
       .catch((err) => {
-        showNotification('Error', err?.message || 'Failed to submit review');
+        alert(err?.message || 'Failed to submit review');
       });
   };
 
@@ -262,6 +244,75 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting, allowWr
     return date.toLocaleDateString('en-US', options);
   };
 
+  const getReviewImages = (review) => {
+    if (Array.isArray(review?.ReviewImages) && review.ReviewImages.length > 0) {
+      return review.ReviewImages;
+    }
+
+    const raw = review?.ImageUrl;
+    if (!raw) return [];
+
+    if (Array.isArray(raw)) {
+      return raw.map((x) => resolveApiImageUrl(x)).filter(Boolean);
+    }
+
+    const text = String(raw).trim();
+    if (!text) return [];
+
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed.map((x) => resolveApiImageUrl(x)).filter(Boolean);
+    } catch {
+      // Ignore and fallback to single value handling.
+    }
+
+    return [resolveApiImageUrl(text)].filter(Boolean);
+  };
+
+  const askDeleteReview = (review) => {
+    setActiveOwnMenuReviewId('');
+    setReviewToDelete(review || null);
+    setDeleteModalOpen(true);
+  };
+
+  const confirmDeleteReview = async () => {
+    const review = reviewToDelete;
+    setDeleteModalOpen(false);
+    setReviewToDelete(null);
+
+    const rid = String(review?.ReviewId || '').trim();
+    if (!rid || !onDeleteReview) return;
+
+    try {
+      await onDeleteReview(rid);
+      if (editingReviewId && editingReviewId === rid) {
+        setEditingReviewId('');
+        setNewReview({ rating: 5, comment: '' });
+        setReviewImageDataUrls([]);
+      }
+      setMessageModalTitle('Deleted');
+      setMessageModalText('Your review has been deleted.');
+      setMessageModalOpen(true);
+    } catch (err) {
+      setMessageModalTitle('Error');
+      setMessageModalText(err?.message || 'Failed to delete review');
+      setMessageModalOpen(true);
+    }
+  };
+
+  const startEditReview = (review) => {
+    const rid = String(review?.ReviewId || '').trim();
+    setActiveOwnMenuReviewId('');
+    if (!rid) return;
+
+    setEditingReviewId(rid);
+    setNewReview({
+      rating: Number(review?.Rating || 5),
+      comment: String(review?.Comment || ''),
+    });
+    setReviewImageDataUrls([]);
+  };
+
   return (
     <section className="review-section">
       <div className="review-container">
@@ -294,8 +345,41 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting, allowWr
                 />
               </div>
 
+              <div className="form-group">
+                <label htmlFor="service-review-images">Review Images (Optional, up to 3)</label>
+                <input
+                  id="service-review-images"
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  multiple
+                  onChange={handleReviewImageChange}
+                />
+                <p className="review-upload-hint">You can pick multiple times. Maximum 3 images.</p>
+                {reviewImageDataUrls.length > 0 ? (
+                  <div className="review-selected-list">
+                    {reviewImageDataUrls.map((img, index) => (
+                      <div className="review-selected-item" key={`${img.slice(0, 30)}-${index}`}>
+                        <img
+                          src={img}
+                          alt={`Selected review ${index + 1}`}
+                          className="review-selected-thumb"
+                        />
+                        <button
+                          type="button"
+                          className="review-selected-remove"
+                          onClick={() => removeSelectedReviewImage(index)}
+                          aria-label={`Remove selected image ${index + 1}`}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
               <button type="submit" className="submit-review-btn" disabled={submitting}>
-                {submitting ? 'Submitting...' : 'Submit Review'}
+                {submitting ? 'Submitting...' : (editingReviewId ? 'Update Review' : 'Submit Review')}
               </button>
             </form>
           </div>
@@ -309,6 +393,25 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting, allowWr
           ) : (
             reviews.map((review) => (
               <div key={review.ReviewId} className="review-item">
+                {String(review?.UserId || '').trim() === String(currentUserId || '').trim() ? (
+                  <div className="review-own-actions">
+                    <button
+                      type="button"
+                      className="review-own-menu"
+                      onClick={() => setActiveOwnMenuReviewId((prev) => prev === String(review.ReviewId) ? '' : String(review.ReviewId))}
+                      aria-label="Open review menu"
+                      title="Open review menu"
+                    >
+                      ⋮
+                    </button>
+                    {activeOwnMenuReviewId === String(review.ReviewId) ? (
+                      <div className="review-own-dropdown">
+                        <button type="button" className="review-own-dropdown-item" onClick={() => startEditReview(review)}>Edit</button>
+                        <button type="button" className="review-own-dropdown-item is-danger" onClick={() => askDeleteReview(review)}>Delete</button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="review-header">
                   <div className="reviewer-info">
                     <div className="reviewer-avatar">
@@ -327,15 +430,73 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting, allowWr
                       <span className="review-date">{formatDate(review.CreatedAt)}</span>
                     </div>
                   </div>
-                  <div className="review-rating">
-                    {renderStars(review.Rating)}
-                  </div>
+                </div>
+                <div className="review-rating">
+                  {renderStars(review.Rating)}
                 </div>
                 <p className="review-comment">{review.Comment}</p>
+                {(() => {
+                  const reviewImages = getReviewImages(review);
+                  if (!reviewImages.length) return null;
+
+                  return (
+                    <div className="review-image-gallery">
+                      {reviewImages.map((img, index) => (
+                      <a key={`${img}-${index}`} href={img} target="_blank" rel="noreferrer">
+                        <img
+                          src={img}
+                          alt={`Review image ${index + 1}`}
+                          className="review-image-thumb"
+                        />
+                      </a>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             ))
           )}
         </div>
+
+        <PortalModal
+          open={deleteModalOpen}
+          title="Delete Review"
+          onClose={() => {
+            setDeleteModalOpen(false);
+            setReviewToDelete(null);
+          }}
+          footer={
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteModalOpen(false);
+                  setReviewToDelete(null);
+                }}
+                style={{ padding: '8px 14px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteReview}
+                style={{ padding: '8px 14px', borderRadius: '8px', border: 'none', background: '#dc2626', color: '#fff', cursor: 'pointer' }}
+              >
+                Delete
+              </button>
+            </div>
+          }
+        >
+          <p>Do you want to delete this review?</p>
+        </PortalModal>
+
+        <PortalModal
+          open={messageModalOpen}
+          title={messageModalTitle}
+          onClose={() => setMessageModalOpen(false)}
+        >
+          <p>{messageModalText}</p>
+        </PortalModal>
       </div>
 
       <PortalModal
@@ -500,7 +661,7 @@ const RecommendedServicesSection = ({ currentServiceId }) => {
                             <h3>{service.Name}</h3>
                             <p className="service-brief">{service.Description}</p>
                             <div className="service-footer">
-                              <span className="service-price">${Number(service.Price || 0).toFixed(2)}</span>
+                              <span className="service-price">{formatVnd(service.Price || 0)}</span>
                               <span className="service-duration">{service.DurationMinutes} min</span>
                             </div>
                             <button className="view-details-btn">
@@ -545,7 +706,9 @@ const ServiceDetail = ({ ownerMode = false }) => {
     loading: reviewsLoading,
     error: reviewsError,
     submitReview,
+    deleteReview,
   } = useServiceReviews(id, 50);
+  const { me } = useAuthMe();
 
   const service = useMemo(() => {
     // If service was passed through navigation state, use it
@@ -602,6 +765,8 @@ const ServiceDetail = ({ ownerMode = false }) => {
         serviceId={serviceWithRating.ServiceId}
         reviews={serviceReviews}
         onSubmitReview={submitReview}
+        onDeleteReview={deleteReview}
+        currentUserId={String(me?.UserId || me?.userId || me?.sub || '').trim()}
         submitting={reviewsLoading}
         allowWrite={!isOwnerMode}
       />

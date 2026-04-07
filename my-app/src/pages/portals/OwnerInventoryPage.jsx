@@ -698,8 +698,8 @@ export default function OwnerInventoryPage() {
         aria-label={`Sort by ${label}`}
         onClick={() => onToggleSort(field)}
       >
-        <span className={`inventory-sortTriangle up ${sortBy === field && sortOrder === 'asc' ? 'is-active' : ''}`.trim()} aria-hidden="true" />
-        <span className={`inventory-sortTriangle down ${sortBy === field && sortOrder === 'desc' ? 'is-active' : ''}`.trim()} aria-hidden="true" />
+        <span className={`inventory-sortTriangle up ${sortBy === field && sortOrder === 'asc' ? 'is-active' : ''}`.trim()} aria-hidden="true">▲</span>
+        <span className={`inventory-sortTriangle down ${sortBy === field && sortOrder === 'desc' ? 'is-active' : ''}`.trim()} aria-hidden="true">▼</span>
       </button>
     )
   }
@@ -4161,7 +4161,7 @@ export default function OwnerInventoryPage() {
                   <tr key={`${h.date}-${h.product}-${idx}`}>
                     <td>{h.date}</td>
                     <td>
-                      <span className={`portal-badge ${h.type === 'Stock In' ? 'confirmed' : 'canceled'}`.trim()}>
+                      <span className={`portal-badge ${h.type === 'Stock In' ? 'confirmed' : 'cancelled'}`.trim()}>
                         {h.type}
                       </span>
                     </td>
