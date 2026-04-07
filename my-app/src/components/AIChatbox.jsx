@@ -373,7 +373,7 @@ export default function AIChatbox() {
                         )}
                         {Array.isArray(payload?.suggestedServices) && payload.suggestedServices.length > 0 && (
                           <div className="analysis-section">
-                            <div className="analysis-label">Dịch vụ gợi ý:</div>
+                            <div className="analysis-label">{payload?.relatedFound?.services ? 'Dịch vụ gợi ý:' : 'Dịch vụ tham khảo thêm:'}</div>
                             <div className="service-tags">
                               {payload.suggestedServices.map((s) => (
                                 <span key={s.ServiceId || s.Name} className="service-tag">
@@ -385,7 +385,7 @@ export default function AIChatbox() {
                         )}
                         {Array.isArray(payload?.suggestedProducts) && payload.suggestedProducts.length > 0 && (
                           <div className="analysis-section">
-                            <div className="analysis-label">Sản phẩm gợi ý:</div>
+                            <div className="analysis-label">{payload?.relatedFound?.products ? 'Sản phẩm gợi ý:' : 'Sản phẩm tham khảo thêm:'}</div>
                             <div className="product-grid">
                               {payload.suggestedProducts.map((p) => (
                                 <div key={p.ProductId || p.Name} className="product-card">

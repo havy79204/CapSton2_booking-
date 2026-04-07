@@ -86,9 +86,18 @@ function emitOwnerNotification(payload) {
   ioInstance.to('role:owner').emit('owner:notification', payload)
 }
 
+function emitStaffDataUpdated(payload = {}) {
+  if (!ioInstance) return
+  ioInstance.to('role:staff').emit('staff:data-updated', {
+    ...payload,
+    ts: new Date().toISOString(),
+  })
+}
+
 module.exports = {
   initSocketServer,
   emitCatMessageToUser,
   emitCatMessageToUsers,
   emitOwnerNotification,
+  emitStaffDataUpdated,
 }
