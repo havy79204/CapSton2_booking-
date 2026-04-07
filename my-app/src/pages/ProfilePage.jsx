@@ -310,6 +310,7 @@ const EditProfileModal = ({ user, isOpen, onClose, onSave, saving }) => {
     avatarDataUrl: '',
     avatarFileName: '',
   }))
+  const [avatarError, setAvatarError] = useState('')
 
   if (!isOpen) return null
 
@@ -328,15 +329,16 @@ const EditProfileModal = ({ user, isOpen, onClose, onSave, saving }) => {
 
     const isSupported = /^image\/(png|jpeg|jpg)$/i.test(file.type)
     if (!isSupported) {
-      alert('Only PNG/JPG images are supported')
+      setAvatarError('Only PNG/JPG images are supported')
       return
     }
 
     if (file.size > 2 * 1024 * 1024) {
-      alert('Avatar file is too large (max 2MB)')
+      setAvatarError('Avatar file is too large (max 2MB)')
       return
     }
 
+    setAvatarError('')
     const reader = new FileReader()
     reader.onload = () => {
       const dataUrl = String(reader.result || '')
@@ -382,6 +384,11 @@ const EditProfileModal = ({ user, isOpen, onClose, onSave, saving }) => {
               <input id="avatarFileInput" type="file" accept="image/png,image/jpeg" onChange={handleAvatarFileChange} className="avatar-file-input" />
               {formData.avatarFileName ? <span className="avatar-upload-name">{formData.avatarFileName}</span> : null}
             </div>
+            {avatarError && (
+              <div style={{ color: '#dc2626', fontSize: '12px', marginTop: '4px', fontWeight: '500' }}>
+                {avatarError}
+              </div>
+            )}
             {formData.avatarDataUrl ? (
               <div className="avatar-preview-box">
                 <img src={formData.avatarDataUrl} alt="Avatar preview" />
@@ -602,6 +609,8 @@ const ProfilePage = () => {
   const [resultModalOpen, setResultModalOpen] = useState(false)
   const [resultMessage, setResultMessage] = useState('')
   const [resultTitle, setResultTitle] = useState('')
+  const [saveProfileConfirmOpen, setSaveProfileConfirmOpen] = useState(false)
+  const [profileDataToSave, setProfileDataToSave] = useState(null)
   const user = me || authMe || context?.user || null
   const bookingTabFromUrl = (() => {
     const query = new URLSearchParams(window.location.search)
@@ -633,19 +642,34 @@ const ProfilePage = () => {
   const error = contextError || bookingsError || ordersError || addressesError
 
   const handleSaveProfile = async (profileData) => {
+    // Validate password before showing modal
+    if (profileData.newPassword || profileData.confirmPassword || profileData.currentPassword) {
+      if (!profileData.currentPassword || !profileData.newPassword) {
+        setResultTitle('Validation Error')
+        setResultMessage('Please provide current and new password')
+        setResultModalOpen(true)
+        return
+      }
+      if (profileData.newPassword !== profileData.confirmPassword) {
+        setResultTitle('Validation Error')
+        setResultMessage('Confirm password does not match')
+        setResultModalOpen(true)
+        return
+      }
+    }
+
+    // Close edit modal and show confirmation modal
+    setShowEditModal(false)
+    setProfileDataToSave(profileData)
+    setSaveProfileConfirmOpen(true)
+  }
+
+  const confirmSaveProfile = async () => {
+    if (!profileDataToSave) return
+
     try {
       setSavingProfile(true)
-
-      if (profileData.newPassword || profileData.confirmPassword || profileData.currentPassword) {
-        if (!profileData.currentPassword || !profileData.newPassword) {
-          alert('Please provide current and new password')
-          return
-        }
-        if (profileData.newPassword !== profileData.confirmPassword) {
-          alert('Confirm password does not match')
-          return
-        }
-      }
+      const profileData = profileDataToSave
 
       let avatarUrl = profileData.avatarUrl
       if (profileData.avatarDataUrl) {
@@ -673,13 +697,26 @@ const ProfilePage = () => {
       setMe(nextMe)
       notifyAuthMeUpdated(nextMe)
       await refreshContext().catch(() => {})
-      setShowEditModal(false)
-      alert('Profile updated successfully!')
+      setSaveProfileConfirmOpen(false)
+      setProfileDataToSave(null)
+      setResultTitle('Success')
+      setResultMessage('Profile updated successfully!')
+      setResultModalOpen(true)
     } catch (err) {
-      alert(err?.message || 'Failed to update profile')
+      setSaveProfileConfirmOpen(false)
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to update profile')
+      setResultModalOpen(true)
+      setShowEditModal(true)  // Re-open edit modal on error
     } finally {
       setSavingProfile(false)
     }
+  }
+
+  const cancelSaveProfile = () => {
+    setSaveProfileConfirmOpen(false)
+    setProfileDataToSave(null)
+    setShowEditModal(true)  // Re-open edit modal so user can continue editing
   }
 
   const handleSaveAddress = async (addressData, editingId) => {
@@ -690,8 +727,13 @@ const ProfilePage = () => {
         await createAddress(addressData)
       }
       await refreshContext().catch(() => {})
+      setResultTitle('Success')
+      setResultMessage('Address saved successfully!')
+      setResultModalOpen(true)
     } catch (err) {
-      alert(err?.message || 'Failed to save address')
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to save address')
+      setResultModalOpen(true)
     }
   }
 
@@ -700,8 +742,13 @@ const ProfilePage = () => {
     try {
       await deleteAddress(id)
       await refreshContext().catch(() => {})
+      setResultTitle('Success')
+      setResultMessage('Address deleted successfully!')
+      setResultModalOpen(true)
     } catch (err) {
-      alert(err?.message || 'Failed to delete address')
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to delete address')
+      setResultModalOpen(true)
     }
   }
 
@@ -709,15 +756,22 @@ const ProfilePage = () => {
     try {
       await setDefaultAddress(id)
       await refreshContext().catch(() => {})
+      setResultTitle('Success')
+      setResultMessage('Default address updated!')
+      setResultModalOpen(true)
     } catch (err) {
-      alert(err?.message || 'Failed to set default address')
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to set default address')
+      setResultModalOpen(true)
     }
   }
 
   const handleCancelBooking = async (booking) => {
     if (!booking?.BookingId) return
     if (!isCStatus(booking?.Status)) {
-      alert('Only pending bookings can be cancelled')
+      setResultTitle('Warning')
+      setResultMessage('Only pending bookings can be cancelled')
+      setResultModalOpen(true)
       return
     }
     setBookingToCancel(booking)
@@ -732,9 +786,14 @@ const ProfilePage = () => {
       await cancelBooking(bookingId)
       setCancelBookingConfirmOpen(false)
       setBookingToCancel(null)
+      setCancellingBookingId('')
+      setResultTitle('Success')
+      setResultMessage('Booking cancelled successfully!')
+      setResultModalOpen(true)
     } catch (err) {
-      alert(err?.message || 'Failed to cancel booking')
-    } finally {
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to cancel booking')
+      setResultModalOpen(true)
       setCancellingBookingId('')
     }
   }
@@ -747,7 +806,9 @@ const ProfilePage = () => {
   const handleCancelOrder = async (order) => {
     if (!order?.OrderId) return
     if (!isCStatus(order?.Status)) {
-      alert('Only pending orders can be cancelled')
+      setResultTitle('Warning')
+      setResultMessage('Only pending orders can be cancelled')
+      setResultModalOpen(true)
       return
     }
     setOrderToCancel(order)
@@ -762,9 +823,14 @@ const ProfilePage = () => {
       await cancelOrder(orderId)
       setCancelOrderConfirmOpen(false)
       setOrderToCancel(null)
+      setCancellingOrderId('')
+      setResultTitle('Success')
+      setResultMessage('Order cancelled successfully!')
+      setResultModalOpen(true)
     } catch (err) {
-      alert(err?.message || 'Failed to cancel order')
-    } finally {
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to cancel order')
+      setResultModalOpen(true)
       setCancellingOrderId('')
     }
   }
@@ -1001,6 +1067,57 @@ const ProfilePage = () => {
         }}>
           {resultMessage}
         </p>
+      </PortalModal>
+
+      <PortalModal
+        open={saveProfileConfirmOpen}
+        title="Confirm Profile Update"
+        onClose={cancelSaveProfile}
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={cancelSaveProfile}>
+              Cancel
+            </button>
+            <button 
+              type="button" 
+              className="portal-modalBtn portal-modalBtnPrimary" 
+              onClick={confirmSaveProfile}
+              disabled={savingProfile}
+              style={{ backgroundColor: savingProfile ? '#ccc' : '#3b82f6' }}
+            >
+              {savingProfile ? 'Saving...' : 'Confirm & Save'}
+            </button>
+          </>
+        }
+      >
+        <div style={{ marginBottom: '16px' }}>
+          <p style={{ fontSize: '15px', color: '#1f2937', marginBottom: '12px', fontWeight: '500' }}>
+            Are you sure you want to update your profile?
+          </p>
+          <div style={{ backgroundColor: '#f3f4f6', padding: '12px', borderRadius: '6px', marginBottom: '12px' }}>
+            {profileDataToSave && (
+              <>
+                <p style={{ fontSize: '13px', color: '#374151', margin: '0 0 8px 0' }}>
+                  <strong>Name:</strong> {profileDataToSave.name || '-'}
+                </p>
+                <p style={{ fontSize: '13px', color: '#374151', margin: '0 0 8px 0' }}>
+                  <strong>Email:</strong> {profileDataToSave.email || '-'}
+                </p>
+                <p style={{ fontSize: '13px', color: '#374151', margin: '0 0 8px 0' }}>
+                  <strong>Phone:</strong> {profileDataToSave.phone || '-'}
+                </p>
+                {profileDataToSave.newPassword && (
+                  <p style={{ fontSize: '13px', color: '#374151', margin: '0' }}>
+                    <strong>Password:</strong> Will be changed
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+          <p style={{ fontSize: '12px', color: '#6b7280', margin: '0' }}>
+            This action cannot be undone.
+          </p>
+        </div>
       </PortalModal>
     </div>
   )
