@@ -186,22 +186,50 @@ export default function OwnerServicesPage() {
 
   async function onSubmitCategory(e) {
     e.preventDefault()
-    if (!categoryForm.name) return
+    
+    const nameInput = (categoryForm.name || '').trim();
+    const catName = nameInput.toLowerCase();
+    
+    if (!catName) return;
+
+    // KIỂM TRA TÊN DANH MỤC HỢP LỆ (NAIL & CARE)
+    const nailKeywords = ['nail', 'móng', 'sơn', 'gel', 'đắp', 'nối mi', 'mi', 'eyelash', 'care', 'elite', 'massage', 'vẽ'];
+    const isValidName = nailKeywords.some(keyword => catName.includes(keyword));
+
+    if (!isValidName) {
+      const errorMsg = "The category name is not related to Nails & Care services. Please re-enter.!";
+      setCategoryError(errorMsg);
+
+      window.dispatchEvent(new CustomEvent('portal:error-modal', { 
+        detail: { message: errorMsg, title: 'Invalid Name' } 
+      }));
+      return; 
+    }
 
     try {
       setCategoryError('')
       const created = await api.post('/api/owner/services/categories', {
-        name: categoryForm.name,
+        name: nameInput,
         description: categoryForm.description,
       })
       await refreshCategories()
       if (created?.id) {
         setForm((p) => ({ ...p, categoryId: String(created.id) }))
       }
+      
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Category added successfully!', title: 'Completed' } 
+      }));
+
       closeCreateCategory()
     } catch (err) {
       console.error(err)
-      setCategoryError(err?.message || 'Unable to create service category')
+      const msg = err?.message || 'Unable to create service catalog';
+      setCategoryError(msg)
+
+      window.dispatchEvent(new CustomEvent('portal:error-modal', { 
+        detail: { message: msg, title: 'Error' } 
+      }));
     }
   }
 
@@ -243,11 +271,21 @@ export default function OwnerServicesPage() {
       setDeleteConfirmOpen(false)
       setError('')
       await api.del(`/api/owner/services/${serviceId}`)
+      
+      window.dispatchEvent(new CustomEvent('portal:success-modal', { 
+        detail: { message: 'Xóa dịch vụ thành công', title: 'Hoàn tất' } 
+      }));
+
       await refresh()
       close()
     } catch (err) {
       console.error(err)
-      setError(err?.message || 'Unable to delete service')
+      const msg = err?.message || 'Không thể xóa dịch vụ';
+      setError(msg)
+      
+      window.dispatchEvent(new CustomEvent('portal:error-modal', { 
+        detail: { message: msg, title: 'Lỗi' } 
+      }));
     }
   }
 
@@ -255,7 +293,7 @@ export default function OwnerServicesPage() {
     e.preventDefault()
     if (!form.name) return
     if (!form.categoryId) {
-      setError('Please select a service category')
+      setError('Please select or enter a service category')
       return
     }
 
@@ -274,12 +312,12 @@ export default function OwnerServicesPage() {
       if (editing?.id) {
         await api.put(`/api/owner/services/${editing.id}`, payload)
         window.dispatchEvent(new CustomEvent('portal:success-modal', { 
-          detail: { message: 'Service updated successfully', title: 'Completed' } 
+          detail: { message: 'Cập nhật dịch vụ thành công!', title: 'Hoàn tất' } 
         }));
       } else {
         await api.post('/api/owner/services', payload)
         window.dispatchEvent(new CustomEvent('portal:success-modal', { 
-          detail: { message: 'Service created successfully', title: 'Completed' } 
+          detail: { message: 'Thêm dịch vụ thành công!', title: 'Hoàn tất' } 
         }));
       }
 
@@ -289,7 +327,12 @@ export default function OwnerServicesPage() {
       close()
     } catch (err) {
       console.error(err)
-      setError(err?.message || 'Something went wrong')
+      const msg = err?.message || 'Có lỗi xảy ra khi lưu dịch vụ';
+      setError(msg)
+
+      window.dispatchEvent(new CustomEvent('portal:error-modal', { 
+        detail: { message: msg, title: 'Lỗi' } 
+      }));
     }
   }
 
@@ -360,16 +403,12 @@ export default function OwnerServicesPage() {
 
         <div className="portal-headerActions">
           <button type="button" className="portal-primaryBtn" onClick={openCreate}>
-            <span className="portal-primaryBtnIcon" aria-hidden="true">
-              +
-            </span>
+            <span className="portal-primaryBtnIcon" aria-hidden="true">+</span>
             Add service
           </button>
 
           <button type="button" className="portal-primaryBtn" onClick={openCreateCategory}>
-            <span className="portal-primaryBtnIcon" aria-hidden="true">
-              +
-            </span>
+            <span className="portal-primaryBtnIcon" aria-hidden="true">+</span>
             Add service category
           </button>
         </div>
@@ -383,23 +422,13 @@ export default function OwnerServicesPage() {
         bodyClassName="portal-serviceModalBody"
         footer={
           <>
-            {editing?.id ? (
-              <button
-                type="button"
-                className="portal-modalBtn"
-                onClick={() => openDetail(editing)}
-              >
-                Details
-              </button>
-            ) : null}
-            {editing?.id ? (
-              <button type="button" className="portal-modalBtn" onClick={openDeleteConfirm}>
-                Delete
-              </button>
-            ) : null}
-            <button type="button" className="portal-modalBtn" onClick={close}>
-              Cancel
-            </button>
+            {editing?.id && (
+              <button type="button" className="portal-modalBtn" onClick={() => openDetail(editing)}>Details</button>
+            )}
+            {editing?.id && (
+              <button type="button" className="portal-modalBtn" onClick={openDeleteConfirm}>Delete</button>
+            )}
+            <button type="button" className="portal-modalBtn" onClick={close}>Cancel</button>
             <button type="submit" form="service-form" className="portal-modalBtn portal-modalBtnPrimary">
               {editing ? 'Save changes' : 'Add service'}
             </button>
@@ -407,11 +436,7 @@ export default function OwnerServicesPage() {
         }
       >
         <form id="service-form" className="portal-serviceFormCompact" onSubmit={onSubmit}>
-          {error ? (
-            <div className="portal-formError" role="alert">
-              {error}
-            </div>
-          ) : null}
+          {error && <div className="portal-formError" role="alert">{error}</div>}
 
           <label className="portal-field">
             <span className="portal-label">Service name</span>
@@ -426,18 +451,22 @@ export default function OwnerServicesPage() {
           <div className="portal-modalGrid2 portal-serviceGridTop">
             <label className="portal-field">
               <span className="portal-label">Service category</span>
-              <select
-                className="portal-select"
-                value={form.categoryId || ''}
-                onChange={(e) => setForm((p) => ({ ...p, categoryId: e.target.value }))}
-              >
-                <option value="">-- Select service category --</option>
+              <input
+                className="portal-input"
+                placeholder="enter or search for keywords..."
+                list="category-suggestions"
+                value={categoriesById.get(form.categoryId)?.name || form.categoryId}
+                onChange={(e) => {
+                   const val = e.target.value;
+                   const matched = categories.find(c => c.name === val);
+                   setForm((p) => ({ ...p, categoryId: matched ? String(matched.id) : val }));
+                }}
+              />
+              <datalist id="category-suggestions">
                 {categories.map((c) => (
-                  <option key={String(c.id)} value={String(c.id)}>
-                    {c.name}
-                  </option>
+                  <option key={String(c.id)} value={c.name} />
                 ))}
-              </select>
+              </datalist>
             </label>
 
             <label className="portal-field">
@@ -450,9 +479,9 @@ export default function OwnerServicesPage() {
                 <option value="">-- Select status --</option>
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
-                {form.status && form.status !== 'active' && form.status !== 'inactive' ? (
+                {form.status && form.status !== 'active' && form.status !== 'inactive' && (
                   <option value={form.status}>{form.status}</option>
-                ) : null}
+                )}
               </select>
             </label>
           </div>
@@ -497,7 +526,6 @@ export default function OwnerServicesPage() {
               style={{ display: 'none' }}
               onChange={onPickImage}
             />
-
             {Array.isArray(form.images) && form.images.length > 0 ? (
               <div className="portal-mediaGallery" role="list">
                 {form.images.map((url, idx) => (
@@ -515,11 +543,8 @@ export default function OwnerServicesPage() {
             ) : (
               <div className="portal-pageSubtitle">No images yet.</div>
             )}
-
             <div className="portal-rowActions" style={{ marginTop: 12 }}>
-              <button type="button" className="portal-ghostBtn" onClick={() => imageInputRef.current?.click()}>
-                Add image
-              </button>
+              <button type="button" className="portal-ghostBtn" onClick={() => imageInputRef.current?.click()}>Add image</button>
               <button
                 type="button"
                 className="portal-ghostBtn danger"
@@ -556,22 +581,13 @@ export default function OwnerServicesPage() {
         onClose={closeCreateCategory}
         footer={
           <>
-            <button type="button" className="portal-modalBtn" onClick={closeCreateCategory}>
-              Cancel
-            </button>
-            <button type="submit" form="service-category-form" className="portal-modalBtn portal-modalBtnPrimary">
-              Save
-            </button>
+            <button type="button" className="portal-modalBtn" onClick={closeCreateCategory}>Cancel</button>
+            <button type="submit" form="service-category-form" className="portal-modalBtn portal-modalBtnPrimary">Save</button>
           </>
         }
       >
         <form id="service-category-form" onSubmit={onSubmitCategory}>
-          {categoryError ? (
-            <div className="portal-formError" role="alert">
-              {categoryError}
-            </div>
-          ) : null}
-
+          {categoryError && <div className="portal-formError" role="alert">{categoryError}</div>}
           <label className="portal-field">
             <span className="portal-label">Category name</span>
             <input
@@ -581,7 +597,6 @@ export default function OwnerServicesPage() {
               onChange={(e) => setCategoryForm((p) => ({ ...p, name: e.target.value }))}
             />
           </label>
-
           <label className="portal-field" style={{ marginTop: 12 }}>
             <span className="portal-label">Description</span>
             <textarea
@@ -594,10 +609,9 @@ export default function OwnerServicesPage() {
         </form>
       </PortalModal>
 
+      {/* SEARCH AND FILTERS */}
       <div className="portal-search portal-searchFull" role="search">
-          <span className="portal-searchIcon" aria-hidden="true">
-            <IconSearch />
-          </span>
+          <span className="portal-searchIcon" aria-hidden="true"><IconSearch /></span>
           <input
             className="portal-searchInput"
             placeholder="Search by service name, category, or status..."
@@ -620,15 +634,14 @@ export default function OwnerServicesPage() {
             <span className="portal-label">Filter by category</span>
             <select className="portal-select" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
               <option value="all">All categories</option>
-              {(categories || []).map((c) => (
-                <option key={String(c.id)} value={String(c.id)}>
-                  {c.name}
-                </option>
+              {categories.map((c) => (
+                <option key={String(c.id)} value={String(c.id)}>{c.name}</option>
               ))}
             </select>
           </label>
       </div>
 
+      {/* SERVICE LIST TABLE */}
       <PortalCard className="portal-invTableCard" title="Service List">
         <div className="portal-tableWrap">
           <table className="portal-table">
@@ -647,10 +660,8 @@ export default function OwnerServicesPage() {
             <tbody>
               {pagedServices.map((s) => {
                 const categoryId = String(s?.categoryId ?? s?.category?.id ?? '')
-                const categoryName =
-                  s?.categoryName || s?.category || categoriesById.get(categoryId)?.name || s?.tag || s?.__group || '-'
-                const duration =
-                  s?.durationMinutes === undefined || s?.durationMinutes === null
+                const categoryName = s?.categoryName || s?.category || categoriesById.get(categoryId)?.name || s?.tag || s?.__group || '-'
+                const duration = s?.durationMinutes === undefined || s?.durationMinutes === null
                     ? `${Number(digitsOnly(s?.duration) || 0)} min`
                     : `${Number(s.durationMinutes || 0)} min`
                 const price = s?.priceVnd === undefined || s?.priceVnd === null ? digitsOnly(s?.price) : s.priceVnd
@@ -660,31 +671,23 @@ export default function OwnerServicesPage() {
                 return (
                   <tr key={s.id || `${categoryName}-${s.name}`}>
                     <td className="portal-invName">{s.name || '-'}</td>
-                    <td>
-                      <span className="portal-invPill">{categoryName}</span>
-                    </td>
+                    <td><span className="portal-invPill">{categoryName}</span></td>
                     <td>{duration}</td>
                     <td>{formatVnd(price)} ₫</td>
                     <td>{Number.isFinite(totalBookings) ? totalBookings : 0}</td>
                     <td>{formatAverageRating(averageRating)}</td>
-                    <td>
-                      <span className="portal-invPill">{s.status || '-'}</span>
-                    </td>
+                    <td><span className="portal-invPill">{s.status || '-'}</span></td>
                     <td style={{ width: 180 }}>
                       <div className="portal-rowActions">
-                        <button type="button" className="portal-ghostBtn" onClick={() => openEdit(s)}>
-                          Edit
-                        </button>
+                        <button type="button" className="portal-ghostBtn" onClick={() => openEdit(s)}>Edit</button>
                       </div>
                     </td>
                   </tr>
                 )
               })}
-              {pagedServices.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="service-emptyRow">No services found</td>
-                </tr>
-              ) : null}
+              {pagedServices.length === 0 && (
+                <tr><td colSpan={8} className="service-emptyRow">No services found</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -695,20 +698,14 @@ export default function OwnerServicesPage() {
             className="service-paginationBtn"
             disabled={page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            aria-label="Previous page"
-          >
-            ‹
-          </button>
+          >‹</button>
           <span className="service-paginationText">Page {page} / {totalPages}</span>
           <button
             type="button"
             className="service-paginationBtn"
             disabled={page >= totalPages}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            aria-label="Next page"
-          >
-            ›
-          </button>
+          >›</button>
         </div>
       </PortalCard>
     </div>
