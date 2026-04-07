@@ -2487,16 +2487,21 @@ async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInpu
   if (rows.length === 0) {
     // If no booking services found, fall back to a single row tied to BookingId via OrderId/BookingId
     try {
+      // Set a marker ServiceId for booking-level reviews so the existing CK constraint
+      // (which requires either ServiceId or ProductId) is satisfied. Use a booking-prefixed
+      // marker to avoid colliding with real service ids.
+      const bookingServiceMarker = `BKG-${bookingId}`
       await query(
         `INSERT INTO [SalonReviews] (
            [ReviewId], [UserId], [ServiceId], [ProductId], [OrderId], [BookingId], [OrderItemId], [BookingServiceId], [Rating], [Comment], [CreatedAt]
          ) VALUES (
-           @reviewId, @userId, NULL, NULL, NULL, @bookingId, NULL, NULL, @rating, @comment, SYSUTCDATETIME()
+           @reviewId, @userId, @serviceId, NULL, NULL, @bookingId, NULL, NULL, @rating, @comment, SYSUTCDATETIME()
          )`,
         {
           reviewId,
           userId: booking.CustomerUserId,
           bookingId,
+          serviceId: bookingServiceMarker,
           rating,
           comment: comment || null,
         }
@@ -2515,15 +2520,17 @@ async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInpu
   for (const r of rows) {
     const rsReviewId = `REV-${newId()}`
     try {
+      // Set ServiceId from the BookingServices row so the CK constraint passes.
       await query(
         `INSERT INTO [SalonReviews] (
            [ReviewId], [UserId], [ServiceId], [ProductId], [OrderId], [OrderItemId], [BookingServiceId], [Rating], [Comment], [CreatedAt]
          ) VALUES (
-           @reviewId, @userId, NULL, NULL, NULL, NULL, @bookingServiceId, @rating, @comment, SYSUTCDATETIME()
+           @reviewId, @userId, @serviceId, NULL, NULL, NULL, @bookingServiceId, @rating, @comment, SYSUTCDATETIME()
          )`,
         {
           reviewId: rsReviewId,
           userId: booking.CustomerUserId,
+          serviceId: r.ServiceId || `BKGSRV-${r.BookingServiceId}`,
           bookingServiceId: r.BookingServiceId,
           rating,
           comment: comment || null,
