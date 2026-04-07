@@ -11,6 +11,7 @@ import {
 } from 'react-icons/io5';
 import { resolveApiImageUrl } from '../lib/api.js';
 import { useServiceReviews, useServices } from '../hooks/useHomepage';
+import PortalModal from '../components/Layout portal/PortalModal.jsx';
 import '../styles/ServiceDetail.css';
 import '../styles/OwnerServiceDetail.css';
 
@@ -161,6 +162,11 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting, allowWr
     comment: ''
   });
   const [hoveredRating, setHoveredRating] = useState(0);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [reviewDataToSubmit, setReviewDataToSubmit] = useState(null);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notificationTitle, setNotificationTitle] = useState('');
+  const [notificationMessage, setNotificationMessage] = useState('');
 
   const handleRatingClick = (rating) => {
     setNewReview({ ...newReview, rating });
@@ -170,26 +176,47 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting, allowWr
     setNewReview({ ...newReview, comment: e.target.value });
   };
 
+  const showNotification = (title, message) => {
+    setNotificationTitle(title);
+    setNotificationMessage(message);
+    setNotificationOpen(true);
+  };
+
   const handleSubmitReview = (e) => {
     e.preventDefault();
     
     if (!newReview.comment.trim()) {
-      alert('Please write a comment');
+      showNotification('Validation Error', 'Please write a comment');
       return;
     }
 
-    onSubmitReview({
+    // Show confirmation modal instead of submitting directly
+    setReviewDataToSubmit({
       serviceId,
       rating: newReview.rating,
       comment: newReview.comment
-    })
+    });
+    setConfirmModalOpen(true);
+  };
+
+  const confirmSubmitReview = () => {
+    if (!reviewDataToSubmit) return;
+
+    onSubmitReview(reviewDataToSubmit)
       .then(() => {
         setNewReview({ rating: 5, comment: '' });
-        alert('Review submitted successfully!');
+        setConfirmModalOpen(false);
+        setReviewDataToSubmit(null);
+        showNotification('Success', 'Review submitted successfully!');
       })
       .catch((err) => {
-        alert(err?.message || 'Failed to submit review');
+        showNotification('Error', err?.message || 'Failed to submit review');
       });
+  };
+
+  const cancelSubmitReview = () => {
+    setConfirmModalOpen(false);
+    setReviewDataToSubmit(null);
   };
 
   const renderStars = (rating, interactive = false) => {
@@ -310,6 +337,61 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, submitting, allowWr
           )}
         </div>
       </div>
+
+      <PortalModal
+        open={confirmModalOpen}
+        title="Confirm Review Submission"
+        onClose={cancelSubmitReview}
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={cancelSubmitReview}>
+              Cancel
+            </button>
+            <button 
+              type="button" 
+              className="portal-modalBtn portal-modalBtnPrimary" 
+              onClick={confirmSubmitReview}
+              disabled={submitting}
+              style={{ backgroundColor: submitting ? '#ccc' : '#3b82f6' }}
+            >
+              {submitting ? 'Submitting...' : 'Confirm & Submit'}
+            </button>
+          </>
+        }
+      >
+        <div style={{ marginBottom: '16px' }}>
+          <p style={{ fontSize: '15px', color: '#1f2937', marginBottom: '12px', fontWeight: '500' }}>
+            Are you sure you want to submit this review?
+          </p>
+          <div style={{ backgroundColor: '#f3f4f6', padding: '12px', borderRadius: '6px', marginBottom: '12px' }}>
+            <p style={{ fontSize: '13px', color: '#374151', margin: '0 0 8px 0', fontWeight: '500' }}>
+              Rating: <strong>{reviewDataToSubmit?.rating || 5} ★</strong>
+            </p>
+            <p style={{ fontSize: '13px', color: '#374151', margin: '0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              <strong>Comment:</strong> {reviewDataToSubmit?.comment || ''}
+            </p>
+          </div>
+          <p style={{ fontSize: '12px', color: '#6b7280', margin: '0' }}>
+            This action cannot be undone.
+          </p>
+        </div>
+      </PortalModal>
+
+      <PortalModal
+        open={notificationOpen}
+        title={notificationTitle}
+        onClose={() => setNotificationOpen(false)}
+      >
+        <p style={{ 
+          fontSize: '15px', 
+          color: '#1f2937', 
+          marginBottom: '0', 
+          lineHeight: '1.6',
+          fontWeight: '500'
+        }}>
+          {notificationMessage}
+        </p>
+      </PortalModal>
     </section>
   );
 };
