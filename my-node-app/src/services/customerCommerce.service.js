@@ -2508,15 +2508,14 @@ async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInpu
     const rsReviewId = `REV-${newId()}`
     await query(
       `INSERT INTO [SalonReviews] (
-         [ReviewId], [UserId], [ServiceId], [ProductId], [OrderId], [BookingId], [OrderItemId], [BookingServiceId], [Rating], [Comment], [CreatedAt]
-       ) VALUES (
-         @reviewId, @userId, NULL, NULL, NULL, @bookingId, NULL, @bookingServiceId, @rating, @comment, SYSUTCDATETIME()
-       )`,
+           [ReviewId], [UserId], [ServiceId], [ProductId], [OrderId], [OrderItemId], [BookingServiceId], [Rating], [Comment], [CreatedAt]
+         ) VALUES (
+           @reviewId, @userId, NULL, NULL, NULL, NULL, @bookingServiceId, @rating, @comment, SYSUTCDATETIME()
+         )`,
       {
         reviewId: rsReviewId,
         userId: booking.CustomerUserId,
-        bookingId,
-        bookingServiceId: r.BookingServiceId,
+          bookingServiceId: r.BookingServiceId,
         rating,
         comment: comment || null,
       }
