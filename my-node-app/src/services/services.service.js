@@ -590,6 +590,33 @@ async function createServiceCategory(payload) {
 
   return { id, name, description }
 }
+/**
+ * TÌM KIẾM DANH MỤC DỊCH VỤ THEO TỪ KHÓA (Dùng cho Autocomplete)
+ * @param {string} keyword - Từ khóa người dùng nhập (vd: 'móng')
+ */
+async function searchServiceCategories(keyword) {
+  const searchTerm = String(keyword || '').trim()
+  
+  if (!searchTerm) {
+    return []
+  }
+
+  // Sử dụng toán tử LIKE để tìm kiếm gần đúng
+  // N'%' + @searchTerm + N'%' giúp tìm từ khóa ở bất kỳ vị trí nào trong tên
+  const res = await query(
+    `SELECT TOP 10 CategoryId, Name, Description
+     FROM ServiceCategories
+     WHERE Name LIKE N'%' + @searchTerm + N'%'
+     ORDER BY Name`,
+    { searchTerm }
+  )
+
+  return (res.recordset || []).map((r) => ({
+    id: r.CategoryId,
+    name: r.Name || '',
+    description: r.Description || '',
+  }))
+}
 
 module.exports = {
   listServicesGrouped,
@@ -600,4 +627,5 @@ module.exports = {
   uploadServiceImageFromDataUrl,
   listServiceCategories,
   createServiceCategory,
+  searchServiceCategories, 
 }
