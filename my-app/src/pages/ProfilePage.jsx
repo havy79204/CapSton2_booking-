@@ -54,7 +54,7 @@ function normalizeOrderStatus(status) {
   if (s === 'processing') return 'Processing'
   if (s === 'shipping' || s === 'shipped' || s === 'delivering' || s === 'in transit') return 'Shipping'
   if (s === 'completed' || s === 'complete' || s === 'delivered') return 'Completed'
-  if (s === 'cancelled' || s === 'canceled') return 'Cancelled'
+  if (s === 'cancelled' || s === 'cancelled') return 'Cancelled'
   if (s === 'failed') return 'Failed'
   return String(status || '').trim() || 'Pending'
 }

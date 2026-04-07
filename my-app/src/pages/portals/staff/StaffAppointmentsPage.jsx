@@ -216,7 +216,7 @@ export default function StaffAppointmentsPage() {
     e.preventDefault();
     e.stopPropagation();
     const rawStatus = String(appt?.status || '').trim().toLowerCase();
-    const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'canceled' : (appt?.status || 'pending');
+    const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'cancelled' : (appt?.status || 'pending');
     setEditingAppt({ ...appt, status: normalizedStatus });
     const currentIds = Array.isArray(appt.serviceIds) ? appt.serviceIds.map(String) : [];
     setSelectedServiceIds(currentIds);
@@ -311,7 +311,7 @@ export default function StaffAppointmentsPage() {
         if (raw !== null && String(raw).trim() !== '') {
           const s = String(raw).trim();
           const lower = s.toLowerCase();
-          if (lower === 'delete' || lower === 'deleted') return 'canceled';
+          if (lower === 'delete' || lower === 'deleted') return 'cancelled';
           return s;
         }
         return editingAppt?.status || 'pending';
@@ -604,7 +604,7 @@ export default function StaffAppointmentsPage() {
               <option value="pending">Pending</option>
               <option value="booked">Booked</option>
               <option value="completed">Completed</option>
-              <option value="canceled">Canceled</option>
+              <option value="cancelled">Cancelled</option>
             </select>
           </div>
 

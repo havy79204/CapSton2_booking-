@@ -7,9 +7,11 @@ const {
   getRecommendations,
   getServiceReviews,
   createServiceReview,
+  deleteServiceReview,
   getProductRating,
   getProductReviews,
   createProductReview,
+  deleteProductReview,
   getReviews,
   getMyReviews,
   getStats,
@@ -39,6 +41,7 @@ router.get('/services/:serviceId/reviews', getServiceReviews)
 
 // POST /api/homepage/services/:serviceId/reviews - Create service review
 router.post('/services/:serviceId/reviews', requireAuth, createServiceReview)
+router.delete('/services/:serviceId/reviews/:reviewId', requireAuth, deleteServiceReview)
 
 // GET /api/homepage/products/:productId/rating - Get product rating
 router.get('/products/:productId/rating', getProductRating)
@@ -48,6 +51,7 @@ router.get('/products/:productId/reviews', getProductReviews)
 
 // POST /api/homepage/products/:productId/reviews - Create product review
 router.post('/products/:productId/reviews', requireAuth, createProductReview)
+router.delete('/products/:productId/reviews/:reviewId', requireAuth, deleteProductReview)
 
 // GET /api/homepage/reviews - Get reviews list
 router.get('/reviews', getReviews)

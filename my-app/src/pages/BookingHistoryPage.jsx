@@ -4,6 +4,7 @@ import { IoCalendarOutline, IoCheckmarkCircleOutline, IoTimeOutline } from 'reac
 import { useCustomerBookings } from '../hooks/useCustomerCommerce'
 import PortalModal from '../components/Layout portal/PortalModal.jsx'
 import { api } from '../lib/api.js'
+import { formatVnd } from '../lib/currency'
 import '../styles/HistoryPage.css'
 
 function bookingStatusClass(status) {
@@ -24,17 +25,20 @@ function isCompleted(status) {
 }
 
 function fmtMoney(value) {
-  return Number(value || 0).toFixed(2)
+  return formatVnd(value || 0)
 }
 
 const BookingHistoryPage = () => {
   const navigate = useNavigate()
-  const { bookings, loading, error, cancelBooking } = useCustomerBookings(100)
+  const { bookings, loading, error, cancelBooking, refresh } = useCustomerBookings(100)
   const [cancellingId, setCancellingId] = useState('')
   const [ratingModalOpen, setRatingModalOpen] = useState(false)
   const [bookingToRate, setBookingToRate] = useState(null)
   const [rating, setRating] = useState(5)
   const [ratingComment, setRatingComment] = useState('')
+  const [ratingImageDataUrls, setRatingImageDataUrls] = useState([])
+  const [ratingTarget, setRatingTarget] = useState('booking')
+  const [selectedBookingServiceId, setSelectedBookingServiceId] = useState('')
   const [submittingRating, setSubmittingRating] = useState(false)
   const [resultModalOpen, setResultModalOpen] = useState(false)
   const [resultMessage, setResultMessage] = useState('')
@@ -61,9 +65,13 @@ const BookingHistoryPage = () => {
   }
 
   const openRatingModal = (booking) => {
+    const firstServiceId = String(booking?.Services?.[0]?.BookingServiceId || '').trim()
     setBookingToRate(booking)
     setRating(5)
     setRatingComment('')
+    setRatingImageDataUrls([])
+    setRatingTarget('booking')
+    setSelectedBookingServiceId(firstServiceId)
     setRatingModalOpen(true)
   }
 
@@ -72,21 +80,49 @@ const BookingHistoryPage = () => {
     setBookingToRate(null)
     setRating(5)
     setRatingComment('')
+    setRatingImageDataUrls([])
+    setRatingTarget('booking')
+    setSelectedBookingServiceId('')
   }
 
   const submitRating = async () => {
     if (!bookingToRate?.BookingId) return
     try {
       setSubmittingRating(true)
-      const payload = {
-        bookingId: bookingToRate.BookingId,
-        rating: Number(rating),
-        comment: ratingComment.trim(),
+      if (ratingTarget === 'service') {
+        const bookingServiceId = String(selectedBookingServiceId || '').trim()
+        if (!bookingServiceId) {
+          setResultTitle('Error')
+          setResultMessage('Please choose a service to review')
+          setResultModalOpen(true)
+          return
+        }
+
+        await api.post(
+          `/api/customer/bookings/${encodeURIComponent(bookingToRate.BookingId)}/services/${encodeURIComponent(bookingServiceId)}/rating`,
+          {
+            rating: Number(rating),
+            comment: ratingComment.trim(),
+            images: ratingImageDataUrls,
+          },
+        )
+      } else {
+        await api.post('/api/customer/bookings/rating', {
+          bookingId: bookingToRate.BookingId,
+          rating: Number(rating),
+          comment: ratingComment.trim(),
+          images: ratingImageDataUrls,
+        })
       }
-      await api.post('/api/customer/bookings/rating', payload)
+
+      await refresh().catch(() => {})
       closeRatingModal()
       setResultTitle('Successfully!')
-      setResultMessage('Thank you for your review!')
+      setResultMessage(
+        ratingTarget === 'service'
+          ? 'Service review submitted. This will override booking review for that service.'
+          : 'Booking review submitted successfully.',
+      )
       setResultModalOpen(true)
     } catch (err) {
       setResultTitle('Error')
@@ -99,6 +135,32 @@ const BookingHistoryPage = () => {
 
   if (loading) return <div className="loading">Loading booking history...</div>
   if (error) return <div className="error">{error}</div>
+
+  const handleRatingImageChange = async (event) => {
+    const files = Array.from(event.target.files || [])
+    if (!files.length) return
+
+    const toDataUrl = (file) =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result || ''))
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+
+    try {
+      const dataUrls = await Promise.all(files.map((file) => toDataUrl(file)))
+      setRatingImageDataUrls((prev) => {
+        const merged = [...prev, ...dataUrls.filter(Boolean)]
+        const unique = Array.from(new Set(merged))
+        return unique.slice(0, 3)
+      })
+    } catch (_err) {
+      alert('Failed to read selected image files')
+    } finally {
+      event.target.value = ''
+    }
+  }
 
   return (
     <section className="history-page">
@@ -143,11 +205,11 @@ const BookingHistoryPage = () => {
                     </div>
                     <div className="history-kv">
                       <p className="history-kv-label">Discount</p>
-                      <p className="history-kv-value">-${fmtMoney(booking.DiscountAmount || 0)}</p>
+                      <p className="history-kv-value">- {fmtMoney(booking.DiscountAmount || 0)}</p>
                     </div>
                     <div className="history-kv">
                       <p className="history-kv-label">Total Price</p>
-                      <p className="history-kv-value">${fmtMoney(booking.TotalPrice || 0)}</p>
+                      <p className="history-kv-value">{fmtMoney(booking.TotalPrice || 0)}</p>
                     </div>
                   </div>
 
@@ -171,8 +233,8 @@ const BookingHistoryPage = () => {
                             <tr key={service.BookingServiceId || `${booking.BookingId}-${service.ServiceId}`}>
                               <td>{service.ServiceName || service.ServiceId}</td>
                               <td>{Number(service.DurationMinutes || 0)} mins</td>
-                              <td>${fmtMoney(service.Price || 0)}</td>
-                              <td>$0.00</td>
+                              <td>{fmtMoney(service.Price || 0)}</td>
+                              <td>{formatVnd(0)}</td>
                             </tr>
                           ))
                         )}
@@ -180,8 +242,8 @@ const BookingHistoryPage = () => {
                       <tfoot>
                         <tr>
                           <td colSpan={2}><strong>Subtotal</strong></td>
-                          <td><strong>${fmtMoney(booking.Subtotal || booking.TotalPrice || 0)}</strong></td>
-                          <td><strong>-${fmtMoney(booking.DiscountAmount || 0)}</strong></td>
+                          <td><strong>{fmtMoney(booking.Subtotal || booking.TotalPrice || 0)}</strong></td>
+                          <td><strong>- {fmtMoney(booking.DiscountAmount || 0)}</strong></td>
                         </tr>
                       </tfoot>
                     </table>
@@ -216,7 +278,7 @@ const BookingHistoryPage = () => {
 
       <PortalModal
         open={ratingModalOpen}
-        title="Rate Service"
+        title="Rate Booking"
         onClose={closeRatingModal}
         footer={
           <>
@@ -235,6 +297,61 @@ const BookingHistoryPage = () => {
         }
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937', marginBottom: '8px', display: 'block' }}>
+              Review Type
+            </label>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+              <button
+                type="button"
+                className="portal-modalBtn"
+                onClick={() => setRatingTarget('booking')}
+                style={{
+                  borderColor: ratingTarget === 'booking' ? '#f59e0b' : '#e5e7eb',
+                  color: ratingTarget === 'booking' ? '#b45309' : '#6b7280',
+                  background: ratingTarget === 'booking' ? '#fff7ed' : '#ffffff',
+                }}
+              >
+                Whole Booking
+              </button>
+              <button
+                type="button"
+                className="portal-modalBtn"
+                onClick={() => setRatingTarget('service')}
+                disabled={!Array.isArray(bookingToRate?.Services) || bookingToRate.Services.length === 0}
+                style={{
+                  borderColor: ratingTarget === 'service' ? '#f59e0b' : '#e5e7eb',
+                  color: ratingTarget === 'service' ? '#b45309' : '#6b7280',
+                  background: ratingTarget === 'service' ? '#fff7ed' : '#ffffff',
+                }}
+              >
+                Specific Service
+              </button>
+            </div>
+
+            {ratingTarget === 'service' ? (
+              <select
+                value={selectedBookingServiceId}
+                onChange={(e) => setSelectedBookingServiceId(e.target.value)}
+                style={{
+                  width: '100%',
+                  height: '40px',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  padding: '0 10px',
+                  fontSize: '14px',
+                  color: '#111827',
+                }}
+              >
+                {(Array.isArray(bookingToRate?.Services) ? bookingToRate.Services : []).map((service) => (
+                  <option key={service.BookingServiceId} value={service.BookingServiceId}>
+                    {service.ServiceName || service.ServiceId || service.BookingServiceId}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+          </div>
+
           <div>
             <label style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937', marginBottom: '8px', display: 'block' }}>
               Your Rating
@@ -263,7 +380,9 @@ const BookingHistoryPage = () => {
             <textarea
               value={ratingComment}
               onChange={(e) => setRatingComment(e.target.value)}
-              placeholder="Share your experience with this service..."
+              placeholder={ratingTarget === 'service'
+                ? 'Share your experience with this service...'
+                : 'Share your experience with this booking...'}
               style={{
                 width: '100%',
                 minHeight: '100px',
@@ -275,6 +394,35 @@ const BookingHistoryPage = () => {
                 resize: 'vertical',
               }}
             />
+          </div>
+
+          <div>
+            <label style={{ fontSize: '14px', fontWeight: '600', color: '#1f2937', marginBottom: '8px', display: 'block' }}>
+              Images (Optional, up to 3)
+            </label>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/jpg,image/webp"
+              multiple
+              onChange={handleRatingImageChange}
+              style={{
+                width: '100%',
+                padding: '8px 0',
+                fontSize: '14px',
+              }}
+            />
+            {ratingImageDataUrls.length > 0 ? (
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                {ratingImageDataUrls.map((img, index) => (
+                  <img
+                    key={`${img.slice(0, 30)}-${index}`}
+                    src={img}
+                    alt={`Selected rating ${index + 1}`}
+                    style={{ width: '64px', height: '64px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       </PortalModal>

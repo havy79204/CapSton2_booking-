@@ -22,7 +22,7 @@ function normalizeAppointmentStatus(status) {
   const normalizedStatusInput = String(status || '').trim().toLowerCase()
   if (normalizedStatusInput === 'c' || normalizedStatusInput === 'pending') return 'Pending'
   if (normalizedStatusInput === 'completed' || normalizedStatusInput === 'complete' || normalizedStatusInput === 'done') return 'Completed'
-  if (normalizedStatusInput === 'canceled' || normalizedStatusInput === 'cancelled' || normalizedStatusInput === 'delete' || normalizedStatusInput === 'deleted') return 'Canceled'
+  if (normalizedStatusInput === 'cancelled' || normalizedStatusInput === 'cancelled' || normalizedStatusInput === 'delete' || normalizedStatusInput === 'deleted') return 'Cancelled'
   if (normalizedStatusInput === 'booked' || normalizedStatusInput === 'confirmed' || normalizedStatusInput === 'confirm') return 'Booked'
   return status || 'Pending'
 }
@@ -422,7 +422,7 @@ async function updateAppointment(bookingId, payload) {
     await applyCommissionForCompletedBooking(bookingId, staffId)
   }
 
-  if (normalizedStatus === 'canceled' || normalizedStatus === 'cancelled') {
+  if (normalizedStatus === 'cancelled' || normalizedStatus === 'cancelled') {
     await notifyOwnerEvent({ event: 'booking_cancelled', bookingId })
   } else if (normalizedStatus === 'pending') {
     await notifyOwnerEvent({ event: 'booking_rescheduled', bookingId })
@@ -431,7 +431,7 @@ async function updateAppointment(bookingId, payload) {
   const targetCustomerUserId = String(currentBooking?.CustomerUserId || '').trim()
   if (targetCustomerUserId) {
     try {
-      if (normalizedStatus === 'canceled' || normalizedStatus === 'cancelled') {
+      if (normalizedStatus === 'cancelled' || normalizedStatus === 'cancelled') {
         await notifyCustomerEvent({
           userId: targetCustomerUserId,
           event: 'booking_cancelled',
@@ -478,7 +478,7 @@ async function cancelAppointment(bookingId) {
 
   await query('UPDATE Bookings SET Status = @status WHERE BookingId = @bookingId', {
     bookingId,
-    status: 'Canceled',
+    status: 'Cancelled',
   })
 
   await notifyOwnerEvent({ event: 'booking_cancelled', bookingId })

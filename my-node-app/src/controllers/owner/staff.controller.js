@@ -45,12 +45,7 @@ const putStaff = asyncHandler(async (req, res) => {
     return
   }
 
-  const { name } = req.body || {}
-  if (!name) {
-    res.status(400).json({ ok: false, error: 'Missing name' })
-    return
-  }
-
+  // Allow partial updates - don't require name for edit operations
   const data = await staffService.updateStaff(id, req.body)
   res.json({ ok: true, data })
 })
