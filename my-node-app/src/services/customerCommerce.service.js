@@ -2486,40 +2486,56 @@ async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInpu
   const rows = bsRes.recordset || []
   if (rows.length === 0) {
     // If no booking services found, fall back to a single row tied to BookingId via OrderId/BookingId
-    await query(
-      `INSERT INTO [SalonReviews] (
-         [ReviewId], [UserId], [ServiceId], [ProductId], [OrderId], [BookingId], [OrderItemId], [BookingServiceId], [Rating], [Comment], [CreatedAt]
-       ) VALUES (
-         @reviewId, @userId, NULL, NULL, NULL, @bookingId, NULL, NULL, @rating, @comment, SYSUTCDATETIME()
-       )`,
-      {
-        reviewId,
-        userId: booking.CustomerUserId,
-        bookingId,
-        rating,
-        comment: comment || null,
-      }
-    )
-    return { ReviewId: reviewId, BookingId: bookingId, Rating: rating, Comment: comment || null }
+    try {
+      await query(
+        `INSERT INTO [SalonReviews] (
+           [ReviewId], [UserId], [ServiceId], [ProductId], [OrderId], [BookingId], [OrderItemId], [BookingServiceId], [Rating], [Comment], [CreatedAt]
+         ) VALUES (
+           @reviewId, @userId, NULL, NULL, NULL, @bookingId, NULL, NULL, @rating, @comment, SYSUTCDATETIME()
+         )`,
+        {
+          reviewId,
+          userId: booking.CustomerUserId,
+          bookingId,
+          rating,
+          comment: comment || null,
+        }
+      )
+      return { ReviewId: reviewId, BookingId: bookingId, Rating: rating, Comment: comment || null }
+    } catch (err) {
+      console.error('[rateBooking] failed fallback SalonReviews insert', {
+        err: err?.message || err,
+        params: { reviewId, userId: booking.CustomerUserId, bookingId, rating, comment }
+      })
+      throw err
+    }
   }
 
   const created = []
   for (const r of rows) {
     const rsReviewId = `REV-${newId()}`
-    await query(
-      `INSERT INTO [SalonReviews] (
+    try {
+      await query(
+        `INSERT INTO [SalonReviews] (
            [ReviewId], [UserId], [ServiceId], [ProductId], [OrderId], [OrderItemId], [BookingServiceId], [Rating], [Comment], [CreatedAt]
          ) VALUES (
            @reviewId, @userId, NULL, NULL, NULL, NULL, @bookingServiceId, @rating, @comment, SYSUTCDATETIME()
          )`,
-      {
-        reviewId: rsReviewId,
-        userId: booking.CustomerUserId,
+        {
+          reviewId: rsReviewId,
+          userId: booking.CustomerUserId,
           bookingServiceId: r.BookingServiceId,
-        rating,
-        comment: comment || null,
-      }
-    )
+          rating,
+          comment: comment || null,
+        }
+      )
+    } catch (err) {
+      console.error('[rateBooking] failed SalonReviews insert', {
+        err: err?.message || err,
+        params: { reviewId: rsReviewId, userId: booking.CustomerUserId, bookingServiceId: r.BookingServiceId, rating, comment }
+      })
+      throw err
+    }
     created.push({ ReviewId: rsReviewId, BookingServiceId: r.BookingServiceId })
   }
 
