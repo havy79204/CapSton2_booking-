@@ -305,26 +305,16 @@ const OrderHistoryPage = () => {
             <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
               <button
                 type="button"
-                className="portal-modalBtn"
+                className={`portal-modalBtn history-reviewTypeBtn ${ratingTarget === 'order' ? 'is-active' : ''}`}
                 onClick={() => setRatingTarget('order')}
-                style={{
-                  borderColor: ratingTarget === 'order' ? '#f59e0b' : '#e5e7eb',
-                  color: ratingTarget === 'order' ? '#b45309' : '#6b7280',
-                  background: ratingTarget === 'order' ? '#fff7ed' : '#ffffff',
-                }}
               >
                 Whole Order
               </button>
               <button
                 type="button"
-                className="portal-modalBtn"
+                className={`portal-modalBtn history-reviewTypeBtn ${ratingTarget === 'item' ? 'is-active' : ''}`}
                 onClick={() => setRatingTarget('item')}
                 disabled={!Array.isArray(orderToRate?.Items) || orderToRate.Items.length === 0}
-                style={{
-                  borderColor: ratingTarget === 'item' ? '#f59e0b' : '#e5e7eb',
-                  color: ratingTarget === 'item' ? '#b45309' : '#6b7280',
-                  background: ratingTarget === 'item' ? '#fff7ed' : '#ffffff',
-                }}
               >
                 Specific Product
               </button>

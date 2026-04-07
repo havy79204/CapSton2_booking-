@@ -265,7 +265,7 @@ const BookingHistoryPage = () => {
                         className="history-rate-btn"
                         onClick={() => openRatingModal(booking)}
                       >
-                        Rate Service
+                        {booking?.IsRated ? 'Review / Override Services' : 'Review'}
                       </button>
                     </div>
                   ) : null}
@@ -304,26 +304,16 @@ const BookingHistoryPage = () => {
             <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
               <button
                 type="button"
-                className="portal-modalBtn"
+                className={`portal-modalBtn history-reviewTypeBtn ${ratingTarget === 'booking' ? 'is-active' : ''}`}
                 onClick={() => setRatingTarget('booking')}
-                style={{
-                  borderColor: ratingTarget === 'booking' ? '#f59e0b' : '#e5e7eb',
-                  color: ratingTarget === 'booking' ? '#b45309' : '#6b7280',
-                  background: ratingTarget === 'booking' ? '#fff7ed' : '#ffffff',
-                }}
               >
                 Whole Booking
               </button>
               <button
                 type="button"
-                className="portal-modalBtn"
+                className={`portal-modalBtn history-reviewTypeBtn ${ratingTarget === 'service' ? 'is-active' : ''}`}
                 onClick={() => setRatingTarget('service')}
                 disabled={!Array.isArray(bookingToRate?.Services) || bookingToRate.Services.length === 0}
-                style={{
-                  borderColor: ratingTarget === 'service' ? '#f59e0b' : '#e5e7eb',
-                  color: ratingTarget === 'service' ? '#b45309' : '#6b7280',
-                  background: ratingTarget === 'service' ? '#fff7ed' : '#ffffff',
-                }}
               >
                 Specific Service
               </button>
