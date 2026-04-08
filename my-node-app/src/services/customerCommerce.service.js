@@ -755,10 +755,54 @@ async function getCustomerContext(userIdInput) {
   }
 }
 
-async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
+// Cache for StaffSkills schema checks to avoid repeated queries
+const staffSkillsSchemaCache = {
+  hasStaffSkills: null,
+  hasCategoryIdInSkills: null,
+  hasServiceIdInSkills: null,
+  lastChecked: null,
+  cacheTimeoutMs: 5 * 60 * 1000 // 5 minutes cache
+}
+
+async function getStaffSkillsSchema() {
+  const now = Date.now()
+  
+  // Return cached result if still valid
+  if (staffSkillsSchemaCache.lastChecked && 
+      (now - staffSkillsSchemaCache.lastChecked) < staffSkillsSchemaCache.cacheTimeoutMs) {
+    return {
+      hasStaffSkills: staffSkillsSchemaCache.hasStaffSkills,
+      hasCategoryIdInSkills: staffSkillsSchemaCache.hasCategoryIdInSkills,
+      hasServiceIdInSkills: staffSkillsSchemaCache.hasServiceIdInSkills
+    }
+  }
+  
+  // Check schema and cache results
+  const hasStaffSkills = await columnExists('StaffSkills', 'StaffId')
+  const hasCategoryIdInSkills = hasStaffSkills ? await columnExists('StaffSkills', 'CategoryId') : false
+  const hasServiceIdInSkills = hasStaffSkills ? await columnExists('StaffSkills', 'ServiceId') : false
+  
+  // Update cache
+  staffSkillsSchemaCache.hasStaffSkills = hasStaffSkills
+  staffSkillsSchemaCache.hasCategoryIdInSkills = hasCategoryIdInSkills
+  staffSkillsSchemaCache.hasServiceIdInSkills = hasServiceIdInSkills
+  staffSkillsSchemaCache.lastChecked = now
+  
+  console.log('[DEBUG] getStaffSkillsSchema: cached schema', { 
+    hasStaffSkills, hasCategoryIdInSkills, hasServiceIdInSkills 
+  })
+  
+  return { hasStaffSkills, hasCategoryIdInSkills, hasServiceIdInSkills }
+}
+
+async function listAvailableStaff(serviceIdsInput = [], dateInput = null) {
+  console.log('[DEBUG] listAvailableStaff: START', { serviceIdsInput, dateInput })
+  
   const serviceIds = Array.isArray(serviceIdsInput)
     ? [...new Set(serviceIdsInput.map((id) => String(id || '').trim()).filter(Boolean))]
     : []
+
+  console.log('[DEBUG] listAvailableStaff: processed serviceIds', { serviceIds, count: serviceIds.length })
 
   const params = {}
   
@@ -766,7 +810,8 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
   let availabilityFilterClause = ''
   let dateForAnalysis = null
   
-  if (dateInput) {
+  // Temporarily disable availability filtering to show all staff
+  if (false && dateInput) {
     try {
       // Import here to avoid circular dependency
       const { toIsoDate } = require('../utils/date')
@@ -807,12 +852,12 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
   let specialtySelectSql = `CAST('' AS NVARCHAR(255)) AS Specialty`
   let specialtyJoinSql = ''
 
-  const hasStaffSkills = await query(
-    `SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'StaffSkills'`
-  ).then((x) => Boolean(x.recordset?.length)).catch(() => false)
+  // Use cached schema to avoid repeated database calls
+  const { hasStaffSkills, hasCategoryIdInSkills, hasServiceIdInSkills } = await getStaffSkillsSchema()
+
+  console.log('[DEBUG] listAvailableStaff: using cached schema', { hasStaffSkills, hasCategoryIdInSkills, hasServiceIdInSkills })
 
   if (hasStaffSkills) {
-    const hasCategoryIdInSkills = await columnExists('StaffSkills', 'CategoryId')
     const hasServiceCategories = await query(
       `SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'ServiceCategories'`
     ).then((x) => Boolean(x.recordset?.length)).catch(() => false)
@@ -850,8 +895,11 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
   }
 
   if (hasStaffSkills && serviceIds.length > 0) {
-    const hasCategoryIdInSkills = await columnExists('StaffSkills', 'CategoryId')
-    const hasServiceIdInSkills = await columnExists('StaffSkills', 'ServiceId')
+    console.log('[DEBUG] listAvailableStaff: checking staff skills', { 
+      hasCategoryIdInSkills, 
+      hasServiceIdInSkills, 
+      serviceIdsLength: serviceIds.length 
+    })
 
     if (hasServiceIdInSkills) {
       const serviceParams = serviceIds.map((serviceId, idx) => {
@@ -868,9 +916,16 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
           FROM StaffSkills ss
           WHERE ss.StaffId = s.StaffId
             AND ss.ServiceId IN (${serviceParams.join(', ')})
-        ) = @requiredServiceCount
+        ) > 0
       `
+      
+      console.log('[DEBUG] listAvailableStaff: using ServiceId filtering (at least 1 match)', { 
+        serviceParams: serviceParams.join(', '), 
+        requiredServiceCount: serviceIds.length 
+      })
     } else if (hasCategoryIdInSkills) {
+      console.log('[DEBUG] listAvailableStaff: using CategoryId fallback filtering')
+      
       const serviceParams = serviceIds.map((serviceId, idx) => {
         const key = `serviceId${idx}`
         params[key] = serviceId
@@ -890,6 +945,12 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
         .map((row) => String(row.CategoryId || '').trim())
         .filter(Boolean)
 
+      console.log('[DEBUG] listAvailableStaff: found categories for services', { 
+        serviceIds, 
+        categoryIds, 
+        categoryCount: categoryIds.length 
+      })
+
       if (categoryIds.length > 0) {
         const categoryParams = categoryIds.map((categoryId, idx) => {
           const key = `categoryId${idx}`
@@ -905,10 +966,38 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
             FROM StaffSkills ss
             WHERE ss.StaffId = s.StaffId
               AND ss.CategoryId IN (${categoryParams.join(', ')})
-          ) = @requiredCategoryCount
+          ) > 0
         `
+        
+        console.log('[DEBUG] listAvailableStaff: using CategoryId filtering (at least 1 match)', { 
+          categoryParams: categoryParams.join(', '), 
+          categoryCount: categoryIds.length 
+        })
+        
+        // Check if StaffSkills has any data for these categories
+        const skillsCheckRes = await query(
+          `SELECT COUNT(DISTINCT StaffId) AS StaffCount
+           FROM StaffSkills 
+           WHERE CategoryId IN (${categoryParams.join(', ')})`,
+          params
+        )
+        
+        const staffCount = skillsCheckRes.recordset?.[0]?.StaffCount || 0
+        console.log('[DEBUG] listAvailableStaff: StaffSkills data check', { staffCount })
+        
+        // If no staff skills data, skip filtering to show all staff
+        if (staffCount === 0) {
+          console.log('[DEBUG] listAvailableStaff: no StaffSkills data found, showing all staff')
+          staffFilterClause = ''
+        }
+      } else {
+        console.log('[DEBUG] listAvailableStaff: no categories found for services, showing all staff')
       }
+    } else {
+      console.log('[DEBUG] listAvailableStaff: no CategoryId or ServiceId in StaffSkills, showing all staff')
     }
+  } else {
+    console.log('[DEBUG] listAvailableStaff: no StaffSkills table or no serviceIds, showing all staff')
   }
 
   const res = await query(
@@ -917,7 +1006,7 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
         s.UserId,
         ${specialtySelectSql},
         s.Status AS StaffStatus,
-        u.Name,
+        u.Name AS Name,
         u.Phone,
         u.Email,
         u.AvatarUrl
@@ -931,9 +1020,15 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
     params
   )
 
+  console.log('[DEBUG] listAvailableStaff: query executed', { 
+    recordsetLength: res.recordset?.length || 0,
+    staffFilterClause: staffFilterClause ? 'ACTIVE' : 'NONE',
+    availabilityFilterClause: availabilityFilterClause ? 'ACTIVE' : 'NONE'
+  })
+
   const staffList = (res.recordset || [])
 
-  // Fetch booked slots for each staff member if date is provided
+  // Fetch booked slots and working hours for each staff member if date is provided
   const result = []
   for (const row of staffList) {
     const staff = {
@@ -946,9 +1041,10 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
       AvatarUrl: row.AvatarUrl || null,
       Status: row.StaffStatus || '',
       BookedSlots: [],
+      WorkingHours: null,
     }
 
-    // Get booked slots if date is provided
+    // Get booked slots and working hours if date is provided
     if (dateInput) {
       try {
         staff.BookedSlots = await getStaffBookedSlots(row.StaffId, dateInput)
@@ -956,10 +1052,23 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
         // If error occurs fetching booked slots, continue without them
         console.log(`[DEBUG] Error fetching booked slots for staff ${row.StaffId}:`, e.message)
       }
+
+      try {
+        staff.WorkingHours = await getStaffWorkingHours(row.StaffId, dateInput)
+      } catch (e) {
+        // If error occurs fetching working hours, continue without them
+        console.log(`[DEBUG] Error fetching working hours for staff ${row.StaffId}:`, e.message)
+      }
     }
 
     result.push(staff)
   }
+
+  console.log('[DEBUG] listAvailableStaff: final result', { 
+    staffCount: result.length,
+    staffIds: result.map(s => s.StaffId),
+    withWorkingHours: result.filter(s => s.WorkingHours).length
+  })
 
   return result
 }
@@ -1012,6 +1121,85 @@ async function getStaffBookedSlots(staffIdInput, dateInput) {
   })
 
   return bookedSlots
+}
+
+async function getStaffWorkingHours(staffIdInput, dateInput) {
+  const staffId = String(staffIdInput || '').trim()
+  const dateStr = String(dateInput || '').trim()
+
+  if (!staffId || !dateStr) return null
+
+  const dateObj = new Date(dateStr)
+  if (Number.isNaN(dateObj.getTime())) return null
+
+  // Import toIsoDate for consistent date formatting
+  const { toIsoDate } = require('../utils/date')
+  const dateIso = toIsoDate(dateObj)
+
+  console.log(`[DEBUG] getStaffWorkingHours: staffId=${staffId}, dateStr=${dateStr}, dateIso=${dateIso}`)
+
+  // Check StaffAvailability table first (this is where schedule data is actually stored)
+  const hasStaffAvailability = await query(
+    `SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'StaffAvailability'`
+  ).then((x) => Boolean(x.recordset?.length)).catch(() => false)
+
+  if (hasStaffAvailability) {
+    const [hasStaffId, hasWeekStartDate, hasStartHour, hasEndHour] = await Promise.all([
+      columnExists('StaffAvailability', 'StaffId'),
+      columnExists('StaffAvailability', 'WeekStartDate'),
+      columnExists('StaffAvailability', 'StartHour'),
+      columnExists('StaffAvailability', 'EndHour'),
+    ])
+
+    console.log(`[DEBUG] getStaffWorkingHours: StaffAvailability columns exist=${hasStaffId && hasWeekStartDate && hasStartHour && hasEndHour}`)
+
+    if (hasStaffId && hasWeekStartDate && hasStartHour && hasEndHour) {
+      // WeekStartDate in StaffAvailability is actually the specific work date
+      const res = await query(
+        `SELECT TOP 1
+            StartHour,
+            EndHour
+         FROM StaffAvailability
+         WHERE StaffId = @staffId
+           AND CAST(WeekStartDate AS DATE) = @workDate
+           AND TRY_CONVERT(FLOAT, EndHour) > TRY_CONVERT(FLOAT, StartHour)`,
+        {
+          staffId,
+          workDate: dateIso,
+        }
+      )
+
+      console.log(`[DEBUG] getStaffWorkingHours: query result for ${staffId} on ${dateIso}`, { 
+        found: res.recordset?.length > 0,
+        row: res.recordset?.[0] 
+      })
+
+      const row = res.recordset?.[0]
+      if (row && row.StartHour !== null && row.EndHour !== null) {
+        // Format hours from integer (9) to time string ("09:00")
+        const formatHour = (h) => {
+          const hour = Math.trunc(Number(h))
+          return `${String(hour).padStart(2, '0')}:00`
+        }
+        const startHour = formatHour(row.StartHour)
+        const endHour = formatHour(row.EndHour)
+        return { startHour, endHour }
+      }
+    }
+  }
+
+  // Debug: Check all available shifts for this staff to see what dates exist
+  const debugRes = await query(
+    `SELECT CAST(WeekStartDate AS DATE) as DateOnly, StartHour, EndHour
+     FROM StaffAvailability
+     WHERE StaffId = @staffId
+     ORDER BY WeekStartDate`,
+    { staffId }
+  )
+  console.log(`[DEBUG] getStaffWorkingHours: all shifts for ${staffId}:`, debugRes.recordset)
+  console.log(`[DEBUG] getStaffWorkingHours: Looking for date=${dateIso}, found dates:`, debugRes.recordset?.map(r => r.DateOnly))
+
+  return null
 }
 
 async function hasPreviousBookings(userId) {
@@ -1696,6 +1884,8 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
 
 async function listBookings(userIdInput, limit = 20) {
   const userId = requireUserId(userIdInput)
+  
+  // Truy vấn lấy dữ liệu Booking kèm theo Invoice mới nhất của từng Booking đó
   const res = await query(
     `SELECT TOP (@limit)
         b.BookingId,
@@ -1704,6 +1894,7 @@ async function listBookings(userIdInput, limit = 20) {
         b.Status,
         b.Notes,
         b.CreatedAt,
+        -- Lấy dữ liệu thật từ bảng Invoices (Nơi lưu kết quả áp mã)
         inv.TotalAmount AS InvoiceTotalAmount,
         inv.DiscountAmount AS InvoiceDiscountAmount,
         inv.FinalAmount AS InvoiceFinalAmount
@@ -1712,7 +1903,7 @@ async function listBookings(userIdInput, limit = 20) {
        SELECT TOP 1 i.TotalAmount, i.DiscountAmount, i.FinalAmount
        FROM Invoices i
        WHERE i.BookingId = b.BookingId
-       ORDER BY i.CreatedAt DESC
+       ORDER BY i.CreatedAt DESC -- Lấy hóa đơn mới nhất
      ) inv
      WHERE b.CustomerUserId = @userId
      ORDER BY b.BookingTime DESC, b.CreatedAt DESC`,
@@ -1723,34 +1914,30 @@ async function listBookings(userIdInput, limit = 20) {
   const results = []
 
   for (const row of rows) {
+    // Lấy danh sách dịch vụ đi kèm
     const svcRes = await query(
       `SELECT
-          bs.BookingServiceId,
-          bs.ServiceId,
-          bs.StaffId,
-          COALESCE(bs.Price, s.Price) AS Price,
-          s.Name AS ServiceName,
-          s.DurationMinutes,
-          s.ImageUrl
+          bs.Price,
+          s.Price AS OriginalPrice,
+          s.DurationMinutes
        FROM BookingServices bs
        LEFT JOIN Services s ON s.ServiceId = bs.ServiceId
-       WHERE bs.BookingId = @bookingId
-       ORDER BY bs.BookingServiceId`,
+       WHERE bs.BookingId = @bookingId`,
       { bookingId: row.BookingId }
     )
 
-    const services = (svcRes.recordset || []).map((s) => ({
-      BookingServiceId: s.BookingServiceId,
-      ServiceId: s.ServiceId,
-      ServiceName: s.ServiceName || '',
-      StaffId: s.StaffId || null,
-      DurationMinutes: Number(s.DurationMinutes || 0),
-      Price: Number(s.Price || 0),
-      ImageUrl: s.ImageUrl || null,
-    }))
-
-    const subtotal = Number(row.InvoiceTotalAmount || services.reduce((sum, s) => sum + s.Price, 0))
-    const discountAmount = Math.max(0, Number(row.InvoiceDiscountAmount || 0))
+    const services = svcRes.recordset || []
+    
+    // LOGIC LẤY GIÁ TRỊ THẬT:
+    // 1. Ưu tiên lấy Discount từ Invoice (Dữ liệu đã áp mã thành công)
+    // 2. Nếu Invoice chưa kịp sinh ra, mặc định là 0
+    const discountAmount = Number(row.InvoiceDiscountAmount || 0)
+    
+    // Tính Subtotal (Tổng tiền trước giảm giá)
+    // Nếu Invoice có ghi nhận Subtotal thì lấy, không thì cộng dồn từ bảng Services
+    const subtotal = Number(row.InvoiceTotalAmount || services.reduce((sum, s) => sum + (s.Price || s.OriginalPrice || 0), 0))
+    
+    // Tính Final (Tổng tiền sau giảm giá)
     const finalAmount = Number(row.InvoiceFinalAmount || Math.max(subtotal - discountAmount, 0))
 
     results.push({
@@ -1760,17 +1947,15 @@ async function listBookings(userIdInput, limit = 20) {
       Status: row.Status || 'pending',
       Notes: row.Notes || '',
       CreatedAt: row.CreatedAt,
-      Services: services,
       Subtotal: subtotal,
-      DiscountAmount: discountAmount,
-      TotalPrice: finalAmount,
-      TotalDuration: services.reduce((sum, s) => sum + s.DurationMinutes, 0),
+      DiscountAmount: discountAmount, // <--- GIÁ TRỊ NÀY SẼ HIỆN LÊN CỘT DISCOUNT
+      TotalPrice: finalAmount,         // <--- GIÁ TRỊ NÀY SẼ HIỆN LÊN CỘT TOTAL PRICE
+      TotalDuration: services.reduce((sum, s) => sum + Number(s.DurationMinutes || 0), 0),
     })
   }
 
   return results
 }
-
 async function createBooking(userIdInput, payload = {}, options = {}) {
   const userId = requireUserId(userIdInput)
   const serviceItems = Array.isArray(payload.serviceItems) ? payload.serviceItems : []
@@ -1811,6 +1996,18 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
 
   if (!when || Number.isNaN(when.getTime())) {
     const err = new Error('Invalid booking time')
+    err.status = 400
+    throw err
+  }
+
+  // ===== VALIDATE: Cannot book past dates =====
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const bookingDateOnly = new Date(when)
+  bookingDateOnly.setHours(0, 0, 0, 0)
+  
+  if (bookingDateOnly < today) {
+    const err = new Error('Cannot book for past dates. Please select today or a future date.')
     err.status = 400
     throw err
   }
@@ -2010,6 +2207,60 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
     }
   }
 
+  // ===== VALIDATE ALL SERVICES BEFORE SAVING =====
+  for (const item of normalizedItems) {
+    const svcRes = await query(
+      `SELECT TOP 1 ServiceId, Price
+       FROM Services
+       WHERE ServiceId = @serviceId
+         AND ${ACTIVE_SERVICE_WHERE}`,
+      { serviceId: item.serviceId }
+    )
+
+    const svc = svcRes.recordset?.[0]
+    if (!svc) {
+      const err = new Error(`Service not found: ${item.serviceId}`)
+      err.status = 404
+      throw err
+    }
+
+    let resolvedStaffId = item.staffId || null
+    
+    // ===== VALIDATE: If user selected a staff, it must support this service =====
+    if (resolvedStaffId) {
+      const supported = await staffSupportsService(resolvedStaffId, item.serviceId)
+      if (!supported) {
+        const err = new Error('Selected specialist does not match the chosen service')
+        err.status = 400
+        throw err
+      }
+    }
+    
+    // ===== AUTO-ASSIGN only if user didn't select staff =====
+    if (!resolvedStaffId && !isReturningCustomer) {
+      resolvedStaffId = await getAutoAssignedStaffIdForService(item.serviceId)
+      if (!resolvedStaffId) resolvedStaffId = autoStaffId
+    }
+
+    if (!resolvedStaffId && isReturningCustomer) {
+      const err = new Error('Please choose a specialist for your booking')
+      err.status = 400
+      throw err
+    }
+
+    if (resolvedStaffId) {
+      assignedStaffIds.add(String(resolvedStaffId))
+      const supported = await staffSupportsService(resolvedStaffId, item.serviceId)
+      if (!supported) {
+        // Always throw error if selected staff doesn't support the service
+        const err = new Error('Selected specialist does not match the chosen service')
+        err.status = 400
+        throw err
+      }
+    }
+  }
+
+  // ===== ALL VALIDATIONS PASSED - NOW SAVE TO DB =====
   const bookingId = `BKG-${newId()}`
   const rawNotes = String(payload.notes || '').trim()
   const promoMarker = appliedPromotion ? promotionUsageMarker(giftCode) : ''
@@ -2027,6 +2278,7 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
     }
   )
 
+  // ===== NOW INSERT BOOKING SERVICES =====
   for (const item of normalizedItems) {
     const svcRes = await query(
       `SELECT TOP 1 ServiceId, Price
@@ -2037,44 +2289,13 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
     )
 
     const svc = svcRes.recordset?.[0]
-    if (!svc) {
-      const err = new Error(`Service not found: ${item.serviceId}`)
-      err.status = 404
-      throw err
-    }
-
     bookingSubtotal += Number(svc.Price || 0) * Number(item.quantity || 0)
 
+    // Use pre-validated staffId
     let resolvedStaffId = item.staffId || null
     if (!resolvedStaffId && !isReturningCustomer) {
       resolvedStaffId = await getAutoAssignedStaffIdForService(item.serviceId)
       if (!resolvedStaffId) resolvedStaffId = autoStaffId
-    }
-
-    if (!resolvedStaffId && isReturningCustomer) {
-      const err = new Error('Please choose a specialist for your booking')
-      err.status = 400
-      throw err
-    }
-
-    if (resolvedStaffId) {
-      assignedStaffIds.add(String(resolvedStaffId))
-      const supported = await staffSupportsService(resolvedStaffId, item.serviceId)
-      if (!supported) {
-        if (!isReturningCustomer) {
-          const fallbackStaffId = await getAutoAssignedStaffIdForService(item.serviceId)
-          if (fallbackStaffId) {
-            resolvedStaffId = fallbackStaffId
-          }
-        }
-
-        const supportedAfterFallback = await staffSupportsService(resolvedStaffId, item.serviceId)
-        if (!supportedAfterFallback) {
-          const err = new Error('Selected specialist does not match the chosen service')
-          err.status = 409
-          throw err
-        }
-      }
     }
 
     for (let i = 0; i < item.quantity; i += 1) {
