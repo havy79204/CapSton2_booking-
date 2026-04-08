@@ -133,7 +133,7 @@ export default function OwnerAppointmentsPage() {
   const fetchData = async () => {
     try {
       const [apptRes, staffRes, custRes, svcRes] = await Promise.all([
-        api.get('/api/owner/appointments'), // Use real endpoint with auth
+        api.get('/api/owner/appointments'),
         api.get('/api/owner/staff'),
         api.get('/api/owner/customers'),
         api.get('/api/owner/services'),
@@ -351,8 +351,6 @@ export default function OwnerAppointmentsPage() {
       })()
     };
 
-    console.log('[DEBUG FRONTEND] Submitting payload:', payload);
-
     try {
       if (editingAppt) {
         const targetId = editingAppt.id || editingAppt.AppointmentId || editingAppt.BookingId;
@@ -374,12 +372,7 @@ export default function OwnerAppointmentsPage() {
       setPromotionCode('');
       await fetchData();
     } catch (err) {
-      console.error('[DEBUG FRONTEND] Error:', err);
-      const errorMessage = err.response?.data?.error || err.message || "Unable to save";
-      // Hiển thị popup toast thay vì alert
-      window.dispatchEvent(new CustomEvent('portal:toast', {
-        detail: { type: 'error', title: 'Error', message: errorMessage },
-      }));
+      alert("Error: " + (err.response?.data?.error || "Unable to save"));
     }
   }
 

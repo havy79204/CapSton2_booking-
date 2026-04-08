@@ -125,9 +125,11 @@ async function request(path, options) {
   }
 
   if (json && typeof json === 'object' && Object.prototype.hasOwnProperty.call(json, 'data')) {
+    console.log('[DEBUG API] Response has data field, extracting:', Array.isArray(json.data) ? json.data.slice(0, 2) : json.data)
     return json.data
   }
 
+  console.log('[DEBUG API] Response has no data field, returning raw json:', Array.isArray(json) ? json.slice(0, 2) : json)
   return json
 }
 

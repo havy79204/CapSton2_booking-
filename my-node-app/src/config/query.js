@@ -3,6 +3,7 @@ const { getPool, sql } = require('./db')
 async function query(text, bind = {}) {
   const pool = await getPool()
   const req = pool.request()
+  req.queryTimeout = 30000 // 30 seconds timeout
   for (const [key, value] of Object.entries(bind || {})) {
     req.input(key, value)
   }
