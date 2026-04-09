@@ -133,7 +133,7 @@ export default function OwnerAppointmentsPage() {
   const fetchData = async () => {
     try {
       const [apptRes, staffRes, custRes, svcRes] = await Promise.all([
-        api.get('/api/owner/appointments'), // Use real endpoint with auth
+        api.get('/api/owner/appointments'),
         api.get('/api/owner/staff'),
         api.get('/api/owner/customers'),
         api.get('/api/owner/services'),
@@ -266,7 +266,7 @@ export default function OwnerAppointmentsPage() {
     if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') e.nativeEvent.stopImmediatePropagation();
     if (typeof console !== 'undefined' && console.debug) console.debug('OwnerAppointments: handleEditClick', { id: appt?.id, status: appt?.status, eventType: e.type, button: e.button });
     const rawStatus = String(appt?.status || '').trim().toLowerCase();
-    const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'cancelled' : (appt?.status || 'pending');
+    const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'canceled' : (appt?.status || 'pending');
     setEditingAppt({ ...appt, status: normalizedStatus });
     const currentIds = Array.isArray(appt.serviceIds) ? appt.serviceIds.map(String) : [];
     setSelectedServiceIds(currentIds);
@@ -344,14 +344,12 @@ export default function OwnerAppointmentsPage() {
         if (raw !== null && String(raw).trim() !== '') {
           const s = String(raw).trim();
           const lower = s.toLowerCase();
-          if (lower === 'delete' || lower === 'deleted') return 'cancelled';
+          if (lower === 'delete' || lower === 'deleted') return 'canceled';
           return s;
         }
         return editingAppt?.status || 'pending';
       })()
     };
-
-    console.log('[DEBUG FRONTEND] Submitting payload:', payload);
 
     try {
       if (editingAppt) {
@@ -374,19 +372,14 @@ export default function OwnerAppointmentsPage() {
       setPromotionCode('');
       await fetchData();
     } catch (err) {
-      console.error('[DEBUG FRONTEND] Error:', err);
-      const errorMessage = err.response?.data?.error || err.message || "Unable to save";
-      // Hiển thị popup toast thay vì alert
-      window.dispatchEvent(new CustomEvent('portal:toast', {
-        detail: { type: 'error', title: 'Error', message: errorMessage },
-      }));
+      alert("Error: " + (err.response?.data?.error || "Unable to save"));
     }
   }
 
   const filteredAppointments = useMemo(() => 
     appointments
       .filter(appt => {
-        // Show all appointments including cancelled and completed
+        // Show all appointments including canceled and completed
         // Only filter out appointments that are explicitly marked for deletion with a special flag
         return true;
       })
@@ -687,7 +680,7 @@ export default function OwnerAppointmentsPage() {
               <option value="pending">Pending</option>
               <option value="booked">Booked</option>
                 <option value="completed">Completed</option>
-                <option value="cancelled">Cancelled</option>
+                <option value="canceled">Canceled</option>
             </select>
           </div>
 

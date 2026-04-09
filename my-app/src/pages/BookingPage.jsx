@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import {
   IoCalendarOutline,
@@ -134,6 +134,7 @@ const BookingPage = () => {
   const [giftCode, setGiftCode] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('store')
   const [selectedStaffId, setSelectedStaffId] = useState('')
+  const [staffSelectionMode, setStaffSelectionMode] = useState('manual') // 'auto' | 'manual'
   const [submitting, setSubmitting] = useState(false)
   const [serviceSelections, setServiceSelections] = useState([])
   const [completionModalOpen, setCompletionModalOpen] = useState(false)
@@ -246,26 +247,7 @@ const BookingPage = () => {
     return serviceSelections.filter((service) => Number(service.quantity || 0) > 0)
   }, [serviceSelections])
 
-  const isReturningCustomer = Array.isArray(bookings) && bookings.length > 0
-  const selectedStaff = (Array.isArray(staffs) ? staffs : []).find((staff) => String(staff.StaffId) === String(selectedStaffId)) || null
-  const selectedTechnician = selectedServiceItems.length === 0
-    ? 'Choose services first'
-    : (selectedStaff?.Name || 'Please choose a specialist')
-
-  useEffect(() => {
-    if (!selectedServiceItems.length) {
-      if (selectedStaffId) setSelectedStaffId('')
-      return
-    }
-
-    const hasSelectedStaffInList = (Array.isArray(staffs) ? staffs : [])
-      .some((staff) => String(staff.StaffId) === String(selectedStaffId))
-
-    if (selectedStaffId && !hasSelectedStaffInList) {
-      setSelectedStaffId('')
-    }
-  }, [selectedServiceItems, staffs, selectedStaffId])
-
+  // Calculate totals BEFORE availableStaffAtTime useMemo
   const subtotal = selectedServiceItems.reduce(
     (sum, service) => sum + Number(service.Price || 0) * Number(service.quantity || 0),
     0,
@@ -275,6 +257,91 @@ const BookingPage = () => {
     (sum, service) => sum + Number(service.DurationMinutes || 0) * Number(service.quantity || 0),
     0,
   )
+
+  const isReturningCustomer = Array.isArray(bookings) && bookings.length > 0
+  
+  // Get available staff for a specific time slot (for auto assign)
+  const getAvailableStaffForTimeSlot = useCallback((slot) => {
+    if (!slot || selectedServiceItems.length === 0) return []
+    
+    const [slotHour, slotMinute] = slot.split(':').map(Number)
+    const slotStartMinutes = slotHour * 60 + slotMinute
+    const slotEndMinutes = slotStartMinutes + totalDuration
+    
+    return (Array.isArray(staffs) ? staffs : []).filter((staff) => {
+      const workingHours = staff?.WorkingHours
+      if (!workingHours || !workingHours.startHour || !workingHours.endHour) {
+        return false
+      }
+      
+      const [workStartHour, workStartMinute] = workingHours.startHour.split(':').map(Number)
+      const [workEndHour, workEndMinute] = workingHours.endHour.split(':').map(Number)
+      const workStartMinutes = workStartHour * 60 + workStartMinute
+      const workEndMinutes = workEndHour * 60 + workEndMinute
+      
+      if (slotStartMinutes < workStartMinutes || slotEndMinutes > workEndMinutes) {
+        return false
+      }
+      
+      const bookedSlots = staff?.BookedSlots || []
+      const hasConflict = isTimeSlotBooked(slot, totalDuration, bookedSlots)
+      return !hasConflict
+    })
+  }, [staffs, selectedServiceItems, totalDuration])
+  
+  // Get time slots for a specific staff (for manual select)
+  const getTimeSlotsForStaff = useCallback((staff) => {
+    if (!staff || !staff.WorkingHours || !staff.WorkingHours.startHour || !staff.WorkingHours.endHour) {
+      return []
+    }
+    
+    const workingStart = parseTimeToMinutes(staff.WorkingHours.startHour)
+    const workingEnd = parseTimeToMinutes(staff.WorkingHours.endHour)
+    
+    return availableTimeSlots.filter((slot) => {
+      const slotMin = parseTimeToMinutes(slot)
+      const slotEndMin = slotMin + totalDuration
+      
+      if (slotMin < workingStart || slotEndMin > workingEnd) return false
+      
+      const bookedSlots = staff?.BookedSlots || []
+      return !isTimeSlotBooked(slot, totalDuration, bookedSlots)
+    })
+  }, [availableTimeSlots, totalDuration])
+  
+  const selectedStaff = staffs.find((staff) => String(staff.StaffId) === String(selectedStaffId)) || null
+  const selectedTechnician = selectedServiceItems.length === 0
+    ? 'Choose services first'
+    : staffSelectionMode === 'auto' && selectedStaff?.Name
+    ? `Auto: ${selectedStaff.Name}`
+    : selectedStaff?.Name || 'Please choose a specialist'
+
+  // Auto-assign staff when time is selected in auto mode
+  const handleTimeSelect = useCallback((slot) => {
+    setSelectedTime(slot)
+    
+    if (staffSelectionMode === 'auto') {
+      const availableStaff = getAvailableStaffForTimeSlot(slot)
+      if (availableStaff.length > 0) {
+        setSelectedStaffId(availableStaff[0].StaffId)
+      } else {
+        setSelectedStaffId('')
+      }
+    }
+  }, [staffSelectionMode, getAvailableStaffForTimeSlot])
+  
+  // Clear time when staff changes in manual mode
+  const handleStaffSelect = useCallback((staffId) => {
+    setSelectedStaffId(staffId)
+    setSelectedTime('')
+  }, [])
+
+  useEffect(() => {
+    if (!selectedServiceItems.length) {
+      if (selectedStaffId) setSelectedStaffId('')
+      return
+    }
+  }, [selectedServiceItems, selectedStaffId])
 
   const discount = useMemo(() => {
     if (!appliedPromotion) return 0
@@ -455,8 +522,10 @@ const BookingPage = () => {
       setSelectedStaffId('')
       setServiceSelections((prev) => prev.map((service) => ({ ...service, quantity: 0 })))
     } catch (err) {
+      // Get error message from API response if available
+      const errorMessage = err?.response?.data?.error || err?.message || 'Failed to submit booking request'
       setResultTitle('Error')
-      setResultMessage(err?.message || 'Failed to submit booking request')
+      setResultMessage(errorMessage)
       setResultModalOpen(true)
     } finally {
       setSubmitting(false)
@@ -525,35 +594,6 @@ const BookingPage = () => {
               </div>
 
               <div className="booking-inline-section">
-                <label><IoPersonOutline /> Technician</label>
-                <div className="info-row">
-                  {selectedServiceItems.length === 0 ? (
-                    <div>
-                      <strong>Our Specialist Team</strong>
-                      <p>Choose services first to continue</p>
-                    </div>
-                  ) : (
-                    <div className="staff-picker-block">
-                      <strong>Choose your specialist</strong>
-                      <p>Only specialists matching selected services are shown.</p>
-                      <select
-                        className="staff-select"
-                        value={selectedStaffId}
-                        onChange={(event) => setSelectedStaffId(event.target.value)}
-                      >
-                        <option value="">-- Select specialist --</option>
-                        {(Array.isArray(staffs) ? staffs : []).map((staff) => (
-                          <option key={staff.StaffId} value={staff.StaffId}>
-                            {staff.Name}{staff.Specialty ? ` - ${staff.Specialty}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="booking-inline-section">
                 <label><IoCheckmarkCircleOutline /> Services</label>
 
                 <div className="category-tabs">
@@ -591,56 +631,311 @@ const BookingPage = () => {
             </div>
 
             <div className="booking-card">
+              <div className="booking-card-title">
+                <span className="step-dot">2</span>
+                <h3>Select date</h3>
+              </div>
+
               <div className="booking-inline-section">
                 <label><IoCalendarOutline /> Schedule</label>
                 <div className="schedule-controls">
                   <input
                     type="date"
+                    min={new Date().toISOString().slice(0, 10)}
                     value={selectedDate}
-                    onChange={(event) => setSelectedDate(event.target.value)}
+                    onChange={(event) => {
+                      setSelectedDate(event.target.value)
+                      setSelectedTime('')
+                      setSelectedStaffId('')
+                    }}
                   />
                 </div>
+              </div>
+            </div>
 
-                <p className="times-title">Available times</p>
-                {effectiveOpenTime && effectiveCloseTime ? (
-                  <p className="times-title" style={{ marginTop: 0 }}>
-                    Working hours: {effectiveOpenTime} - {effectiveCloseTime}
-                  </p>
-                ) : null}
-                <div className="time-grid">
-                  {availableTimeSlots.map((slot) => {
-                    const isPassed = isTimeSlotPassed(slot, selectedDate)
-                    const isBooked = isReturningCustomer && selectedStaff 
-                      ? isTimeSlotBooked(slot, totalDuration, selectedStaff?.BookedSlots || [])
-                      : false
-                    const isDisabled = isPassed || isBooked
-                    
-                    return (
-                      <button
-                        key={slot}
-                        className={`time-btn ${selectedTime === slot ? 'active' : ''} ${isDisabled ? 'disabled' : ''} ${isBooked ? 'booked' : ''}`}
-                        onClick={() => !isDisabled && setSelectedTime(slot)}
-                        disabled={isDisabled}
-                        title={
-                          isPassed 
-                            ? 'This time has already passed' 
-                            : isBooked 
-                            ? 'This specialist is not available at this time'
-                            : ''
-                        }
-                      >
-                        {slot}
-                      </button>
-                    )
-                  })}
+            <div className="booking-card">
+              <div className="booking-card-title">
+                <span className="step-dot">3</span>
+                <h3>Choose your specialist</h3>
+              </div>
+
+              <div className="booking-inline-section">
+                <label><IoPersonOutline /> Technician</label>
+                <div className="info-row">
+                  {selectedServiceItems.length === 0 ? (
+                    <div>
+                      <strong>Our Specialist Team</strong>
+                      <p>Choose services first to continue</p>
+                    </div>
+                  ) : (
+                    <div className="staff-picker-block">
+                      <strong>Choose your specialist</strong>
+                      <p>Select how you want to assign a specialist for your booking.</p>
+                      
+                      <div className="staff-selection-modes">
+                        <label className={`staff-mode-option ${staffSelectionMode === 'auto' ? 'active' : ''}`}>
+                          <input
+                            type="radio"
+                            name="staffSelectionMode"
+                            value="auto"
+                            checked={staffSelectionMode === 'auto'}
+                            onChange={() => {
+                              setStaffSelectionMode('auto')
+                              setSelectedStaffId('')
+                              setSelectedTime('')
+                            }}
+                          />
+                          <span className="mode-title">Auto Assign</span>
+                          <span className="mode-desc">System automatically assigns the best available specialist</span>
+                        </label>
+                        
+                        <label className={`staff-mode-option ${staffSelectionMode === 'manual' ? 'active' : ''}`}>
+                          <input
+                            type="radio"
+                            name="staffSelectionMode"
+                            value="manual"
+                            checked={staffSelectionMode === 'manual'}
+                            onChange={() => {
+                              setStaffSelectionMode('manual')
+                              setSelectedStaffId('')
+                              setSelectedTime('')
+                            }}
+                          />
+                          <span className="mode-title">Manual Select</span>
+                          <span className="mode-desc">Choose your preferred specialist</span>
+                        </label>
+                      </div>
+                      
+                      {/* AUTO ASSIGN MODE - Show time slots first */}
+                      {staffSelectionMode === 'auto' && (
+                        <div className="auto-assign-section" style={{ marginTop: '1rem' }}>
+                          <p className="times-title">Select a time slot</p>
+                          <p className="times-title" style={{ marginTop: 0, fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                            Working hours: {effectiveOpenTime} - {effectiveCloseTime}
+                          </p>
+                          <div className="time-grid">
+                            {availableTimeSlots.map((slot) => {
+                              const isPassed = isTimeSlotPassed(slot, selectedDate)
+                              const availableStaff = getAvailableStaffForTimeSlot(slot)
+                              const hasAvailableStaff = availableStaff.length > 0
+                              const isDisabled = isPassed || !hasAvailableStaff
+                              const isSelected = selectedTime === slot
+                              
+                              return (
+                                <button
+                                  key={slot}
+                                  className={`time-btn ${isSelected ? 'active' : ''} ${isDisabled ? 'disabled' : ''}`}
+                                  onClick={() => {
+                                    if (!isDisabled) {
+                                      handleTimeSelect(slot)
+                                    }
+                                  }}
+                                  disabled={isDisabled}
+                                  title={
+                                    isPassed 
+                                      ? 'This time has already passed' 
+                                      : !hasAvailableStaff 
+                                      ? 'No specialist available at this time'
+                                      : ''
+                                  }
+                                >
+                                  {slot}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          
+                          {selectedStaff && (
+                            <div className="auto-staff-info" style={{ marginTop: '1rem', background: '#f0fdf4', borderColor: '#86efac' }}>
+                              <p className="staff-assigned" style={{ color: '#166534' }}>
+                                <strong>Assigned:</strong> {selectedStaff.Name}
+                                {selectedStaff.WorkingHours && (
+                                  <span style={{ marginLeft: '0.5rem', color: '#6b7280' }}>
+                                    ({selectedStaff.WorkingHours.startHour}-{selectedStaff.WorkingHours.endHour})
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+                          )}
+                          
+                          {!selectedStaff && selectedTime && (
+                            <div className="auto-staff-info" style={{ marginTop: '1rem', background: '#fff5f5', borderColor: '#ffcdd2' }}>
+                              <p className="staff-assigned" style={{ color: '#c62828' }}>
+                                No specialist available at {selectedTime}. Please choose another time.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* MANUAL SELECT MODE - Show staff list first, then their times */}
+                      {staffSelectionMode === 'manual' && (
+                        <div className="manual-select-section" style={{ marginTop: '1rem' }}>
+                          <p style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Select a specialist</p>
+                          
+                          {(() => {
+                            const allStaff = (Array.isArray(staffs) ? staffs : [])
+                            if (allStaff.length === 0) {
+                              return (
+                                <p className="staff-filter-hint" style={{ color: '#c62828' }}>
+                                  No specialists available.
+                                </p>
+                              )
+                            }
+                            
+                            // If no staff selected yet, show staff list
+                            if (!selectedStaff) {
+                              return (
+                                <div className="staff-list-container">
+                                  {allStaff.map((staff) => {
+                                    const hasWorkingHours = staff?.WorkingHours?.startHour && staff?.WorkingHours?.endHour
+                                    const staffTimeSlots = getTimeSlotsForStaff(staff)
+                                    const hasAvailableSlots = staffTimeSlots.length > 0
+                                    
+                                    return (
+                                      <label
+                                        key={staff.StaffId}
+                                        className={`staff-option ${!hasAvailableSlots ? 'disabled' : ''}`}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '0.75rem',
+                                          padding: '0.75rem',
+                                          border: '1px solid var(--color-border)',
+                                          borderRadius: 'var(--radius-sm)',
+                                          marginBottom: '0.5rem',
+                                          cursor: hasAvailableSlots ? 'pointer' : 'not-allowed',
+                                          background: hasAvailableSlots ? '#fff' : '#f3f4f6',
+                                          opacity: hasAvailableSlots ? 1 : 0.6,
+                                          transition: 'all 0.2s ease'
+                                        }}
+                                        onClick={() => hasAvailableSlots && handleStaffSelect(staff.StaffId)}
+                                      >
+                                        <input
+                                          type="radio"
+                                          name="selectedStaff"
+                                          value={staff.StaffId}
+                                          checked={false}
+                                          onChange={() => hasAvailableSlots && handleStaffSelect(staff.StaffId)}
+                                          disabled={!hasAvailableSlots}
+                                          style={{ flexShrink: 0 }}
+                                        />
+                                        <div style={{ flex: 1 }}>
+                                          <div style={{ fontWeight: 600, color: 'var(--color-primary)' }}>
+                                            {staff.Name}
+                                            {!hasAvailableSlots && (
+                                              <span style={{ fontSize: '0.75rem', color: '#dc2626', marginLeft: '0.5rem', fontWeight: 500 }}>
+                                                {hasWorkingHours ? '(No available slots)' : '(Not working today)'}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                                            {staff.Specialty || 'Specialist'}
+                                            {staff.WorkingHours?.startHour && staff.WorkingHours?.endHour && (
+                                              <span style={{ marginLeft: '0.5rem', color: hasAvailableSlots ? '#059669' : '#9ca3af' }}>
+                                                ({staff.WorkingHours.startHour}-{staff.WorkingHours.endHour})
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </label>
+                                    )
+                                  })}
+                                </div>
+                              )
+                            }
+                            
+                            // If staff selected, show their available times
+                            const staffTimeSlots = getTimeSlotsForStaff(selectedStaff)
+                            
+                            return (
+                              <div>
+                                <div className="selected-staff-header" style={{ 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  gap: '0.75rem',
+                                  padding: '0.75rem',
+                                  background: '#f8f5ef',
+                                  border: '1px solid var(--color-secondary)',
+                                  borderRadius: 'var(--radius-sm)',
+                                  marginBottom: '1rem'
+                                }}>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontWeight: 600, color: 'var(--color-primary)' }}>
+                                      {selectedStaff.Name}
+                                    </div>
+                                    <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                                      {selectedStaff.Specialty || 'Specialist'}
+                                      {selectedStaff.WorkingHours?.startHour && selectedStaff.WorkingHours?.endHour && (
+                                        <span style={{ marginLeft: '0.5rem' }}>
+                                          ({selectedStaff.WorkingHours.startHour}-{selectedStaff.WorkingHours.endHour})
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedStaffId('')
+                                      setSelectedTime('')
+                                    }}
+                                    style={{
+                                      padding: '0.25rem 0.75rem',
+                                      fontSize: '0.85rem',
+                                      background: 'transparent',
+                                      border: '1px solid var(--color-border)',
+                                      borderRadius: 'var(--radius-sm)',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    Change
+                                  </button>
+                                </div>
+                                
+                                <p className="times-title" style={{ marginBottom: '0.5rem' }}>
+                                  Available times for {selectedStaff.Name}
+                                </p>
+                                
+                                {staffTimeSlots.length === 0 ? (
+                                  <p style={{ color: '#dc2626', fontSize: '0.9rem' }}>
+                                    No available time slots for this specialist. Please select another specialist or date.
+                                  </p>
+                                ) : (
+                                  <div className="time-grid">
+                                    {staffTimeSlots.map((slot) => {
+                                      const isPassed = isTimeSlotPassed(slot, selectedDate)
+                                      const isSelected = selectedTime === slot
+                                      
+                                      return (
+                                        <button
+                                          key={slot}
+                                          className={`time-btn ${isSelected ? 'active' : ''} ${isPassed ? 'disabled' : ''}`}
+                                          onClick={() => !isPassed && setSelectedTime(slot)}
+                                          disabled={isPassed}
+                                          title={isPassed ? 'This time has already passed' : ''}
+                                        >
+                                          {slot}
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()}
+                        </div>
+                      )}
+                      
+                      <textarea
+                        rows="4"
+                        placeholder="Add note for booking"
+                        value={notes}
+                        onChange={(event) => setNotes(event.target.value)}
+                        style={{ marginTop: '1rem' }}
+                      />
+                    </div>
+                  )}
                 </div>
-
-                <textarea
-                  rows="4"
-                  placeholder="Add note for booking"
-                  value={notes}
-                  onChange={(event) => setNotes(event.target.value)}
-                />
               </div>
             </div>
           </div>
@@ -648,7 +943,7 @@ const BookingPage = () => {
           <aside className="booking-right-panel">
             <div className="booking-card sticky-card">
               <div className="booking-card-title">
-                <span className="step-dot">2</span>
+                <span className="step-dot">4</span>
                 <h3>Confirmation</h3>
               </div>
 
