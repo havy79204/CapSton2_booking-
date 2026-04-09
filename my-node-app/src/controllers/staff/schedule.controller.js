@@ -25,7 +25,8 @@ const getSchedule = asyncHandler(async(req, res) => {
         return
     }
 
-    // Read working schedule from StaffAvailability and leave requests from StaffShifts
+    // Staff mobile screen expects an array of 7 day rows:
+    // [{ date, shifts, available }].
     const data = await scheduleService.getStaffScheduleFromShifts({ staffId, weekStartQuery: weekStart })
 
     res.json({ ok: true, data })
@@ -33,7 +34,7 @@ const getSchedule = asyncHandler(async(req, res) => {
 
 const postShift = asyncHandler(async(req, res) => {
     const userId = req.user?.userId || req.user?.sub
-    const { date, note, shiftType } = req.body || {}
+    const { date, note, shiftType, isRecurring, endDate } = req.body || {}
 
     if (!userId) {
         res.status(401).json({ ok: false, error: 'Unauthorized' })
@@ -58,7 +59,7 @@ const postShift = asyncHandler(async(req, res) => {
     }
 
     // Register leave request in StaffShifts
-    const data = await scheduleService.requestStaffLeave({ staffId, date, note, shiftType })
+    const data = await scheduleService.requestStaffLeave({ staffId, date, note, shiftType, isRecurring, endDate })
     emitStaffDataUpdated({ source: 'schedule', action: 'create', staffId: String(staffId || ''), date: String(date || '') })
 
     res.status(201).json({ ok: true, data })
@@ -66,15 +67,15 @@ const postShift = asyncHandler(async(req, res) => {
 
 const deleteShift = asyncHandler(async(req, res) => {
     const userId = req.user?.userId || req.user?.sub
-    const { date, label } = req.body || {}
+    const { date, label, offScheduleId, shiftType } = req.body || {}
 
     if (!userId) {
         res.status(401).json({ ok: false, error: 'Unauthorized' })
         return
     }
 
-    if (!date || !label) {
-        res.status(400).json({ ok: false, error: 'Missing date or label' })
+    if (!offScheduleId && !date) {
+        res.status(400).json({ ok: false, error: 'Missing offScheduleId or date' })
         return
     }
 
@@ -90,8 +91,18 @@ const deleteShift = asyncHandler(async(req, res) => {
         return
     }
 
-    // Staff chỉ được xóa shift của chính họ - kiểm tra qua staffId
-    const data = await scheduleService.deleteShift({ staffId, date, label })
+    // If offScheduleId (or leave payload) is provided, delete only pending leave request.
+    let data
+    if (offScheduleId || shiftType) {
+        data = await scheduleService.deleteStaffLeaveRequest({ staffId, offScheduleId, date, shiftType })
+    } else {
+        // Backward-compatible path: delete assigned availability shift by date+label
+        if (!label) {
+            res.status(400).json({ ok: false, error: 'Missing label' })
+            return
+        }
+        data = await scheduleService.deleteShift({ staffId, date, label })
+    }
     emitStaffDataUpdated({ source: 'schedule', action: 'delete', staffId: String(staffId || ''), date: String(date || '') })
     res.json({ ok: true, data })
 })

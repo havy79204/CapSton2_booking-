@@ -4,11 +4,11 @@ const appointmentsService = require('../../services/appointments.service')
 const { emitStaffDataUpdated } = require('../../realtime/socket')
 
 async function resolveStaffId(req) {
-    const userId = String(req.userId || req.user ?.userId || req.user ?.sub || '').trim()
+    const userId = String(req.userId || req.user?.userId || req.user?.sub || '').trim()
     if (!userId) return ''
 
     const staffResult = await query('SELECT TOP 1 StaffId FROM Staff WHERE UserId = @userId', { userId })
-    return String(staffResult.recordset ?.[0] ?.StaffId || '').trim()
+    return String(staffResult.recordset?.[0]?.StaffId || '').trim()
 }
 
 const getAppointments = asyncHandler(async(req, res) => {
@@ -34,37 +34,7 @@ const getAppointmentMeta = asyncHandler(async(req, res) => {
 })
 
 const postAppointment = asyncHandler(async(req, res) => {
-    const ownStaffId = await resolveStaffId(req)
-    if (!ownStaffId) {
-        res.status(401).json({ ok: false, error: 'Unauthorized' })
-        return
-    }
-
-    const body = req.body || {}
-    const normalizedServiceIds = Array.isArray(body.serviceIds) ?
-        body.serviceIds :
-        (body.serviceId ? [body.serviceId] : [])
-
-    const normalizedPayload = {
-        ...body,
-        serviceIds: normalizedServiceIds,
-        staffId: body.staffId || ownStaffId,
-    }
-
-    if (!normalizedPayload.customerUserId || normalizedServiceIds.length === 0 || !normalizedPayload.date || !normalizedPayload.time) {
-        res.status(400).json({ ok: false, error: 'Missing customerUserId/serviceIds/date/time' })
-        return
-    }
-
-    // Staff can only create appointments for themselves.
-    if (String(normalizedPayload.staffId) !== String(ownStaffId)) {
-        res.status(403).json({ ok: false, error: 'Forbidden' })
-        return
-    }
-
-    const data = await appointmentsService.createAppointment(normalizedPayload)
-    emitStaffDataUpdated({ source: 'appointments', action: 'create', staffId: String(normalizedPayload.staffId || '') })
-    res.status(201).json({ ok: true, data })
+    res.status(403).json({ ok: false, error: 'Staff cannot create appointments' })
 })
 
 const getAppointmentById = asyncHandler(async(req, res) => {
@@ -112,6 +82,13 @@ const putAppointment = asyncHandler(async(req, res) => {
         return
     }
 
+    const keys = Object.keys(req.body || {})
+    const onlyStatus = keys.length === 1 && keys[0] === 'status'
+    if (!onlyStatus) {
+        res.status(403).json({ ok: false, error: 'Staff can only update appointment status' })
+        return
+    }
+
     const existing = await appointmentsService.getAppointmentById(id)
     if (!existing) {
         res.status(404).json({ ok: false, error: 'Appointment not found' })
@@ -123,39 +100,23 @@ const putAppointment = asyncHandler(async(req, res) => {
         return
     }
 
-    const payload = {...req.body, staffId }
+    const currentStatus = String(existing.status || '').trim().toLowerCase()
+    const nextStatusRaw = String(req.body?.status || '').trim().toLowerCase()
+    const isCurrentConfirmed = currentStatus === 'booked' || currentStatus === 'confirmed'
+    const isNextCompleted = nextStatusRaw === 'completed' || nextStatusRaw === 'complete' || nextStatusRaw === 'done'
+    if (!isCurrentConfirmed || !isNextCompleted) {
+        res.status(403).json({ ok: false, error: 'Staff can only mark confirmed appointments as completed' })
+        return
+    }
+
+    const payload = { status: req.body.status, staffId }
     const data = await appointmentsService.updateAppointment(id, payload)
     emitStaffDataUpdated({ source: 'appointments', action: 'update', staffId: String(staffId || ''), appointmentId: String(id) })
     res.json({ ok: true, data })
 })
 
 const deleteAppointment = asyncHandler(async(req, res) => {
-    const staffId = await resolveStaffId(req)
-    if (!staffId) {
-        res.status(401).json({ ok: false, error: 'Unauthorized' })
-        return
-    }
-
-    const { id } = req.params || {}
-    if (!id) {
-        res.status(400).json({ ok: false, error: 'Missing id' })
-        return
-    }
-
-    const existing = await appointmentsService.getAppointmentById(id)
-    if (!existing) {
-        res.status(404).json({ ok: false, error: 'Appointment not found' })
-        return
-    }
-
-    if (String(existing.staffId || '') !== String(staffId)) {
-        res.status(403).json({ ok: false, error: 'Forbidden' })
-        return
-    }
-
-    const data = await appointmentsService.cancelAppointment(id)
-    emitStaffDataUpdated({ source: 'appointments', action: 'delete', staffId: String(staffId || ''), appointmentId: String(id) })
-    res.json({ ok: true, data })
+    res.status(403).json({ ok: false, error: 'Staff cannot delete appointments' })
 })
 
 module.exports = {

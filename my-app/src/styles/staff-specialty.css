@@ -23,8 +23,23 @@
   max-height: 220px;
   overflow-y: auto;
   padding: 4px;
-  scrollbar-width: thin;
-  scrollbar-color: #b99466 transparent;
+}
+
+.staff-addModal .portal-specialtyGrid::-webkit-scrollbar,
+.staff-detailModal .portal-specialtyGrid::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.staff-addModal .portal-specialtyGrid::-webkit-scrollbar-thumb,
+.staff-detailModal .portal-specialtyGrid::-webkit-scrollbar-thumb {
+  background: #b99466;
+  border-radius: 8px;
+}
+
+.staff-addModal .portal-specialtyGrid::-webkit-scrollbar-track,
+.staff-detailModal .portal-specialtyGrid::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .staff-addModal .portal-specialtyChip,
@@ -39,6 +54,7 @@
   color: #f3e6d8;
   background: rgba(54, 36, 2, 0.501);
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);

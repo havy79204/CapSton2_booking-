@@ -51,6 +51,7 @@ const getSummary = asyncHandler(async(req, res) => {
     const now = new Date()
     const dayStart = startOfDay(now)
     const nextDay = addDays(dayStart, 1)
+    const dayIso = toYmd(dayStart)
     const weekStart = addDays(dayStart, -6)
 
     const yearStart = new Date(now.getFullYear(), 0, 1)
@@ -58,21 +59,24 @@ const getSummary = asyncHandler(async(req, res) => {
 
     const settingsMap = await getSettingsMap().catch(() => ({}))
 
+    
+
     const [
-        todayCountRes,
-        weeklyCustomersRes,
-        weeklyHoursRes,
-        weeklyRevenueRes,
-        weeklyReviewsCountRes,
-        todayApptsRes,
-        recentApptsRes,
-        todayShiftRes,
-        weeklyBookingSeriesRes,
-        serviceDistRes,
-        ratingsRes,
-        recentReviewsRes,
-        yearRevenueByMonthRes,
-        yearHoursByMonthRes,
+      todayCountRes,
+      weeklyCustomersRes,
+      weeklyHoursRes,
+      weeklyRevenueRes,
+      weeklyReviewsCountRes,
+      todayApptsRes,
+      recentApptsRes,
+      todayShiftRes,
+      todayAvailabilityRes,
+      weeklyBookingSeriesRes,
+      serviceDistRes,
+      ratingsRes,
+      recentReviewsRes,
+      yearRevenueByMonthRes,
+      yearHoursByMonthRes,
     ] = await Promise.all([
         query(
             `SELECT COUNT(DISTINCT b.BookingId) AS Cnt
@@ -91,13 +95,15 @@ const getSummary = asyncHandler(async(req, res) => {
         ),
         query(
             `SELECT SUM(CASE
-                WHEN ISNULL(sa.EndHour, 0) > ISNULL(sa.StartHour, 0) THEN ISNULL(sa.EndHour, 0) - ISNULL(sa.StartHour, 0)
+                WHEN ISNULL(TRY_CONVERT(FLOAT, sa.DurationHours), 0) > 0 THEN ISNULL(TRY_CONVERT(FLOAT, sa.DurationHours), 0)
+                WHEN TRY_CONVERT(FLOAT, sa.EndHour) > TRY_CONVERT(FLOAT, sa.StartHour)
+                  THEN TRY_CONVERT(FLOAT, sa.EndHour) - TRY_CONVERT(FLOAT, sa.StartHour)
                 ELSE 0
               END) AS Hours
-       FROM StaffAvailability sa
+       FROM StaffShifts sa
        WHERE sa.StaffId = @staffId
-         AND sa.WeekStartDate >= @weekStart
-         AND sa.WeekStartDate < @nextDay`, { staffId, weekStart, nextDay },
+         AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) >= @weekStart
+         AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) < @nextDay`, { staffId, weekStart, nextDay },
         ).catch(() => ({ recordset: [{ Hours: 0 }] })),
         query(
             `SELECT SUM(ISNULL(COALESCE(bs.Price, sv.Price), 0)) AS Revenue
@@ -168,14 +174,32 @@ const getSummary = asyncHandler(async(req, res) => {
         ),
         query(
             `SELECT
-          sa.WeekStartDate AS ShiftDate,
+          DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) AS ShiftDate,
           sa.StartHour,
-          sa.EndHour
-       FROM StaffAvailability sa
+          (TRY_CONVERT(INT, sa.StartHour)
+           + ISNULL(TRY_CONVERT(INT, sa.DurationHours),
+               CASE
+                 WHEN TRY_CONVERT(INT, sa.EndHour) > TRY_CONVERT(INT, sa.StartHour)
+                   THEN TRY_CONVERT(INT, sa.EndHour) - TRY_CONVERT(INT, sa.StartHour)
+                 ELSE 0
+               END
+             )) AS EndHour
+       FROM StaffShifts sa
        WHERE sa.StaffId = @staffId
-         AND sa.WeekStartDate >= @dayStart
-         AND sa.WeekStartDate < @nextDay
+         AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) >= @dayStart
+         AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) < @nextDay
        ORDER BY sa.StartHour ASC`, { staffId, dayStart, nextDay },
+        ).catch(() => ({ recordset: [] })),
+        // Also fetch any StaffAvailability rows for today (some setups store assigned shifts here)
+        query(
+          `SELECT
+             CAST(sa2.WeekStartDate AS date) AS ShiftDate,
+             DATEPART(hour, sa2.StartHour) AS StartHour,
+             DATEPART(hour, sa2.EndHour) AS EndHour
+           FROM StaffAvailability sa2
+           WHERE sa2.StaffId = @staffId
+             AND CAST(sa2.WeekStartDate AS date) = @dayIso
+           ORDER BY ShiftDate ASC`, { staffId, dayIso },
         ).catch(() => ({ recordset: [] })),
         query(
             `SELECT CAST(b.BookingTime AS date) AS D, COUNT(DISTINCT b.BookingId) AS Cnt
@@ -342,15 +366,28 @@ const getSummary = asyncHandler(async(req, res) => {
         }
     }
 
-    const todaySchedule = (todayShiftRes.recordset || []).map((r) => {
-        const start = Number(r.StartHour || 0)
-      const end = Number(r.EndHour || start)
+    // Merge shifts from StaffShifts and StaffAvailability
+    const shiftsFromShifts = (todayShiftRes.recordset || []).map((r) => ({
+        start: Number(r.StartHour || 0),
+        end: Number(r.EndHour || r.StartHour || 0),
+    }))
+    const shiftsFromAvail = (todayAvailabilityRes && Array.isArray(todayAvailabilityRes.recordset) ? (todayAvailabilityRes.recordset || []) : []).map((r) => ({
+      start: Number(r.StartHour || 0),
+      end: Number(r.EndHour || r.StartHour || 0),
+    }))
 
-        return {
+    const mergedShifts = [...shiftsFromShifts, ...shiftsFromAvail]
+
+    
+
+    const todaySchedule = mergedShifts.map((s) => {
+      const start = Number(s.start || 0)
+      const end = Number(s.end || start)
+      return {
         time: `${String(start).padStart(2, '0')}:00 - ${String(Math.max(end, start)).padStart(2, '0')}:00`,
         type: 'assigned',
         note: 'Ca lam viec',
-        }
+      }
     })
 
     const data = {

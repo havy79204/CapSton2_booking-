@@ -44,3 +44,50 @@ button {
   font-size: 1.2rem;
   color: #5a5a5a;
 }
+
+/* Modal overlay styles for edit page */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(12,16,23,0.45);
+  -webkit-backdrop-filter: blur(6px) saturate(1.05);
+  backdrop-filter: blur(6px) saturate(1.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  z-index: 1200;
+}
+
+.modal-card {
+  background: #fff;
+  width: 100%;
+  max-width: 900px;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(10,10,20,0.15);
+  padding: 24px;
+  max-height: 85vh;
+  overflow: auto;
+  border: 1px solid rgba(240, 240, 240, 0.9);
+}
+
+.modal-card h3 {
+  margin: 0 0 12px 0;
+  font-size: 1.125rem;
+}
+
+.modal-card label { display: block; font-size: 0.85rem; color: #333; }
+
+.modal-card input, .modal-card select, .modal-card textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e6e6e6;
+  border-radius: 8px;
+  background: #fff;
+}
+
+/* Buttons used in modal */
+.portal-outlineBtn { background: transparent; border: 1px solid #e6e6e6; padding: 8px 12px; border-radius: 8px; }
+.portal-primaryBtn { background: #ff9c1a; color: #fff; padding: 8px 12px; border-radius: 8px; border: none; }
+.portal-successBtn { background: #1aa884; color: #fff; padding: 8px 12px; border-radius: 8px; border: none; }
+

@@ -92,8 +92,6 @@
     rgba(80, 35, 3, 0.13)
   );
 
-  backdrop-filter: blur(14px) saturate(220%);
-  -webkit-backdrop-filter: blur(14px) saturate(220%);
 
   border: 1px solid rgba(255, 235, 153, 0);
 
@@ -282,7 +280,7 @@
 .settings-page .portal-settingsWeekdayHint {
   margin-bottom: 12px;
   font-size: 13px;
-  color: color-mix(in srgb, var(--text) 75%, white 25%);
+  color: #646b78;
 }
 
 .settings-page .portal-settingsWeekdayList {
@@ -291,13 +289,13 @@
 
 .settings-page .portal-settingsWeekdayRow {
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--border) 70%, #8b6f37 30%);
+  border: 1px solid #cab690;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 88%, #f3e5bd 12%);
+  background: #fcf5e9;
 }
 
 .settings-page .portal-settingsWeekdayRow .portal-settingsRowTitle {
-  color: color-mix(in srgb, var(--text) 85%, #4f3a16 15%);
+  color: #493a25;
 }
 
 .settings-page .portal-settingsWeekdayTimeRange {
@@ -308,8 +306,8 @@
 
 .settings-page .portal-settingsWeekdayInput {
   width: 130px;
-  border-color: color-mix(in srgb, var(--border) 65%, #8b6f37 35%);
-  background: color-mix(in srgb, var(--surface) 92%, #fff7de 8%);
+  border-color: #c7b38e;
+  background: #fff9ea;
   color: #000;
 }
 
@@ -324,7 +322,7 @@
 }
 
 .settings-page .portal-settingsWeekdaySeparator {
-  color: color-mix(in srgb, var(--text) 75%, #4f3a16 25%);
+  color: #5f4a30;
   font-weight: 700;
 }
 
@@ -354,8 +352,8 @@
     rgba(80, 35, 3, 0.13)
   );
 
-  backdrop-filter: blur(14px) saturate(220%);
   -webkit-backdrop-filter: blur(14px) saturate(220%);
+  backdrop-filter: blur(14px) saturate(220%);
 
   border: 1px solid rgba(255, 235, 153, 0);
 
@@ -417,8 +415,8 @@
     rgba(80, 35, 3, 0.13)
   );
 
-  backdrop-filter: blur(14px) saturate(220%);
   -webkit-backdrop-filter: blur(14px) saturate(220%);
+  backdrop-filter: blur(14px) saturate(220%);
 
   border: 1px solid rgba(255, 235, 153, 0);
 

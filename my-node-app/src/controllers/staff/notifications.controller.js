@@ -107,7 +107,7 @@ const getNotifications = asyncHandler(async (req, res) => {
       try {
         const ws = await query(
           `SELECT TOP 1 StaffId
-           FROM StaffAvailability
+           FROM StaffShifts
            WHERE StaffId = @staffId`,
           { staffId },
         )

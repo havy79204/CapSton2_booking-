@@ -111,6 +111,7 @@
 }
 
 .profile {
+  -webkit-user-select: none;
   user-select: none;
   width: 36px;
   height: 36px;

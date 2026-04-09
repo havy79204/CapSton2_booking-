@@ -1,4 +1,5 @@
 const { query, newId } = require('../config/query')
+const { notifyCustomerEvent } = require('./notifications.service')
 const { mondayOf, buildWeekColumns, buildWeekRangeLabel, toIsoDate } = require('../utils/date')
 const { toDateLabel } = require('../utils/format')
 
@@ -34,7 +35,9 @@ function formatHourValue(value) {
 
     const dt = new Date(raw)
     if (!Number.isNaN(dt.getTime())) {
-        return `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`
+        // Use UTC getters to avoid local timezone shifts when SQL TIME values
+        // are returned as Date objects with UTC time (driver behavior).
+        return `${String(dt.getUTCHours()).padStart(2, '0')}:${String(dt.getUTCMinutes()).padStart(2, '0')}`
     }
 
     return raw
@@ -56,6 +59,32 @@ function parseHourToInt(value) {
     return minute >= 30 ? hour + 1 : hour;
 }
 
+function shiftTypeFromStartHour(hourValue) {
+    const h = Number(hourValue)
+    if (!Number.isFinite(h)) return 'full'
+    if (h <= 11) return 'morning'
+    if (h <= 16) return 'afternoon'
+    return 'evening'
+}
+
+function stripOverlappedWorkingShifts(dayList, leaveType) {
+    const lt = String(leaveType || 'full').toLowerCase()
+    if (!Array.isArray(dayList) || !dayList.length) return []
+    if (lt === 'full') return dayList.filter((item) => typeof item !== 'string' ? String(item?.type || '').toLowerCase() !== 'assigned' : false)
+
+    return dayList.filter((item) => {
+        const isAssignedObject = typeof item === 'object' && String(item?.type || '').toLowerCase() === 'assigned'
+        const isAssignedString = typeof item === 'string'
+        if (!isAssignedObject && !isAssignedString) return true
+
+        const raw = isAssignedObject ? String(item?.time || '') : String(item)
+        const startToken = raw.split('-')[0]?.trim()
+        const startHour = parseHourToInt(startToken)
+        const st = shiftTypeFromStartHour(startHour)
+        return st !== lt
+    })
+}
+
 async function tableExists(tableName) {
     try {
         const res = await query(
@@ -63,7 +92,7 @@ async function tableExists(tableName) {
        FROM INFORMATION_SCHEMA.TABLES
        WHERE TABLE_NAME = @tableName`, { tableName }
         )
-        return Boolean(res.recordset ?.length)
+        return Boolean(res.recordset?.length)
     } catch (err) {
         console.warn(`tableExists check failed for ${tableName}:`, err.message)
         return false
@@ -78,9 +107,45 @@ async function columnExists(tableName, columnName) {
        WHERE TABLE_NAME = @tableName
          AND COLUMN_NAME = @columnName`, { tableName, columnName }
         )
-        return Boolean(res.recordset ?.length)
+        return Boolean(res.recordset?.length)
     } catch (err) {
         console.warn(`columnExists check failed for ${tableName}.${columnName}:`, err.message)
+        return false
+    }
+}
+
+async function columnType(tableName, columnName) {
+    try {
+        const res = await query(
+            `SELECT DATA_TYPE AS dtype
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_NAME = @tableName
+         AND COLUMN_NAME = @columnName`, { tableName, columnName }
+        )
+        const dtype = res.recordset?.[0]?.dtype
+        return dtype ? String(dtype).toLowerCase() : null
+    } catch (err) {
+        console.warn(`columnType check failed for ${tableName}.${columnName}:`, err.message)
+        return null
+    }
+}
+
+const _identityColumnCache = new Map()
+
+async function isIdentityColumn(tableName, columnName) {
+    const key = `${String(tableName || '').toLowerCase()}.${String(columnName || '').toLowerCase()}`
+    if (_identityColumnCache.has(key)) return _identityColumnCache.get(key)
+    try {
+        const res = await query(
+            `SELECT COLUMNPROPERTY(OBJECT_ID(@tableName), @columnName, 'IsIdentity') AS IsIdentity`,
+            { tableName, columnName }
+        )
+        const value = Number(res.recordset?.[0]?.IsIdentity || 0) === 1
+        _identityColumnCache.set(key, value)
+        return value
+    } catch (err) {
+        console.warn(`isIdentityColumn check failed for ${tableName}.${columnName}:`, err.message)
+        _identityColumnCache.set(key, false)
         return false
     }
 }
@@ -177,7 +242,7 @@ async function getSchedule(weekStartQuery, options = {}) {
     const columns = buildWeekColumns(weekStart)
 
     const roleSql = await getStaffRoleSqlParts()
-    const staffFilter = staffId ? 'WHERE s.StaffId = @staffId' : ''
+        const staffFilter = staffId ? 'WHERE CAST(s.StaffId AS NVARCHAR(100)) = @staffId' : ''
     const staffRes = await query(
         `SELECT s.StaffId, ${roleSql.selectSql}, u.Name, u.AvatarUrl
      FROM Staff s
@@ -196,8 +261,9 @@ async function getSchedule(weekStartQuery, options = {}) {
     }))
 
     const availFilter = staffId ? 'AND StaffId = @staffId' : ''
-    const availRes = await query(
-        `SELECT StaffId, WeekStartDate, StartHour, EndHour
+    const [availRes, offRes] = await Promise.all([
+        query(
+        `SELECT AvailabilityId, StaffId, WeekStartDate, StartHour, EndHour
      FROM StaffAvailability
      WHERE WeekStartDate >= @weekStart
        AND WeekStartDate <= @weekEnd
@@ -206,12 +272,25 @@ async function getSchedule(weekStartQuery, options = {}) {
             weekEnd: weekEndIso,
             ...(staffId ? { staffId } : {})
         }
-    )
+    ),
+        query(
+            `SELECT StaffId, DayIndex, StartHour, IsRecurring, StartDate, EndDate, Note, Status
+             FROM StaffOffSchedules
+             WHERE CAST(StartDate AS date) <= @weekEnd
+               AND CAST(ISNULL(EndDate, StartDate) AS date) >= @weekStart
+                             ${staffId ? 'AND CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))' : ''}`,
+            {
+                weekStart: weekStartIso,
+                weekEnd: weekEndIso,
+                ...(staffId ? { staffId } : {}),
+            },
+        ).catch(() => ({ recordset: [] })),
+    ])
 
     const availMap = new Map()
     for (const row of availRes.recordset || []) {
-        const staffId = row.StaffId
-        if (!staffId) continue
+        const staffIdKey = String(row.StaffId || '').trim()
+        if (!staffIdKey) continue
 
         const dateValue = row.WeekStartDate ? new Date(row.WeekStartDate) : null
         if (!dateValue || Number.isNaN(dateValue.getTime())) continue
@@ -222,14 +301,85 @@ async function getSchedule(weekStartQuery, options = {}) {
         if (!startHour || !endHour) continue
 
         const label = `${startHour} - ${endHour}`
-        if (!availMap.has(staffId)) availMap.set(staffId, {})
-        const staffShifts = availMap.get(staffId)
+        if (!availMap.has(staffIdKey)) availMap.set(staffIdKey, {})
+        const staffShifts = availMap.get(staffIdKey)
         if (!Array.isArray(staffShifts[dateLabel])) staffShifts[dateLabel] = []
-        staffShifts[dateLabel].push(label)
+        staffShifts[dateLabel].push({ Label: label, AvailabilityId: row.AvailabilityId, StartHour: row.StartHour, EndHour: row.EndHour })
+    }
+
+    for (const row of offRes.recordset || []) {
+        const sid = String(row.StaffId || '').trim()
+        if (!sid) continue
+
+        const status = String(row.Status || 'Pending').trim().toLowerCase()
+        if (status === 'rejected') continue
+
+        const startDate = new Date(row.StartDate)
+        if (Number.isNaN(startDate.getTime())) continue
+        const endDateRaw = row.EndDate ? new Date(row.EndDate) : null
+        const endDate = endDateRaw && !Number.isNaN(endDateRaw.getTime()) ? endDateRaw : startDate
+        const startDateIso = toIsoDate(startDate)
+        const endDateIso = toIsoDate(endDate)
+        if (!startDateIso || !endDateIso) continue
+
+        const rowDayIndexRaw = Number(row.DayIndex)
+        const rowDayIndex = Number.isFinite(rowDayIndexRaw)
+            ? (rowDayIndexRaw >= 1 && rowDayIndexRaw <= 7 ? rowDayIndexRaw - 1 : rowDayIndexRaw)
+            : null
+        const isRecurring = Number(row.IsRecurring || 0) === 1
+
+        const rawStartHour = String(row.StartHour || '').trim()
+        const startHourNum = parseHourToInt(rawStartHour)
+        const note = String(row.Note || '').trim()
+        const leaveTypeMatch = note.match(/LEAVE_REQUEST\[(morning|afternoon|evening|full)\]/i)
+        const leaveType = leaveTypeMatch
+            ? String(leaveTypeMatch[1]).toLowerCase()
+            : (startHourNum === 8 ? 'morning' : startHourNum === 13 ? 'afternoon' : startHourNum === 16 ? 'evening' : 'full')
+        const shiftLabel = leaveType === 'morning'
+            ? 'Morning'
+            : leaveType === 'afternoon'
+                ? 'Afternoon'
+                : leaveType === 'evening'
+                    ? 'Evening'
+                    : 'Full Day'
+
+        const includeDate = (dateObj) => {
+            const iso = toIsoDate(dateObj)
+            if (!iso) return
+            if (iso < weekStartIso || iso > weekEndIso) return
+            if (iso < startDateIso || iso > endDateIso) return
+
+            const dateLabel = toDateLabel(dateObj)
+            if (!availMap.has(sid)) availMap.set(sid, {})
+            const staffShifts = availMap.get(sid)
+            if (status !== 'pending') {
+                staffShifts[dateLabel] = stripOverlappedWorkingShifts(staffShifts[dateLabel] || [], leaveType)
+            }
+            if (!Array.isArray(staffShifts[dateLabel])) staffShifts[dateLabel] = []
+            staffShifts[dateLabel].push({
+                Label: shiftLabel,
+                Status: status === 'pending' ? 'Pending' : 'Approved',
+                Note: note.replace(/^LEAVE_REQUEST(\[(morning|afternoon|evening|full)\])?\s*:?\s*/i, '') || note,
+            })
+        }
+
+        if (isRecurring && rowDayIndex !== null) {
+            // Always include recurrence day in current week
+            const occ = new Date(weekStart)
+            occ.setDate(occ.getDate() + rowDayIndex)
+            includeDate(occ)
+
+            // Also include explicit range boundaries when they fall inside this week.
+            // This fixes missing first/last week boundary dates.
+            includeDate(startDate)
+            includeDate(endDate)
+        } else {
+            includeDate(startDate)
+        }
     }
 
     const staffRows = staffList.map((s) => {
-        const shifts = availMap.get(s.staffId) || {}
+        const shifts = availMap.get(String(s.staffId || '').trim()) || {}
 
         // make sure every key is formatted like dd/MM
         const normalized = {}
@@ -279,6 +429,12 @@ async function addShift(payload) {
         err.status = 400
         throw err
     }
+
+    // determine whether DB columns store time as TIME type; bind time strings if so
+    const startHourColType = await columnType('StaffAvailability', 'StartHour')
+    const endHourColType = await columnType('StaffAvailability', 'EndHour')
+    const startParam = (startHourColType && startHourColType.startsWith('time')) ? `${String(startHourInt).padStart(2, '0')}:00:00` : startHourInt
+    const endParam = (endHourColType && endHourColType.startsWith('time')) ? `${String(endHourInt).padStart(2, '0')}:00:00` : endHourInt
 
     if (startHourInt >= endHourInt) {
         const err = new Error('Start time must be earlier than end time')
@@ -342,16 +498,16 @@ async function addShift(payload) {
        )`, {
             shiftDate: shiftDateIso,
             staffId,
-            startHour: startHourInt,
-            endHour: endHourInt,
+            startHour: startParam,
+            endHour: endParam,
             isEditing: isEditing ? 1 : 0,
             oldShiftDate: oldShiftDateIso,
-            oldStartHour: oldStartHourInt,
-            oldEndHour: oldEndHourInt,
+            oldStartHour: oldStartHourInt !== null && startHourColType && startHourColType.startsWith('time') ? `${String(oldStartHourInt).padStart(2,'0')}:00:00` : oldStartHourInt,
+            oldEndHour: oldEndHourInt !== null && endHourColType && endHourColType.startsWith('time') ? `${String(oldEndHourInt).padStart(2,'0')}:00:00` : oldEndHourInt,
         }
     )
 
-    if (duplicate.recordset ?.length) {
+    if (duplicate.recordset?.length) {
         const err = new Error('This shift already exists')
         err.status = 409
         throw err
@@ -371,16 +527,16 @@ async function addShift(payload) {
        )`, {
             shiftDate: shiftDateIso,
             staffId,
-            startHour: startHourInt,
-            endHour: endHourInt,
+            startHour: startParam,
+            endHour: endParam,
             isEditing: isEditing ? 1 : 0,
             oldShiftDate: oldShiftDateIso,
-            oldStartHour: oldStartHourInt,
-            oldEndHour: oldEndHourInt,
+            oldStartHour: oldStartHourInt !== null && startHourColType && startHourColType.startsWith('time') ? `${String(oldStartHourInt).padStart(2,'0')}:00:00` : oldStartHourInt,
+            oldEndHour: oldEndHourInt !== null && endHourColType && endHourColType.startsWith('time') ? `${String(oldEndHourInt).padStart(2,'0')}:00:00` : oldEndHourInt,
         }
     )
 
-    if (overlap.recordset ?.length) {
+    if (overlap.recordset?.length) {
         const existed = overlap.recordset[0]
         const isExactDuplicate =
             Number(existed.StartHour) === Number(startHourInt) &&
@@ -415,8 +571,8 @@ async function addShift(payload) {
      VALUES (@shiftDate, @staffId, @startHour, @endHour, GETDATE())`, {
             shiftDate: shiftDateIso,
             staffId,
-            startHour: startHourInt,
-            endHour: endHourInt,
+            startHour: startParam,
+            endHour: endParam,
         }
     )
 
@@ -424,13 +580,31 @@ async function addShift(payload) {
 }
 
 async function deleteShift(payload) {
-    const { staffId, date, label } = payload || {};
+    const { staffId, date, label, availabilityId } = payload || {};
+
+    // If AvailabilityId is provided prefer to delete by the PK (unambiguous)
+    if (availabilityId) {
+        // Delete by AvailabilityId only — don't require staffId to match (caller may pass different id)
+        const res = await query(
+            `DELETE FROM StaffAvailability
+         WHERE AvailabilityId = @availabilityId`,
+            { availabilityId }
+        )
+        const deleted = (res.rowsAffected && res.rowsAffected[0]) || 0
+        if (!deleted) {
+            const err = new Error('Shift not found or already deleted')
+            err.status = 404
+            throw err
+        }
+        return { deleted }
+    }
 
     if (!staffId || !date || !label) {
         const err = new Error('Missing data (staffId, date, or label)');
         err.status = 400;
         throw err;
     }
+
     const parts = label.split('-').map(t => t.trim());
     if (parts.length < 2) {
         const err = new Error('Invalid label format');
@@ -454,20 +628,104 @@ async function deleteShift(payload) {
     }
     const shiftDateIso = toIsoDate(shiftDate);
 
-    await query(
-        `DELETE FROM StaffAvailability 
-     WHERE StaffId = @staffId 
-     AND WeekStartDate = @shiftDate 
-     AND StartHour = @startHour 
-     AND EndHour = @endHour`, {
-            staffId,
-            shiftDate: shiftDateIso,
-            startHour: startHourInt,
-            endHour: endHourInt
-        }
-    );
+    // Determine column storage types so we send matching parameter types
+    const startType = String(await columnType('StaffAvailability', 'StartHour') || '').toLowerCase()
+    const endType = String(await columnType('StaffAvailability', 'EndHour') || '').toLowerCase()
 
-    return { success: true };
+    const startParam = (startType && startType.startsWith('time')) ? `${String(startHourInt).padStart(2, '0')}:00:00` : startHourInt
+    const endParam = (endType && endType.startsWith('time')) ? `${String(endHourInt).padStart(2, '0')}:00:00` : endHourInt
+
+    // Prefer numeric StaffId when possible to avoid unnecessary casts
+    const staffIdNum = Number(staffId)
+    const staffParam = Number.isFinite(staffIdNum) ? staffIdNum : String(staffId)
+
+    // Select candidate rows for this staff/date and match in JS to avoid SQL type-cast issues
+    const candidates = await query(
+        `SELECT * FROM StaffAvailability
+     WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
+       AND CAST(WeekStartDate AS date) = @shiftDate`,
+        { staffId: String(staffId), shiftDate: shiftDateIso }
+    )
+
+    const wantedStart = formatHourValue(parts[0])
+    const wantedEnd = formatHourValue(parts[1])
+
+    const rows = candidates.recordset || []
+    const matches = []
+    for (const r of rows) {
+        const rs = formatHourValue(r.StartHour)
+        const re = formatHourValue(r.EndHour)
+
+        // Match by formatted HH:MM string or by hour-int equivalence
+        const startIntMatch = parseHourToInt(parts[0]) === parseHourToInt(rs)
+        const endIntMatch = parseHourToInt(parts[1]) === parseHourToInt(re)
+        const stringMatch = (rs === wantedStart && re === wantedEnd)
+
+        if (stringMatch || (startIntMatch && endIntMatch)) {
+            matches.push(r)
+        }
+    }
+
+    if (!matches.length) {
+        const err = new Error('Shift not found or already deleted')
+        err.status = 404
+        throw err
+    }
+
+    let deletedCount = 0
+    for (const m of matches) {
+        // Delete by matching the DB column types to avoid incompatible type comparisons
+        const startIsTime = (startType && startType.startsWith('time'))
+        const endIsTime = (endType && endType.startsWith('time'))
+
+        function extractHourMinute(val) {
+            if (val === null || val === undefined) return { h: null, m: null }
+            if (val instanceof Date) return { h: val.getUTCHours(), m: val.getUTCMinutes() }
+            const s = String(val || '').trim()
+            const mm = s.match(/^(\d{1,2}):(\d{2})/) || s.match(/^(\d{1,2})$/)
+            if (mm) return { h: Number(mm[1]), m: Number(mm[2] || 0) }
+            const n = Number(s)
+            if (!Number.isNaN(n)) return { h: Math.trunc(n), m: 0 }
+            const dt = new Date(s)
+            if (!Number.isNaN(dt.getTime())) return { h: dt.getUTCHours(), m: dt.getUTCMinutes() }
+            return { h: null, m: null }
+        }
+
+        const startHM = extractHourMinute(m.StartHour)
+        const endHM = extractHourMinute(m.EndHour)
+
+        const startCond = startIsTime
+            ? 'DATEPART(HOUR, StartHour) = @startHour AND DATEPART(MINUTE, StartHour) = @startMinute'
+            : 'TRY_CONVERT(INT, StartHour) = @startHour'
+        const endCond = endIsTime
+            ? 'DATEPART(HOUR, EndHour) = @endHour AND DATEPART(MINUTE, EndHour) = @endMinute'
+            : 'TRY_CONVERT(INT, EndHour) = @endHour'
+
+        const delSql = `DELETE FROM StaffAvailability
+         WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
+           AND CAST(WeekStartDate AS date) = @shiftDate
+           AND ${startCond}
+           AND ${endCond}`
+
+        const delParams = {
+            staffId: String(staffId),
+            shiftDate: shiftDateIso,
+            startHour: startIsTime ? startHM.h : (startHM.h !== null ? startHM.h : startHourInt),
+            startMinute: startIsTime ? (startHM.m !== null ? startHM.m : 0) : 0,
+            endHour: endIsTime ? endHM.h : (endHM.h !== null ? endHM.h : endHourInt),
+            endMinute: endIsTime ? (endHM.m !== null ? endHM.m : 0) : 0,
+        }
+
+        const delRes = await query(delSql, delParams)
+        deletedCount += (delRes.rowsAffected && delRes.rowsAffected[0]) || 0
+    }
+
+    if (!deletedCount) {
+        const err = new Error('Shift not found or already deleted')
+        err.status = 404
+        throw err
+    }
+    return { deleted: deletedCount }
 }
 
 module.exports = {
@@ -476,55 +734,168 @@ module.exports = {
     deleteShift,
     getStaffScheduleFromShifts,
     requestStaffLeave,
+    getAllOffSchedules,
+    deleteStaffLeaveRequest,
 };
 
-async function approveLeave({ staffId, weekStartDate, dayIndex } = {}) {
-    if (!staffId || !weekStartDate || (dayIndex === undefined || dayIndex === null)) {
+async function approveLeave({ offScheduleId, staffId, weekStartDate, dayIndex } = {}) {
+    if (!offScheduleId && !staffId && !weekStartDate && dayIndex === undefined) {
         const err = new Error('Missing parameters')
         err.status = 400
         throw err
     }
 
+    if (offScheduleId) {
+        const res = await query(
+            `UPDATE StaffOffSchedules
+             SET Status = 'Approved'
+             WHERE OffScheduleId = @offScheduleId
+               AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) = 'PENDING'`,
+            { offScheduleId }
+        )
+        const updated = (res.rowsAffected && res.rowsAffected[0]) || 0
+        if (updated > 0) {
+            const target = await query(
+                `SELECT TOP 1 s.UserId
+                 FROM StaffOffSchedules o
+                    JOIN Staff s ON CAST(s.StaffId AS NVARCHAR(100)) = CAST(o.StaffId AS NVARCHAR(100))
+                 WHERE o.OffScheduleId = @offScheduleId`,
+                { offScheduleId }
+            )
+            const userId = String(target.recordset?.[0]?.UserId || '').trim()
+                if (userId) {
+                await notifyCustomerEvent({
+                    userId,
+                    event: 'staff_shift_changed',
+                    payload: { body: 'Your leave request has been approved.' },
+                    sendEmailNow: false,
+                })
+            }
+        }
+        return { approved: updated }
+    }
+
+    const normalizedDayIndex = Number(dayIndex)
+    const oneBasedDayIndex = Number.isFinite(normalizedDayIndex)
+        ? (normalizedDayIndex >= 1 && normalizedDayIndex <= 7 ? normalizedDayIndex : normalizedDayIndex + 1)
+        : null
+    const targetDate = weekStartDate ? toIsoDate(new Date(weekStartDate)) : null
+
     const existing = await query(
-        `SELECT TOP 1 ShiftId, Note
-         FROM StaffShifts
-         WHERE StaffId = @staffId AND WeekStartDate = @weekStartDate AND DayIndex = @dayIndex
-           AND UPPER(ISNULL(Note, '')) LIKE 'LEAVE_REQUEST%'
-        `, { staffId, weekStartDate, dayIndex }
+        `SELECT TOP 1 OffScheduleId
+         FROM StaffOffSchedules
+                 WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
+           AND (@targetDate IS NULL OR CAST(StartDate AS date) = @targetDate)
+           AND (@dayIndex IS NULL OR TRY_CONVERT(INT, DayIndex) = @dayIndex)
+           AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) = 'PENDING'
+         ORDER BY CreatedAt DESC`,
+        { staffId, targetDate, dayIndex: oneBasedDayIndex }
     )
 
     const row = existing.recordset?.[0]
-    if (!row || !row.ShiftId) {
+    if (!row || !row.OffScheduleId) {
         const err = new Error('Leave request not found')
         err.status = 404
         throw err
     }
 
-    // remove LEAVE_REQUEST prefix and trim
-    const rawNote = String(row.Note || '')
-    const newNote = rawNote.replace(/^LEAVE_REQUEST(\[(morning|afternoon|evening|full)\])?\s*:?\s*/i, '') || ''
-
     await query(
-        `UPDATE StaffShifts SET Note = @note WHERE ShiftId = @shiftId`,
-        { note: newNote, shiftId: row.ShiftId }
+        `UPDATE StaffOffSchedules
+         SET Status = 'Approved'
+         WHERE OffScheduleId = @offScheduleId`,
+        { offScheduleId: row.OffScheduleId }
     )
+
+    const target = await query(
+        `SELECT TOP 1 s.UserId
+         FROM StaffOffSchedules o
+         JOIN Staff s ON CAST(s.StaffId AS NVARCHAR(100)) = CAST(o.StaffId AS NVARCHAR(100))
+         WHERE o.OffScheduleId = @offScheduleId`,
+        { offScheduleId: row.OffScheduleId }
+    )
+    const userId = String(target.recordset?.[0]?.UserId || '').trim()
+    if (userId) {
+        await notifyCustomerEvent({
+            userId,
+            event: 'staff_shift_changed',
+            payload: { body: 'Don xin nghi cua ban da duoc duyet.' },
+            sendEmailNow: false,
+        })
+    }
 
     return { approved: 1 }
 }
 
-async function rejectLeave({ staffId, weekStartDate, dayIndex } = {}) {
-    if (!staffId || !weekStartDate || (dayIndex === undefined || dayIndex === null)) {
+async function rejectLeave({ offScheduleId, staffId, weekStartDate, dayIndex } = {}) {
+    if (!offScheduleId && !staffId && !weekStartDate && dayIndex === undefined) {
         const err = new Error('Missing parameters')
         err.status = 400
         throw err
     }
 
+    if (offScheduleId) {
+        const res = await query(
+            `UPDATE StaffOffSchedules
+             SET Status = 'Rejected'
+             WHERE OffScheduleId = @offScheduleId
+               AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) = 'PENDING'`,
+            { offScheduleId }
+        )
+        const updated = (res.rowsAffected && res.rowsAffected[0]) || 0
+        if (updated > 0) {
+            const target = await query(
+                `SELECT TOP 1 s.UserId
+                 FROM StaffOffSchedules o
+                    JOIN Staff s ON CAST(s.StaffId AS NVARCHAR(100)) = CAST(o.StaffId AS NVARCHAR(100))
+                 WHERE o.OffScheduleId = @offScheduleId`,
+                { offScheduleId }
+            )
+            const userId = String(target.recordset?.[0]?.UserId || '').trim()
+            if (userId) {
+        await notifyCustomerEvent({
+            userId,
+            event: 'staff_shift_changed',
+            payload: { body: 'Your leave request has been rejected.' },
+            sendEmailNow: false,
+        })
+            }
+        }
+        return { rejected: updated }
+    }
+
+    const normalizedDayIndex = Number(dayIndex)
+    const oneBasedDayIndex = Number.isFinite(normalizedDayIndex)
+        ? (normalizedDayIndex >= 1 && normalizedDayIndex <= 7 ? normalizedDayIndex : normalizedDayIndex + 1)
+        : null
+    const targetDate = weekStartDate ? toIsoDate(new Date(weekStartDate)) : null
+
     const res = await query(
-        `DELETE FROM StaffShifts WHERE StaffId = @staffId AND WeekStartDate = @weekStartDate AND DayIndex = @dayIndex AND UPPER(ISNULL(Note,'')) LIKE 'LEAVE_REQUEST%'`,
-        { staffId, weekStartDate, dayIndex }
+        `UPDATE StaffOffSchedules
+         SET Status = 'Rejected'
+                 WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
+           AND (@targetDate IS NULL OR CAST(StartDate AS date) = @targetDate)
+           AND (@dayIndex IS NULL OR TRY_CONVERT(INT, DayIndex) = @dayIndex)
+           AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) = 'PENDING'`,
+        { staffId, targetDate, dayIndex: oneBasedDayIndex }
     )
 
-    return { deleted: (res.rowsAffected && res.rowsAffected[0]) || 0 }
+    const updated = (res.rowsAffected && res.rowsAffected[0]) || 0
+    if (updated > 0 && staffId) {
+        const target = await query(
+            `SELECT TOP 1 UserId FROM Staff WHERE StaffId = @staffId`,
+            { staffId }
+        )
+        const userId = String(target.recordset?.[0]?.UserId || '').trim()
+        if (userId) {
+            await notifyCustomerEvent({
+                userId,
+                event: 'staff_shift_changed',
+                payload: { body: 'Don xin nghi cua ban da bi tu choi.' },
+                sendEmailNow: false,
+            })
+        }
+    }
+    return { rejected: updated }
 }
 
 // export the new functions
@@ -560,15 +931,15 @@ async function getStaffScheduleFromShifts({ staffId, weekStartQuery } = {}) {
          AND WeekStartDate <= @weekEnd
        ORDER BY WeekStartDate ASC, StartHour ASC`, { staffId, weekStart: weekStartIso, weekEnd: weekEndIso },
         ),
-        query(
-            `SELECT StaffId, WeekStartDate, DayIndex, StartHour, DurationHours, Note
-       FROM StaffShifts
-       WHERE StaffId = @staffId
-         AND WeekStartDate >= @weekStart
-         AND WeekStartDate <= @weekEnd
-         AND UPPER(LTRIM(RTRIM(ISNULL(Note, '')))) LIKE 'LEAVE_REQUEST%'
-       ORDER BY WeekStartDate ASC, DayIndex ASC, StartHour ASC`, { staffId, weekStart: weekStartIso, weekEnd: weekEndIso },
-        ).catch(() => ({ recordset: [] })),
+                query(
+                        `SELECT OffScheduleId, StaffId, DayIndex, StartHour, IsRecurring, StartDate, EndDate, Note, Status
+                         FROM StaffOffSchedules
+                         WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
+                             AND CAST(StartDate AS date) <= @weekEnd
+                             AND CAST(ISNULL(EndDate, StartDate) AS date) >= @weekStart
+                         ORDER BY StartDate ASC, CreatedAt DESC`,
+                        { staffId, weekStart: weekStartIso, weekEnd: weekEndIso },
+                ).catch(() => ({ recordset: [] })),
     ])
 
     const map = new Map()
@@ -587,42 +958,73 @@ async function getStaffScheduleFromShifts({ staffId, weekStartQuery } = {}) {
             type: 'assigned',
             meta: {
                 note: 'Ca lam viec',
+                availabilityId: r.AvailabilityId,
+                startHour: r.StartHour,
+                endHour: r.EndHour,
             },
         })
     }
 
     for (const r of leaveRows.recordset || []) {
-        const dayIndex = Number(r.DayIndex || 0)
-        const d = new Date(r.WeekStartDate)
-        d.setDate(d.getDate() + dayIndex)
-        const ymd = toIsoDate(d)
-        if (!map.has(ymd)) map.set(ymd, [])
+        const status = String(r.Status || 'Pending').trim().toLowerCase()
+        if (status === 'rejected') continue
 
-        const start = Number(r.StartHour || 0)
-        const dur = Number(r.DurationHours || 0)
-        const end = start + dur
-        const label = `${String(start).padStart(2, '0')}:00 - ${String(Math.max(end, start)).padStart(2, '0')}:00`
+        const startDate = new Date(r.StartDate)
+        if (Number.isNaN(startDate.getTime())) continue
+        const endDateRaw = r.EndDate ? new Date(r.EndDate) : null
+        const endDate = endDateRaw && !Number.isNaN(endDateRaw.getTime()) ? endDateRaw : startDate
+        const startDateIso = toIsoDate(startDate)
+        const endDateIso = toIsoDate(endDate)
+        if (!startDateIso || !endDateIso) continue
+
         const note = String(r.Note || '').trim()
-        const isLeave = note.toUpperCase().includes('LEAVE_REQUEST') || dur <= 0
         const leaveTypeMatch = note.match(/LEAVE_REQUEST\[(morning|afternoon|evening|full)\]/i)
-        const leaveType = leaveTypeMatch ? String(leaveTypeMatch[1]).toLowerCase() : 'full'
-        const leaveTypeLabel = leaveType === 'morning' ?
-            'Ca sang' :
-            leaveType === 'afternoon' ?
-            'Ca chieu' :
-            leaveType === 'evening' ?
-            'Ca toi' :
-            'Nghi ca ngay'
-        map.get(ymd).push({
-            time: isLeave ? leaveTypeLabel : label,
-            type: isLeave ? 'leave-request' : 'leave',
-            meta: {
-                note: note
-                    .replace(/^LEAVE_REQUEST(\[(morning|afternoon|evening|full)\])?\s*:?\s*/i, '') ||
-                    note,
-                leaveType,
-            },
-        })
+        const leaveTypeFromNote = leaveTypeMatch ? String(leaveTypeMatch[1]).toLowerCase() : ''
+        const parsedStartHour = parseHourToInt(String(r.StartHour || '').trim())
+        const leaveType = leaveTypeFromNote || (parsedStartHour === 8 ? 'morning' : parsedStartHour === 13 ? 'afternoon' : parsedStartHour === 16 ? 'evening' : 'full')
+        const leaveTypeLabel = leaveType === 'morning'
+            ? 'Morning'
+            : leaveType === 'afternoon'
+                ? 'Afternoon'
+                : leaveType === 'evening'
+                    ? 'Evening'
+                    : 'Full Day'
+
+        const rowDayIndexRaw = Number(r.DayIndex)
+        const rowDayIndex = Number.isFinite(rowDayIndexRaw)
+            ? (rowDayIndexRaw >= 1 && rowDayIndexRaw <= 7 ? rowDayIndexRaw - 1 : rowDayIndexRaw)
+            : null
+        const isRecurring = Number(r.IsRecurring || 0) === 1
+
+        const includeDate = (isoDate) => {
+            if (!isoDate) return
+            if (isoDate < weekStartIso || isoDate > weekEndIso) return
+            if (isoDate < startDateIso || isoDate > endDateIso) return
+            if (!map.has(isoDate)) map.set(isoDate, [])
+            if (status !== 'pending') {
+                map.set(isoDate, stripOverlappedWorkingShifts(map.get(isoDate) || [], leaveType))
+            }
+            map.get(isoDate).push({
+                time: leaveTypeLabel,
+                type: status === 'pending' ? 'leave-request' : 'leave',
+                meta: {
+                    offScheduleId: r.OffScheduleId,
+                    status: r.Status || 'Pending',
+                    note: note.replace(/^LEAVE_REQUEST(\[(morning|afternoon|evening|full)\])?\s*:?\s*/i, '') || note,
+                    leaveType,
+                },
+            })
+        }
+
+        if (isRecurring && rowDayIndex !== null) {
+            const occ = new Date(weekStart)
+            occ.setDate(occ.getDate() + rowDayIndex)
+            includeDate(toIsoDate(occ))
+            includeDate(startDateIso)
+            includeDate(endDateIso)
+        } else {
+            includeDate(startDateIso)
+        }
     }
 
     const out = []
@@ -639,11 +1041,53 @@ function resolveLeaveShift(shiftType) {
     const normalized = String(shiftType || 'full').trim().toLowerCase()
     if (normalized === 'morning') return { shiftType: 'morning', startHour: 8, durationHours: 4 }
     if (normalized === 'afternoon') return { shiftType: 'afternoon', startHour: 13, durationHours: 4 }
-    if (normalized === 'evening') return { shiftType: 'evening', startHour: 17, durationHours: 4 }
+    if (normalized === 'evening') return { shiftType: 'evening', startHour: 16, durationHours: 4 }
     return { shiftType: 'full', startHour: 8, durationHours: 9 }
 }
 
-async function requestStaffLeave({ staffId, date, note, shiftType } = {}) {
+function normalizeDayIndexOneBased(value) {
+    const n = Number(value)
+    if (!Number.isFinite(n)) return null
+    if (n >= 1 && n <= 7) return Math.trunc(n)
+    if (n >= 0 && n <= 6) return Math.trunc(n + 1)
+    return null
+}
+
+async function getAllOffSchedules() {
+    const offStartHourColType = await columnType('StaffOffSchedules', 'StartHour')
+    const offStartHourExpr = (offStartHourColType && offStartHourColType.startsWith('time'))
+        ? 'DATEPART(HOUR, o.StartHour)'
+        : 'TRY_CONVERT(INT, o.StartHour)'
+
+    const res = await query(
+        `SELECT
+            o.OffScheduleId,
+            o.StaffId,
+            o.StaffName,
+            o.DayIndex,
+            o.StartHour,
+            o.IsRecurring,
+            o.StartDate,
+            o.EndDate,
+            o.Note,
+            o.CreatedAt,
+            ISNULL(NULLIF(LTRIM(RTRIM(o.Status)), ''), 'Pending') AS Status,
+            u.AvatarUrl,
+                        CASE
+                                                                                                                WHEN UPPER(ISNULL(o.Note, '')) LIKE '%LEAVE_REQUEST[[]MORNING[]]%' OR ${offStartHourExpr} = 8 THEN N'Morning'
+                                                                                                                WHEN UPPER(ISNULL(o.Note, '')) LIKE '%LEAVE_REQUEST[[]AFTERNOON[]]%' OR ${offStartHourExpr} = 13 THEN N'Afternoon'
+                                                                                                                WHEN UPPER(ISNULL(o.Note, '')) LIKE '%LEAVE_REQUEST[[]EVENING[]]%' OR ${offStartHourExpr} = 16 THEN N'Evening'
+                            ELSE N'Full Day'
+                        END AS ShiftVN
+         FROM StaffOffSchedules o
+         LEFT JOIN Staff s ON CAST(s.StaffId AS NVARCHAR(100)) = CAST(o.StaffId AS NVARCHAR(100))
+         LEFT JOIN Users u ON u.UserId = s.UserId
+         ORDER BY o.CreatedAt DESC`
+    )
+    return res.recordset || []
+}
+
+async function requestStaffLeave({ staffId, date, note, shiftType, isRecurring, endDate } = {}) {
     if (!staffId || !date) {
         const err = new Error('Missing staffId/date')
         err.status = 400
@@ -668,24 +1112,24 @@ async function requestStaffLeave({ staffId, date, note, shiftType } = {}) {
         throw err
     }
 
-    const weekStart = mondayOf(leaveDate)
-    const dayIndex = (leaveDate.getDay() + 6) % 7
-    const weekStartIso = toIsoDate(weekStart)
+    const dayIndexOneBased = normalizeDayIndexOneBased((leaveDate.getDay() + 6) % 7)
+    const startDateIso = toIsoDate(leaveDate)
+    const endDateValue = endDate ? new Date(endDate) : null
+    const endDateIso = endDateValue && !Number.isNaN(endDateValue.getTime()) ? toIsoDate(endDateValue) : startDateIso
     const leaveShift = resolveLeaveShift(shiftType)
+    const offStartHourColType = await columnType('StaffOffSchedules', 'StartHour')
+    const offStartHourParam = (offStartHourColType && offStartHourColType.startsWith('time'))
+        ? `${String(leaveShift.startHour).padStart(2, '0')}:00:00`
+        : leaveShift.startHour
     const safeNote = `LEAVE_REQUEST[${leaveShift.shiftType}]${note ? `: ${String(note).trim()}` : ''}`
-
-    // Disallow leave requests for the current week
-    const thisWeekStart = mondayOf(today)
-    if (thisWeekStart && toIsoDate(thisWeekStart) === weekStartIso) {
-        const err = new Error('Cannot request leave for the current week')
-        err.status = 400
-        throw err
-    }
 
     // Disallow leave requests on dates that already have an assigned shift
     const shiftDateIso = toIsoDate(leaveDate)
     const assignedCheck = await query(
-        `SELECT TOP 1 1 AS ok FROM StaffAvailability WHERE StaffId = @staffId AND WeekStartDate = @shiftDate`,
+                `SELECT TOP 1 1 AS ok
+                 FROM StaffAvailability
+                 WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
+                     AND WeekStartDate = @shiftDate`,
         { staffId, shiftDate: shiftDateIso }
     )
     if (assignedCheck.recordset && assignedCheck.recordset.length) {
@@ -694,25 +1138,32 @@ async function requestStaffLeave({ staffId, date, note, shiftType } = {}) {
         throw err
     }
 
-  const existing = await query(
-    `SELECT TOP 1 ShiftId
-     FROM StaffShifts
-     WHERE StaffId = @staffId AND WeekStartDate = @weekStartDate AND DayIndex = @dayIndex`,
-    { staffId, weekStartDate: weekStartIso, dayIndex },
-  )
+    const existing = await query(
+        `SELECT TOP 1 OffScheduleId
+         FROM StaffOffSchedules
+         WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
+             AND CAST(StartDate AS date) = @startDate
+             AND TRY_CONVERT(INT, DayIndex) = @dayIndex
+             AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) = 'PENDING'
+         ORDER BY CreatedAt DESC`,
+        { staffId, startDate: startDateIso, dayIndex: dayIndexOneBased },
+    )
 
-  if (existing.recordset?.[0]?.ShiftId) {
+    if (existing.recordset?.[0]?.OffScheduleId) {
     await query(
-      `UPDATE StaffShifts
-       SET Note = @note,
+            `UPDATE StaffOffSchedules
+             SET Note = @note,
                      StartHour = @startHour,
-                     DurationHours = @durationHours
-       WHERE ShiftId = @shiftId`,
+                     IsRecurring = @isRecurring,
+                     EndDate = @endDate,
+                     Status = 'Pending'
+             WHERE OffScheduleId = @offScheduleId`,
             {
-                shiftId: existing.recordset[0].ShiftId,
+                                offScheduleId: existing.recordset[0].OffScheduleId,
                 note: safeNote,
-                startHour: leaveShift.startHour,
-                durationHours: leaveShift.durationHours,
+                startHour: offStartHourParam,
+                                isRecurring: Number(isRecurring) === 1 ? 1 : 0,
+                                endDate: endDateIso,
             },
     )
     return { updated: 1 }
@@ -722,25 +1173,75 @@ async function requestStaffLeave({ staffId, date, note, shiftType } = {}) {
     `SELECT TOP 1 st.StaffId, u.Name AS StaffName
      FROM Staff st
      LEFT JOIN Users u ON u.UserId = st.UserId
-     WHERE st.StaffId = @staffId`,
+         WHERE CAST(st.StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))`,
     { staffId },
   )
   const staffName = String(profile.recordset?.[0]?.StaffName || '').trim() || 'Staff'
 
-    await query(
-        `INSERT INTO StaffShifts (ShiftId, WeekStartDate, SalonId, StaffId, StaffName, DayIndex, StartHour, DurationHours, Note, CreatedAt)
-                 VALUES (@shiftId, @weekStartDate, NULL, @staffId, @staffName, @dayIndex, @startHour, @durationHours, @note, GETDATE())`,
-        {
-                        shiftId: newId(),
-            weekStartDate: weekStartIso,
-            staffId,
-            staffName,
-            dayIndex,
-            startHour: leaveShift.startHour,
-            durationHours: leaveShift.durationHours,
-            note: safeNote,
-        },
-  )
+    const offScheduleIdIsIdentity = await isIdentityColumn('StaffOffSchedules', 'OffScheduleId')
+    if (offScheduleIdIsIdentity) {
+        await query(
+            `INSERT INTO StaffOffSchedules (StaffId, StaffName, DayIndex, StartHour, IsRecurring, StartDate, EndDate, Note, CreatedAt, Status)
+                     VALUES (@staffId, @staffName, @dayIndex, @startHour, @isRecurring, @startDate, @endDate, @note, GETDATE(), 'Pending')`,
+            {
+                staffId,
+                staffName,
+                dayIndex: dayIndexOneBased,
+                startHour: offStartHourParam,
+                isRecurring: Number(isRecurring) === 1 ? 1 : 0,
+                startDate: startDateIso,
+                endDate: endDateIso,
+                note: safeNote,
+            },
+        )
+    } else {
+        await query(
+            `INSERT INTO StaffOffSchedules (OffScheduleId, StaffId, StaffName, DayIndex, StartHour, IsRecurring, StartDate, EndDate, Note, CreatedAt, Status)
+                     VALUES (@offScheduleId, @staffId, @staffName, @dayIndex, @startHour, @isRecurring, @startDate, @endDate, @note, GETDATE(), 'Pending')`,
+            {
+                offScheduleId: newId(),
+                staffId,
+                staffName,
+                dayIndex: dayIndexOneBased,
+                startHour: offStartHourParam,
+                isRecurring: Number(isRecurring) === 1 ? 1 : 0,
+                startDate: startDateIso,
+                endDate: endDateIso,
+                note: safeNote,
+            },
+        )
+    }
 
   return { created: 1 }
+}
+
+async function deleteStaffLeaveRequest({ staffId, offScheduleId, date, shiftType } = {}) {
+    if (!staffId) {
+        const err = new Error('Missing staffId')
+        err.status = 400
+        throw err
+    }
+
+    if (offScheduleId) {
+        const res = await query(
+            `DELETE FROM StaffOffSchedules
+             WHERE OffScheduleId = @offScheduleId
+                             AND CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
+               AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) = 'PENDING'`,
+            { offScheduleId, staffId }
+        )
+        return { deleted: (res.rowsAffected && res.rowsAffected[0]) || 0 }
+    }
+
+    const targetDate = date ? toIsoDate(new Date(date)) : null
+    const shift = resolveLeaveShift(shiftType)
+    const res = await query(
+        `DELETE FROM StaffOffSchedules
+                 WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
+           AND (@targetDate IS NULL OR CAST(StartDate AS date) = @targetDate)
+           AND (@startHour IS NULL OR TRY_CONVERT(INT, StartHour) = @startHour)
+           AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) = 'PENDING'`,
+        { staffId, targetDate, startHour: shift?.startHour ?? null }
+    )
+    return { deleted: (res.rowsAffected && res.rowsAffected[0]) || 0 }
 }
