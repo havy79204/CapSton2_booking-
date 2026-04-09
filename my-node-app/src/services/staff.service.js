@@ -561,10 +561,12 @@ async function buildRatingAggregationSql(period) {
     return 'LEFT JOIN (SELECT CAST(NULL AS NVARCHAR(50)) AS StaffId, CAST(0 AS FLOAT) AS AverageRating, CAST(0 AS INT) AS RatingCount WHERE 1=0) ratingAgg ON ratingAgg.StaffId = s.StaffId'
   }
 
-  const [hasRating, hasBookingId, hasBookingServiceId] = await Promise.all([
+  const [hasRating, hasBookingId, hasBookingServiceId, hasReviewServiceId, hasBookingServiceServiceId] = await Promise.all([
     columnExists('SalonReviews', 'Rating'),
     columnExists('SalonReviews', 'BookingId'),
     columnExists('SalonReviews', 'BookingServiceId'),
+    columnExists('SalonReviews', 'ServiceId'),
+    columnExists('BookingServices', 'ServiceId'),
   ])
 
   if (!hasRating || (!hasBookingId && !hasBookingServiceId)) {
@@ -581,34 +583,99 @@ async function buildRatingAggregationSql(period) {
     : '1 = 0'
 
   const byBookingPredicate = hasBookingId
-    ? 'bs2.BookingId = sr.BookingId'
+    ? 'bs3.BookingId = sr.BookingId'
     : '1 = 0'
+
+  const byBookingAndServicePredicate = hasBookingId && hasReviewServiceId && hasBookingServiceServiceId
+    ? 'bs2.BookingId = sr.BookingId AND bs2.ServiceId = sr.ServiceId'
+    : '1 = 0'
+
+  const bookingFallbackNoServiceMatchPredicate = hasReviewServiceId && hasBookingServiceServiceId
+    ? `(
+         sr.ServiceId IS NULL
+         OR NOT EXISTS (
+           SELECT 1
+           FROM BookingServices bsx
+           WHERE bsx.BookingId = sr.BookingId
+             AND bsx.ServiceId = sr.ServiceId
+             AND bsx.StaffId IS NOT NULL
+         )
+       )`
+    : '1 = 1'
+
+  const branchByBookingServiceSql = hasBookingServiceId
+    ? `
+      SELECT
+        sr.ReviewId,
+        bs1.StaffId,
+        TRY_CONVERT(FLOAT, sr.Rating) AS Rating
+      FROM SalonReviews sr
+      INNER JOIN BookingServices bs1
+        ON ${byServicePredicate}
+      WHERE sr.BookingServiceId IS NOT NULL
+        AND bs1.StaffId IS NOT NULL
+        AND TRY_CONVERT(FLOAT, sr.Rating) IS NOT NULL
+        ${reviewRangeCondition}`
+    : ''
+
+  const branchByBookingAndServiceSql = hasBookingId && hasReviewServiceId && hasBookingServiceServiceId
+    ? `
+      SELECT
+        sr.ReviewId,
+        bs2.StaffId,
+        TRY_CONVERT(FLOAT, sr.Rating) AS Rating
+      FROM SalonReviews sr
+      INNER JOIN BookingServices bs2
+        ON ${byBookingAndServicePredicate}
+      WHERE sr.BookingServiceId IS NULL
+        AND sr.BookingId IS NOT NULL
+        AND sr.ServiceId IS NOT NULL
+        AND bs2.StaffId IS NOT NULL
+        AND TRY_CONVERT(FLOAT, sr.Rating) IS NOT NULL
+        ${reviewRangeCondition}`
+    : ''
+
+  const branchByBookingFallbackSql = hasBookingId
+    ? `
+      SELECT
+        sr.ReviewId,
+        bs3.StaffId,
+        TRY_CONVERT(FLOAT, sr.Rating) AS Rating
+      FROM SalonReviews sr
+      INNER JOIN BookingServices bs3
+        ON ${byBookingPredicate}
+      WHERE sr.BookingServiceId IS NULL
+        AND sr.BookingId IS NOT NULL
+        AND ${bookingFallbackNoServiceMatchPredicate}
+        AND bs3.StaffId IS NOT NULL
+        AND TRY_CONVERT(FLOAT, sr.Rating) IS NOT NULL
+        ${reviewRangeCondition}`
+    : ''
+
+  const reviewStaffBranches = [
+    branchByBookingServiceSql,
+    branchByBookingAndServiceSql,
+    branchByBookingFallbackSql,
+  ].filter(Boolean)
+
+  if (reviewStaffBranches.length === 0) {
+    return 'LEFT JOIN (SELECT CAST(NULL AS NVARCHAR(50)) AS StaffId, CAST(0 AS FLOAT) AS AverageRating, CAST(0 AS INT) AS RatingCount WHERE 1=0) ratingAgg ON ratingAgg.StaffId = s.StaffId'
+  }
+
+  const reviewStaffUnionSql = reviewStaffBranches.join('\n      UNION ALL\n')
 
   return `
     LEFT JOIN (
       SELECT
-        COALESCE(staffByService.StaffId, staffByBooking.StaffId) AS StaffId,
-        AVG(TRY_CONVERT(FLOAT, sr.Rating)) AS AverageRating,
+        mappedRaw.StaffId,
+        AVG(mappedRaw.Rating) AS AverageRating,
         COUNT(1) AS RatingCount
-      FROM SalonReviews sr
-      OUTER APPLY (
-        SELECT TOP 1 bs1.StaffId
-        FROM BookingServices bs1
-        WHERE ${byServicePredicate}
-          AND bs1.StaffId IS NOT NULL
-      ) staffByService
-      OUTER APPLY (
-        SELECT TOP 1 bs2.StaffId
-        FROM BookingServices bs2
-        WHERE sr.BookingServiceId IS NULL
-          AND ${byBookingPredicate}
-          AND bs2.StaffId IS NOT NULL
-        ORDER BY bs2.BookingServiceId
-      ) staffByBooking
-      WHERE TRY_CONVERT(FLOAT, sr.Rating) IS NOT NULL
-        AND COALESCE(staffByService.StaffId, staffByBooking.StaffId) IS NOT NULL
-        ${reviewRangeCondition}
-      GROUP BY COALESCE(staffByService.StaffId, staffByBooking.StaffId)
+      FROM (
+${reviewStaffUnionSql}
+      ) mappedRaw
+      WHERE mappedRaw.StaffId IS NOT NULL
+        AND mappedRaw.Rating IS NOT NULL
+      GROUP BY mappedRaw.StaffId
     ) ratingAgg ON ratingAgg.StaffId = s.StaffId`
 }
 
