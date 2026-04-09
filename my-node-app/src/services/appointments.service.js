@@ -120,74 +120,103 @@ async function applyCommissionForCompletedBooking(bookingId, staffId) {
 }
 
 async function listAppointments() {
-  const result = await query(
-    `SELECT 
-    b.BookingId,
-    b.CustomerUserId,
-    b.BookingTime,
-    b.Status AS BookingStatus,
-    b.Notes,
-    cu.Name AS CustomerName,
+  console.log('[DEBUG] listAppointments: Fetching real data...');
 
-    -- SERVICE NAMES
-    ISNULL((
-        SELECT TOP 1 STUFF((
-            SELECT ', ' + sv.Name
-            FROM BookingServices bs2
-            JOIN Services sv ON sv.ServiceId = bs2.ServiceId
-            WHERE bs2.BookingId = b.BookingId
-            ORDER BY sv.Name
-            FOR XML PATH(''), TYPE
-        ).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
-    ), 'No Service') AS AllServices,
+  try {
+    // Query chính - dùng subquery để lấy thông tin tổng hợp
+    const result = await query(
+      `SELECT TOP 100
+          b.BookingId,
+          b.CustomerUserId,
+          b.BookingTime,
+          b.Status AS BookingStatus,
+          b.Notes,
+          cu.Name AS CustomerName,
+          -- Lấy danh sách dịch vụ qua subquery
+          ISNULL((
+            SELECT STRING_AGG(COALESCE(sv.Name, 'Unknown'), ', ') 
+            FROM BookingServices bs 
+            LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId 
+            WHERE bs.BookingId = b.BookingId
+          ), 'No Service') AS FirstService,
+          -- Lấy danh sách ServiceIds cho edit
+          (
+            SELECT STRING_AGG(bs.ServiceId, ',')
+            FROM BookingServices bs
+            WHERE bs.BookingId = b.BookingId
+          ) AS ServiceIds,
+          -- Tổng giá
+          ISNULL((
+            SELECT SUM(COALESCE(bs.Price, sv.Price, 0))
+            FROM BookingServices bs
+            LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+            WHERE bs.BookingId = b.BookingId
+          ), 0) AS Price,
+          -- Tổng thời gian
+          ISNULL((
+            SELECT SUM(COALESCE(sv.DurationMinutes, 30))
+            FROM BookingServices bs
+            LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
+            WHERE bs.BookingId = b.BookingId
+          ), 30) AS TotalDuration,
+          -- Staff info
+          (SELECT TOP 1 bs.StaffId FROM BookingServices bs WHERE bs.BookingId = b.BookingId) AS StaffIdResolved,
+          (SELECT TOP 1 su.Name 
+           FROM BookingServices bs 
+           JOIN Staff st ON st.StaffId = bs.StaffId
+           JOIN Users su ON su.UserId = st.UserId
+           WHERE bs.BookingId = b.BookingId) AS StaffName,
+          -- Invoice info
+          ISNULL((SELECT TOP 1 i.DiscountAmount FROM Invoices i WHERE i.BookingId = b.BookingId ORDER BY i.CreatedAt DESC), 0) AS Discount,
+          ISNULL((SELECT TOP 1 i.FinalAmount FROM Invoices i WHERE i.BookingId = b.BookingId ORDER BY i.CreatedAt DESC), 
+            ISNULL((SELECT SUM(COALESCE(bs.Price, sv.Price, 0)) FROM BookingServices bs LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId WHERE bs.BookingId = b.BookingId), 0)
+          ) AS TotalPrice
+       FROM Bookings b
+       LEFT JOIN Users cu ON cu.UserId = b.CustomerUserId
+       ORDER BY b.BookingTime DESC`
+    );
 
-    -- SERVICE IDS
-    ISNULL((
-        SELECT STUFF((
-            SELECT ',' + CAST(bs2.ServiceId AS NVARCHAR(50))
-            FROM BookingServices bs2
-            WHERE bs2.BookingId = b.BookingId
-            ORDER BY bs2.ServiceId
-            FOR XML PATH(''), TYPE
-        ).value('.', 'NVARCHAR(MAX)'), 1, 1, '')
-    ), '') AS ServiceIds,
+    // Mapping dữ liệu chuẩn để Frontend nhận diện được biến 'discount'
+    return (result.recordset || []).map(row => {
+      const mapped = toAppointmentListItem(row);
+      
+      // Parse ServiceIds string thành array
+      const serviceIdsString = row.ServiceIds || '';
+      const serviceIdsArray = serviceIdsString ? serviceIdsString.split(',').filter(Boolean) : [];
+      
+      return {
+        ...mapped,
+        serviceIds: serviceIdsArray, // Giữ lại cho edit form
+        service: row.FirstService || 'No Service', // Tên dịch vụ đã join
+        duration: Number(row.TotalDuration || 30), // Duration tổng
+        customerName: row.CustomerName,
+        staffName: row.StaffName,
+        price: Number(row.Price || 0),
+        discount: Number(row.Discount || 0),
+        discountType: 'fixed',
+        totalPrice: Number(row.TotalPrice || 0)
+      };
+    });
+  } catch (error) {
+    console.error('[ERROR] listAppointments failed:', error.message);
+    throw error;
+  }
+}
 
-    -- TOTAL DURATION
-    ISNULL((
-        SELECT SUM(ISNULL(sv2.DurationMinutes, 0))
-        FROM BookingServices bs3
-        JOIN Services sv2 ON sv2.ServiceId = bs3.ServiceId
-        WHERE bs3.BookingId = b.BookingId
-    ), 30) AS TotalDuration,
-
-    st.StaffId AS StaffIdResolved,
-    su.Name AS StaffName
-
-FROM Bookings b
-LEFT JOIN Users cu ON cu.UserId = b.CustomerUserId
-OUTER APPLY (
-    SELECT TOP 1 StaffId FROM BookingServices WHERE BookingId = b.BookingId
-) bs_ref
-LEFT JOIN Staff st ON st.StaffId = bs_ref.StaffId
-LEFT JOIN Users su ON su.UserId = st.UserId
-ORDER BY b.BookingTime DESC`
-  );
-
-  // Phải map qua toAppointmentListItem để Frontend nhận đúng format
-  return (result.recordset || []).map(row => {
-    const mapped = toAppointmentListItem(row);
-
-    return {
-      ...mapped,
-      serviceIds: row.ServiceIds
-        ? row.ServiceIds.split(',').map(id => String(id).trim()).filter(Boolean)
-        : []
-    };
-  });
+async function staffSupportsService(staffId, serviceId) {
+  console.log(`[DEBUG] Checking if staff ${staffId} supports service ${serviceId}`)
+  const res = await query(
+    `SELECT 1 FROM StaffSkills 
+     WHERE StaffId = @staffId AND ServiceId = @serviceId`,
+    { staffId, serviceId }
+  )
+  const hasSkill = res.recordset?.length > 0
+  console.log(`[DEBUG] Result: ${hasSkill ? 'YES' : 'NO'}`)
+  return hasSkill
 }
 
 async function createAppointment(payload) {
-  const { customerUserId, serviceIds, staffId, date, time, notes, status } = payload || {}
+  const { customerUserId, serviceIds, staffId, date, time, notes, status, promotionCode } = payload || {}
   const statusToSave = normalizeAppointmentStatus(status)
 
 if (!Array.isArray(serviceIds) || serviceIds.length === 0) {
@@ -199,6 +228,32 @@ if (!Array.isArray(serviceIds) || serviceIds.length === 0) {
     err.status = 400
     throw err
   }
+
+  // ===== VALIDATE: Cannot book past dates =====
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const bookingDateOnly = new Date(when)
+  bookingDateOnly.setHours(0, 0, 0, 0)
+  
+  if (bookingDateOnly < today) {
+    const err = new Error('Cannot book for past dates. Please select today or a future date.')
+    err.status = 400
+    throw err
+  }
+  
+  // ===== VALIDATE STAFF CAN PERFORM ALL SERVICES =====
+  console.log(`[DEBUG] Validating ${serviceIds.length} services for staff ${staffId}`)
+  for (const serviceId of serviceIds) {
+    const canPerform = await staffSupportsService(staffId, serviceId)
+    if (!canPerform) {
+      console.log(`[DEBUG] Validation FAILED for service ${serviceId}`)
+      const err = new Error('Selected specialist does not match the chosen service')
+      err.status = 400
+      throw err
+    }
+  }
+  console.log(`[DEBUG] All services validated successfully`)
+  
   // ===== TÍNH TOTAL DURATION (NHIỀU SERVICE) =====
 const services = await query(
   `SELECT DurationMinutes 
@@ -255,6 +310,31 @@ await query(
 )
 
 // Loop insert services
+let resolvedPromotionId = null
+  
+  // Process promotion code if provided
+  if (promotionCode) {
+    console.log('[DEBUG] Processing promotion code:', promotionCode)
+    try {
+      const promoResult = await query(
+        `SELECT PromotionId, DiscountValue, DiscountType, Status 
+         FROM Promotions 
+         WHERE Code = @code AND Status = 'ACTIVE' 
+         AND GETDATE() BETWEEN StartDate AND EndDate`,
+        { code: promotionCode }
+      )
+      
+      if (promoResult.recordset?.length > 0) {
+        resolvedPromotionId = promoResult.recordset[0].PromotionId
+        console.log('[DEBUG] Found valid promotion:', promoResult.recordset[0])
+      } else {
+        console.log('[DEBUG] No valid promotion found for code:', promotionCode)
+      }
+    } catch (err) {
+      console.error('[DEBUG] Error processing promotion code:', err.message)
+    }
+  }
+  
 for (let serviceId of serviceIds) {
   const svc = await query(
     'SELECT Price FROM Services WHERE ServiceId = @serviceId',
@@ -263,14 +343,15 @@ for (let serviceId of serviceIds) {
 
   await query(
     `INSERT INTO BookingServices 
-     (BookingServiceId, BookingId, ServiceId, StaffId, Price)
-     VALUES (@id, @bookingId, @serviceId, @staffId, @price)`,
+     (BookingServiceId, BookingId, ServiceId, StaffId, Price, PromotionId)
+     VALUES (@id, @bookingId, @serviceId, @staffId, @price, @promotionId)`,
     {
       id: newId(),
       bookingId,
       serviceId,
       staffId,
-      price: svc.recordset?.[0]?.Price ?? 0
+      price: svc.recordset?.[0]?.Price ?? 0,
+      promotionId: resolvedPromotionId
     }
   )
 }
@@ -345,6 +426,18 @@ async function updateAppointment(bookingId, payload) {
     const err = new Error('Invalid datetime')
     err.status = 400
     throw err
+  }
+
+  // ===== VALIDATE STAFF CAN PERFORM ALL SERVICES (for updates too) =====
+  if (Array.isArray(serviceIds) && serviceIds.length > 0) {
+    for (const serviceId of serviceIds) {
+      const canPerform = await staffSupportsService(staffId, serviceId)
+      if (!canPerform) {
+        const err = new Error('Selected specialist does not match the chosen service')
+        err.status = 400
+        throw err
+      }
+    }
   }
 
   // ===== CHECK EXIST =====

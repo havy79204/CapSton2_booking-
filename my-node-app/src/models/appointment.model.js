@@ -22,7 +22,7 @@ function toAppointmentListItem(row) {
     customerUserId: row.CustomerUserId,
     staffId: row.StaffIdResolved,
 
-    service: row.AllServices || 'No Service',
+    service: row.AllServices || row.FirstService || 'No Service',
     duration: Number(row.TotalDuration || 30),
 
     customer: row.CustomerName || 'Khách hàng',
@@ -32,7 +32,13 @@ function toAppointmentListItem(row) {
 
     time: timeValue,
     date: dateValue,
-    bookingTime: row.BookingTime
+    bookingTime: row.BookingTime,
+    
+    // Preserve price fields if they exist
+    price: row.Price ? Number(row.Price) : undefined,
+    discount: row.Discount ? Number(row.Discount) : undefined,
+    discountType: row.DiscountType,
+    totalPrice: row.TotalPrice ? Number(row.TotalPrice) : undefined
   }
 }
 
