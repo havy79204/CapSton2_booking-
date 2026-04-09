@@ -1,4 +1,5 @@
 const { query } = require('../config/query')
+const attendanceService = require('./attendance.service')
 const { getSettingsMap } = require('./settings.service')
 
 function monthStart(date) {
@@ -66,26 +67,47 @@ async function getMonthMetrics(staffId, startAt, endAt, tiers) {
         ),
         query(
             `SELECT SUM(CASE
-          WHEN ISNULL(sa.EndHour, 0) > ISNULL(sa.StartHour, 0) THEN ISNULL(sa.EndHour, 0) - ISNULL(sa.StartHour, 0)
+          WHEN ISNULL(TRY_CONVERT(FLOAT, sa.DurationHours), 0) > 0 THEN ISNULL(TRY_CONVERT(FLOAT, sa.DurationHours), 0)
+          WHEN TRY_CONVERT(FLOAT, sa.EndHour) > TRY_CONVERT(FLOAT, sa.StartHour)
+            THEN TRY_CONVERT(FLOAT, sa.EndHour) - TRY_CONVERT(FLOAT, sa.StartHour)
           ELSE 0
         END) AS Hours
-       FROM StaffAvailability sa
+       FROM StaffShifts sa
        WHERE sa.StaffId = @staffId
-         AND sa.WeekStartDate >= @startAt
-         AND sa.WeekStartDate < @endAt`, { staffId, startAt, endAt },
+         AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) >= @startAt
+         AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) < @endAt`, { staffId, startAt, endAt },
         ).catch(() => ({ recordset: [{ Hours: 0 }] })),
         query(
-            `SELECT COUNT(DISTINCT CAST(sa.WeekStartDate AS DATE)) AS Days
-       FROM StaffAvailability sa
+            `SELECT COUNT(DISTINCT DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE))) AS Days
+       FROM StaffShifts sa
        WHERE sa.StaffId = @staffId
-         AND sa.WeekStartDate >= @startAt
-         AND sa.WeekStartDate < @endAt`, { staffId, startAt, endAt },
+         AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) >= @startAt
+         AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) < @endAt`, { staffId, startAt, endAt },
         ).catch(() => ({ recordset: [{ Days: 0 }] })),
     ])
 
     const totalAppointments = Number(appointmentsRes.recordset?.[0]?.TotalAppointments || 0)
     const revenue = Number(revenueRes.recordset?.[0]?.Revenue || 0)
-    const totalHours = Number(hoursRes.recordset?.[0]?.Hours || 0)
+    let totalHours = Number(hoursRes.recordset?.[0]?.Hours || 0)
+    // Prefer Attendance Report totalHours when available (actual time logs)
+    try {
+      const toIsoDateOnly = (d) => {
+        const dt = new Date(d)
+        const y = dt.getFullYear()
+        const m = String(dt.getMonth() + 1).padStart(2, '0')
+        const day = String(dt.getDate()).padStart(2, '0')
+        return `${y}-${m}-${day}`
+      }
+      const startDateText = toIsoDateOnly(startAt)
+      const endDateText = toIsoDateOnly(new Date(endAt.getTime() - 1))
+      const attendanceRows = await attendanceService.getAttendanceReport(undefined, startDateText, endDateText)
+      const myRow = (attendanceRows || []).find(r => String(r.StaffId || r.StaffIdText || '').trim() === String(staffId).trim())
+      if (myRow && Number(myRow.TotalHours || 0) > 0) {
+        totalHours = Number(myRow.TotalHours || 0)
+      }
+    } catch (err) {
+      // fallback to StaffShifts-derived hours on error
+    }
     const workDays = Number(daysRes.recordset?.[0]?.Days || 0)
 
     let tips = 0

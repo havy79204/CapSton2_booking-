@@ -21,12 +21,14 @@ function toStaffListItem(row) {
   const totalBookings = Number(row.TotalBookings || 0)
   const workingHours = Number(row.WorkingHours || 0)
   const rating = Number(row.AverageRating || 0)
+  const ratingCount = Number(row.RatingCount || 0)
   const totalCommissionRevenue = Number(row.TotalCommissionRevenue || 0)
   const normalizedWorkingHours = Number.isFinite(workingHours) ? Math.round(workingHours * 100) / 100 : 0
   const normalizedCommissionRevenue = Number.isFinite(totalCommissionRevenue) ? totalCommissionRevenue : 0
   // Commission will be calculated in staff.service based on revenue and tier settings
   const totalCommission = 0 // Will be set by staff.service after calculating tiers
-  const totalSalary = (normalizedWorkingHours * STAFF_HOURLY_RATE_VND) + totalCommission
+  const salary = normalizedWorkingHours * STAFF_HOURLY_RATE_VND
+  const totalRevenue = salary + totalCommission
 
   return {
     id: row.StaffId,
@@ -45,8 +47,10 @@ function toStaffListItem(row) {
     workingHours: normalizedWorkingHours,
     totalCommissionRevenue: normalizedCommissionRevenue,
     totalCommission: 0,
-    totalSalary: Number.isFinite(totalSalary) ? Math.round(totalSalary) : 0,
+    salary: Number.isFinite(salary) ? Math.round(salary) : 0,
+    totalRevenue: Number.isFinite(totalRevenue) ? Math.round(totalRevenue) : 0,
     rating: Number.isFinite(rating) ? Math.round(rating * 10) / 10 : 0,
+    ratingCount: Number.isFinite(ratingCount) ? Math.max(0, Math.trunc(ratingCount)) : 0,
   }
 }
 

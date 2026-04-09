@@ -67,7 +67,8 @@ async function deletePaymentsAndInvoicesByReference(referenceIdInput, invoiceRef
 async function notifyPaymentResult(orderIdInput, isSuccess, reason = '') {
   const referenceId = String(orderIdInput || '').trim()
   if (!referenceId) return
-
+  // Only notify on successful payments. Failed payments should not trigger notifications.
+  if (!isSuccess) return
   try {
     const orderRes = await query(
       `SELECT TOP 1 OrderId, UserId

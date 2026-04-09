@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { ScrollView, View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { get } from '@/services/apiClient';
+import { Link } from 'expo-router';
 import Card from '@/components/ui/card';
 import Avatar from '@/components/ui/avatar';
 import { BarChart, DonutLegend } from '@/components/ui/chart';
@@ -11,6 +12,7 @@ import { subscribeStaffDataUpdates } from '../../lib/realtime';
 const LIVE_REFRESH_MS = 5000;
 
 export default function HomeScreen() {
+  
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<any[]>([])
   const [todaySchedule, setTodaySchedule] = useState<any[]>([])
@@ -135,6 +137,12 @@ export default function HomeScreen() {
         ))}
       </View>
 
+      <View style={{ paddingHorizontal: 12, marginTop: 8 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+          <Link href="/checkin" style={{ color: '#2563eb', fontWeight: '700' }}>Check-in / Check-out</Link>
+        </View>
+      </View>
+
       <View style={styles.section}>
         <Card>
           <Text style={styles.sectionTitle}>Lịch làm hôm nay</Text>
@@ -172,7 +180,20 @@ export default function HomeScreen() {
         <Card>
           <Text style={styles.sectionTitle}>Số lịch hẹn 7 ngày gần nhất</Text>
           <BarChart
-            data={['T2','T3','T4','T5','T6','T7','CN'].map((d, i) => ({ label: d, value: weekly[i] }))}
+            data={(() => {
+              // Build labels for the last 7 days aligning with `weekly` indices.
+              // Assume `weekly[0]` is oldest (6 days ago) and `weekly[6]` is today.
+              const labels: string[] = []
+              const dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
+              const today = new Date()
+              for (let i = 0; i < 7; i++) {
+                const d = new Date(today)
+                d.setDate(today.getDate() - (6 - i))
+                const wd = d.getDay() // 0 = Sun
+                labels.push(dayNames[wd])
+              }
+              return labels.map((label, i) => ({ label, value: weekly[i] }))
+            })()}
             height={140}
           />
           <Text style={styles.summaryText}>Tổng lịch hẹn 7 ngày qua: {weeklyTotalAppointments}</Text>

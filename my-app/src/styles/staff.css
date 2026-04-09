@@ -1,7 +1,11 @@
 /* Staff - Beautiful Modern Theme */
 .staff-page {
   background: transparent;
-  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family:
+    "Segoe UI",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
 }
 
 /* Dashboard Cards */
@@ -46,7 +50,7 @@
   border-radius: 14px;
   display: grid;
   place-items: center;
-  background: rgba(255, 127, 80, 0.10);
+  background: rgba(255, 127, 80, 0.1);
   color: #ff7f50;
   flex: 0 0 46px;
 }
@@ -134,66 +138,90 @@
 
 /* Table header sort */
 .staff-page .staff-sortHeader {
-  display: inline-flex;
+  width: 100%;
+  display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .staff-page .staff-sortToggle {
-  border: none;
-  background: #fff8f0;
-  padding: 2px 6px;
-  border-radius: 4px;
-  cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  color: #ff8c00;
-  font-weight: 500;
-  width: auto;
-  height: auto;
+  width: 18px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid #e98b36;
+  background: #fff7ef;
   display: inline-flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
-  gap: 2px;
-  font-size: 12px;
+  gap: 1px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 2px 0;
 }
 
 .staff-page .staff-sortToggle:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-  background: #ff8c00;
-  color: #fff;
+  border-color: #d96b0d;
+  background: #ffe8d2;
+  box-shadow: 0 4px 10px rgba(217, 107, 13, 0.28);
 }
 
 .staff-page .staff-sortTriangle {
-  width: 0;
-  height: 0;
-  opacity: 0.25;
-}
-
-.staff-page .staff-sortTriangle.up {
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-bottom: 8px solid #ff7f50;
-}
-
-.staff-page .staff-sortTriangle.down {
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-top: 8px solid #ff7f50;
+  display: block;
+  width: 10px;
+  height: 8px;
+  line-height: 8px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 900;
+  color: #c35c08;
+  opacity: 0.9;
+  transition:
+    opacity 0.2s ease,
+    color 0.2s ease;
 }
 
 .staff-page .staff-sortTriangle.is-active {
   opacity: 1;
 }
 
+.staff-page .staff-sortTriangle.up.is-active {
+  color: #ff6a00;
+}
+
+.staff-page .staff-sortTriangle.down.is-active {
+  color: #ff6a00;
+}
+
 .staff-page .staff-avatarImage {
-  width: 42px;
-  height: 42px;
+  width: 54px;
+  height: 54px;
   border-radius: 999px;
   object-fit: cover;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #ffd7ba;
   background: #fff;
+  box-shadow: 0 5px 14px rgba(255, 127, 80, 0.15);
+  box-sizing: border-box;
+  padding: 2px;
+  display: block;
+}
+
+.staff-page .staff-avatarFallback {
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #ffd7ba;
+  background: linear-gradient(145deg, #ffd8bd, #ffb688);
+  color: #8a3b0d;
+  font-size: 16px;
+  font-weight: 900;
+  box-shadow: 0 5px 14px rgba(255, 127, 80, 0.15);
+  box-sizing: border-box;
+  padding: 2px;
 }
 
 .staff-page .staff-name {
@@ -206,6 +234,18 @@
   font-size: 12px;
   font-weight: 700;
   color: rgba(17, 24, 39, 0.62);
+}
+
+.staff-page .staff-ratingValue {
+  display: inline;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+.staff-page .staff-ratingValue.is-empty {
+  color: inherit;
 }
 
 .staff-page .staff-emptyRow {
@@ -284,9 +324,220 @@
 }
 
 .staff-detailStatusBadge.is-inactive {
-  background: rgba(239, 68, 68, 0.10);
+  background: rgba(239, 68, 68, 0.1);
   color: rgba(220, 38, 38, 1);
   border: 1px solid rgba(239, 68, 68, 0.18);
+}
+
+.staff-detailAvatarWrap {
+  width: 94px;
+  height: 94px;
+  border-radius: 999px;
+  overflow: hidden;
+  padding: 3px;
+  background: linear-gradient(135deg, #ffe5d1, #ffc89e);
+  box-shadow: 0 10px 24px rgba(255, 127, 80, 0.2);
+  display: grid;
+  place-items: center;
+}
+
+.staff-detailAvatar {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 50% !important;
+  object-fit: cover;
+  display: block;
+  background: #fff;
+}
+
+.staff-detailAvatarFallback {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 50% !important;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, #ffd8bf, #ffb07b);
+  color: #8a3b0d;
+  font-weight: 900;
+  font-size: 30px;
+}
+
+.staff-addModal .portal-modal,
+.staff-detailModal .portal-modal {
+  width: min(760px, 94vw);
+  max-height: 88vh;
+  cursor: default;
+  border: 1px solid #edd6bf;
+  background: linear-gradient(180deg, #fffdfa 0%, #fff5eb 100%);
+  box-shadow: 0 24px 50px rgba(96, 54, 23, 0.2);
+}
+
+.staff-addModalBody,
+.staff-detailModalBody {
+  padding-top: 10px !important;
+}
+
+.staff-detailForm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.staff-detailHero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px;
+  border: 1px solid #efdcc9;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #fffaf4, #ffeedd);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.staff-detailAvatarBlock {
+  flex: 0 0 auto;
+}
+
+.staff-detailHeroInfo {
+  min-width: 0;
+  flex: 1;
+}
+
+.staff-detailTopRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.staff-detailName {
+  font-size: 26px;
+  line-height: 1.2;
+  color: #17212e;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.staff-detailRole {
+  margin-top: 5px;
+  color: #8c5a32;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.staff-detailSection {
+  background: #ffffff;
+  border: 1px solid #efdfce;
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 5px 14px rgba(156, 99, 56, 0.08);
+}
+
+.staff-detailSectionTitle {
+  margin-bottom: 12px;
+  color: #6e3f1b;
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.staff-detailGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.staff-detailFieldFull {
+  width: 100%;
+}
+
+.staff-detailTextarea {
+  min-height: 94px;
+  resize: vertical;
+}
+
+.staff-addModal .portal-label,
+.staff-detailModal .portal-label {
+  color: #374151 !important;
+  font-weight: 700 !important;
+}
+
+.staff-addModal .portal-input,
+.staff-addModal .portal-select,
+.staff-addModal .portal-textarea,
+.staff-detailModal .portal-input,
+.staff-detailModal .portal-select,
+.staff-detailModal .portal-textarea {
+  background: #ffffff;
+  color: #111827;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-weight: 650;
+  font-size: 14px;
+  outline: none;
+  box-shadow: none;
+}
+
+.staff-addModal .portal-input:focus-visible,
+.staff-addModal .portal-select:focus-visible,
+.staff-addModal .portal-textarea:focus-visible,
+.staff-detailModal .portal-input:focus-visible,
+.staff-detailModal .portal-select:focus-visible,
+.staff-detailModal .portal-textarea:focus-visible {
+  border-color: #000000 !important;
+  box-shadow: 0 0 0 3px rgba(255, 123, 0, 0.15) !important;
+}
+
+.staff-detailModal .portal-input[readonly],
+.staff-detailModal .portal-input:read-only,
+.staff-detailModal .portal-textarea[readonly],
+.staff-detailModal .portal-textarea:read-only {
+  background: #ffffff !important;
+  color: #303a48 !important;
+}
+
+.staff-detailStatusBadge {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.staff-detailSpecialty .portal-specialtyGrid {
+  padding: 6px;
+  border: 1px solid #ecd7c2;
+  border-radius: 12px;
+  background: #fffbf6;
+}
+
+.staff-addModal .portal-modalBtn,
+.staff-addModal .portal-modalBtnPrimary,
+.staff-detailModal .portal-modalBtn,
+.staff-detailModal .portal-modalBtnPrimary {
+  border-radius: 10px !important;
+}
+
+@media (max-width: 760px) {
+  .staff-detailGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .staff-detailHero {
+    align-items: flex-start;
+  }
+
+  .staff-detailName {
+    font-size: 20px;
+  }
+}
+
+/* Field error text styling */
+.staff-fieldErrorText {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #dc2626;
 }
 
 /* Responsive */

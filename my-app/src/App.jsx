@@ -11,10 +11,12 @@ import OwnerProductsPage from './pages/portals/OwnerProductsPage.jsx'
 import OwnerOrdersPage from './pages/portals/OwnerOrdersPage.jsx'
 import OwnerCustomersPage from './pages/portals/OwnerCustomersPage.jsx'
 import OwnerReportsPage from './pages/portals/OwnerReportsPage.jsx'
+import AttendanceReportPage from './pages/portals/AttendanceReportPage.jsx'
 import OwnerSettingsPage from './pages/portals/OwnerSettingsPage.jsx'
 import OwnerNotificationsPage from './pages/portals/OwnerNotificationsPage.jsx'
 import OwnerChatPage from './pages/portals/OwnerChatPage.jsx'
 import OwnerCustomerDetailPage from './pages/portals/OwnerCustomerDetailPage.jsx'
+import PendingRequestsPage from './pages/portals/pending-requests.jsx'
 import StaffPortalLayout from './components/Layout portal/StaffPortalLayout.jsx'
 import StaffAppointmentsPage from './pages/portals/staff/StaffAppointmentsPage.jsx'
 import StaffSchedulePage from './pages/portals/staff/StaffSchedulePage.jsx'
@@ -124,6 +126,7 @@ function App() {
           </RequireAuth>
         }
       >
+        <Route path="pending-requests" element={<PendingRequestsPage />} />
         <Route path="dashboard" element={<OwnerDashboardPage />} />
         <Route path="appointments" element={<OwnerAppointmentsPage />} />
         <Route path="schedule" element={<OwnerSchedulePage />} />
@@ -135,6 +138,7 @@ function App() {
         <Route path="customers" element={<OwnerCustomersPage />} />
         <Route path="customers/:customerId" element={<OwnerCustomerDetailPage />} />
         <Route path="reports" element={<OwnerReportsPage />} />
+        <Route path="attendance-report" element={<AttendanceReportPage />} />
         <Route path="settings" element={<OwnerSettingsPage />} />
         <Route path="notifications" element={<OwnerNotificationsPage />} />
         <Route path="chat" element={<OwnerChatPage />} />

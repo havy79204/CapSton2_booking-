@@ -41,7 +41,10 @@ const getStaff = asyncHandler(async (req, res) => {
     .filter(Boolean)
   const selectedDate = String(req.query?.date || '').trim()
 
-  console.log('[DEBUG] getStaff:', { serviceIds, selectedDate, query: req.query })
+  // Debug output can be silenced by setting environment variable `SILENT_LOGS=1`
+  if (!(String(process.env.SILENT_LOGS || '').trim() === '1')) {
+    console.log('[DEBUG] getStaff:', { serviceIds, selectedDate, query: req.query })
+  }
 
   const data = await commerceService.listAvailableStaff(serviceIds, selectedDate)
   res.json({ ok: true, data, debug: { selectedDate, serviceIds } })
@@ -112,8 +115,57 @@ const postCancelBooking = asyncHandler(async (req, res) => {
 
 const postBookingRating = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
-  const { bookingId, rating, comment } = req.body || {}
-  const data = await commerceService.rateBooking(userId, bookingId, rating, comment)
+  const { bookingId, rating, comment, images, imageDataUrls, reviewImages } = req.body || {}
+  const data = await commerceService.rateBooking(
+    userId,
+    bookingId,
+    rating,
+    comment,
+    images || imageDataUrls || reviewImages,
+  )
+  res.status(201).json({ ok: true, data })
+})
+
+const postBookingServiceRating = asyncHandler(async (req, res) => {
+  const userId = getUserIdFromReq(req)
+  const { bookingId, bookingServiceId } = req.params || {}
+  const { rating, comment, images, imageDataUrls, reviewImages } = req.body || {}
+  const data = await commerceService.rateBookingService(
+    userId,
+    bookingId,
+    bookingServiceId,
+    rating,
+    comment,
+    images || imageDataUrls || reviewImages,
+  )
+  res.status(201).json({ ok: true, data })
+})
+
+const postOrderRating = asyncHandler(async (req, res) => {
+  const userId = getUserIdFromReq(req)
+  const { orderId, rating, comment, images, imageDataUrls, reviewImages } = req.body || {}
+  const data = await commerceService.rateOrder(
+    userId,
+    orderId,
+    rating,
+    comment,
+    images || imageDataUrls || reviewImages,
+  )
+  res.status(201).json({ ok: true, data })
+})
+
+const postOrderItemRating = asyncHandler(async (req, res) => {
+  const userId = getUserIdFromReq(req)
+  const { orderId, orderItemId } = req.params || {}
+  const { rating, comment, images, imageDataUrls, reviewImages } = req.body || {}
+  const data = await commerceService.rateOrderItem(
+    userId,
+    orderId,
+    orderItemId,
+    rating,
+    comment,
+    images || imageDataUrls || reviewImages,
+  )
   res.status(201).json({ ok: true, data })
 })
 
@@ -176,6 +228,9 @@ module.exports = {
   getBookings,
   postBooking,
   postBookingRating,
+  postBookingServiceRating,
+  postOrderRating,
+  postOrderItemRating,
   getOrders,
   postCancelBooking,
   postCancelOrder,

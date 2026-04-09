@@ -1062,11 +1062,21 @@ async function getDetailedAvailabilityForDate(dateIso, windowStartHour = 9, wind
   if (staffIdFilter) binds.staffId = staffIdFilter
 
   const staffRes = await query(
-    `SELECT sa.StaffId, sa.StartHour, sa.EndHour, u.Name
-     FROM StaffAvailability sa
+    `SELECT sa.StaffId,
+            sa.StartHour,
+            (TRY_CONVERT(INT, sa.StartHour)
+              + ISNULL(TRY_CONVERT(INT, sa.DurationHours),
+                  CASE
+                    WHEN TRY_CONVERT(INT, sa.EndHour) > TRY_CONVERT(INT, sa.StartHour)
+                      THEN TRY_CONVERT(INT, sa.EndHour) - TRY_CONVERT(INT, sa.StartHour)
+                    ELSE 0
+                  END
+                )) AS EndHour,
+            u.Name
+     FROM StaffShifts sa
      LEFT JOIN Staff st ON st.StaffId = sa.StaffId
      LEFT JOIN Users u ON u.UserId = st.UserId
-     WHERE sa.WeekStartDate = @date
+     WHERE DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) = @date
      ${staffWhere}`,
     binds
   ).catch(() => ({ recordset: [] }))
@@ -1154,7 +1164,7 @@ async function findStaffByName(prompt) {
 function detectWindowFromPrompt(prompt = '') {
   const t = normalize(prompt)
   if (/sáng|sang|buổi sáng|sang mai|sáng mai/.test(t)) return { start: 9, end: 12 }
-  if (/chiều|chieu|buổi chiều/.test(t)) return { start: 13, end: 17 }
+  if (/chiều|chieu|buổi chiều/.test(t)) return { start: 13, end: 16 }
   if (/tối|toi|buổi tối/.test(t)) return { start: 18, end: 20 }
   return null
 }

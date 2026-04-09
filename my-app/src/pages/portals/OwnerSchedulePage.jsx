@@ -124,19 +124,91 @@ function StaffAvatar({ initial, avatarUrl, name }) {
 }
 
 function ShiftPill({ label, onClick }) {
-  const [startText] = String(label || '').split('-').map((part) => part.trim())
+  // label can be a string or an object containing metadata
+  const raw = label || ''
+  let display = String(raw)
+  let note = ''
+  let status = 'normal'
+  let startText = ''
+  if (typeof raw === 'object') {
+    display = raw.Label || raw.label || raw.time || String(raw)
+    note = raw.Note || raw.note || ''
+    status = raw.Status || raw.status || 'normal'
+    startText = (display || '').split('-')[0]?.trim()
+    // If this is an approved leave record, render as Off (red) regardless of time
+    const sLower = String(status || '').toLowerCase()
+    if (sLower === 'approved' || sLower === 'pending') {
+      // show Off as friendly label, keep original display in tooltip
+      startText = ''
+      display = raw.Label || raw.label || 'Off'
+    }
+  } else {
+    display = String(raw)
+    startText = display.split('-')[0]?.trim()
+    if (/REQUESTED/i.test(display) || /leave-request/i.test(display)) status = 'Pending'
+    if (/\bLEAVE\b/i.test(display) && !/REQUESTED/i.test(display)) status = 'Approved'
+  }
+
   const startMinutes = parseTimeToMinutes(startText)
-  const startHour = startMinutes === null ? 8 : Math.floor(startMinutes / 60)
+  const startHour = startMinutes === null ? (Number(startText) || 8) : Math.floor(startMinutes / 60)
   const toneClass = startHour < 12 ? 'portal-shiftPill--morning' : startHour < 16 ? 'portal-shiftPill--afternoon' : 'portal-shiftPill--evening'
 
+  const pending = String(status).toLowerCase() === 'pending'
+  const approved = String(status).toLowerCase() === 'approved'
+  const isLeave = pending || approved
+
+  const classes = [
+    'portal-shiftPill',
+    isLeave ? 'portal-shiftPill--leave' : toneClass,
+    pending ? 'border-2 border-dashed border-yellow-400 relative' : '',
+    approved ? 'bg-red-600 text-white cursor-not-allowed' : '',
+  ].join(' ')
+
+  // Map numeric startHour to friendly Vietnamese shift label when display looks like a time range
+  let friendlyLabel = display
+  if (isLeave) {
+    const normalizedDisplay = String(display || '').toLowerCase()
+    let shiftRange = ''
+    if (normalizedDisplay.includes('sáng') || normalizedDisplay.includes('sang') || normalizedDisplay.includes('morning')) {
+      shiftRange = '8-12'
+    } else if (normalizedDisplay.includes('chiều') || normalizedDisplay.includes('chieu') || normalizedDisplay.includes('afternoon')) {
+      shiftRange = '13-16'
+    } else if (normalizedDisplay.includes('tối') || normalizedDisplay.includes('toi') || normalizedDisplay.includes('evening')) {
+      shiftRange = '16-20'
+    }
+
+    friendlyLabel = shiftRange ? `${display} ${shiftRange} Off` : `${display} Off`
+  } else if (/^\d{1,2}:\d{2}/.test(display) || /^\d{1,2}\b/.test(display)) {
+  if (startHour < 12) friendlyLabel = 'Morning'
+  else if (startHour < 16) friendlyLabel = 'Afternoon'
+  else friendlyLabel = 'Evening'
+  }
+
   return (
-    <div className={`portal-shiftPill ${toneClass}`} onClick={onClick} style={{ cursor: 'pointer' }}>
+    <div className={classes} onClick={approved ? undefined : onClick} style={{ cursor: approved ? 'default' : 'pointer' }} title={note || ''}>
       <span className="portal-shiftPillIcon" aria-hidden="true">
         <IconClock />
       </span>
-      {label}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        {friendlyLabel}
+        {pending ? <span style={{ fontSize: 12 }} aria-hidden>⚠️</span> : null}
+      </span>
     </div>
   )
+}
+
+function detectShiftMeta(item) {
+  if (!item) return { status: 'normal', label: String(item || '') }
+  if (typeof item === 'object') {
+    const availabilityId = item.AvailabilityId || item.availabilityId || (item.meta && (item.meta.availabilityId || item.meta.AvailabilityId))
+    const startHour = item.StartHour || (item.meta && item.meta.startHour) || ''
+    const endHour = item.EndHour || (item.meta && item.meta.endHour) || ''
+    return { status: item.Status || item.status || 'normal', label: item.Label || item.label || item.time || String(item), note: item.Note || item.note || '', availabilityId, startHour, endHour }
+  }
+  const s = String(item)
+  if (/REQUESTED/i.test(s) || /leave-request/i.test(s)) return { status: 'Pending', label: s, note: s }
+  if (/\bLEAVE\b/i.test(s) && !/REQUESTED/i.test(s)) return { status: 'Approved', label: s, note: s }
+  return { status: 'normal', label: s, note: '' }
 }
 
 export default function OwnerSchedulePage() {
@@ -230,6 +302,7 @@ export default function OwnerSchedulePage() {
     end: initialModal.end || initialModalDefaults.end,
     isEditing: initialModal.mode === 'edit',
     oldLabel: initialModal.mode === 'edit' ? (initialModal.oldLabel || '') : '',
+    availabilityId: '',
   })
 
   const [weekRange, setWeekRange] = useState(null)
@@ -237,6 +310,7 @@ export default function OwnerSchedulePage() {
   const [staffRows, setStaffRows] = useState([])
   const [formError, setFormError] = useState('')
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [pendingRequests, setPendingRequests] = useState([])
 
   // --- API Logic ---
   async function refreshSchedule(nextWeekStart) {
@@ -247,6 +321,7 @@ export default function OwnerSchedulePage() {
         if (data.weekRange) setWeekRange(data.weekRange)
         if (Array.isArray(data.columns)) setColumns(data.columns)
         if (Array.isArray(data.staffRows)) setStaffRows(data.staffRows)
+        if (Array.isArray(data.pendingRequests)) setPendingRequests(data.pendingRequests)
       }
     } catch (err) {
       console.error(err)
@@ -382,6 +457,7 @@ export default function OwnerSchedulePage() {
       end: defaults.end,
       isEditing: false,
       oldLabel: '',
+      availabilityId: '',
     })
   }
 
@@ -410,11 +486,16 @@ export default function OwnerSchedulePage() {
         emitPortalToast({ type: 'error', message: 'Delete failed: Invalid date format.' })
         return
       }
-      await api.delete('/api/owner/schedule/shifts', {
+      const payload = {
         staffId: form.staffId,
         date: normalizeFormDateForApi(form.oldDate || form.date) || normalizedDate,
         label: form.oldLabel,
-      })
+      }
+      if (form.availabilityId) payload.availabilityId = form.availabilityId
+      const deleteResult = await api.delete('/api/owner/schedule/shifts', payload)
+      if (!deleteResult || Number(deleteResult.deleted || 0) <= 0) {
+        throw new Error('Delete failed: Shift not found or already deleted.')
+      }
       await refreshSchedule(weekStart)
       window.dispatchEvent(new CustomEvent('portal:success-modal', { 
         detail: { message: 'Shift deleted successfully.', title: 'Completed' } 
@@ -730,6 +811,16 @@ export default function OwnerSchedulePage() {
           </div>
 
           <div className="portal-weekNavRight">
+            <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+              <button
+                type="button"
+                className="portal-outlineBtn"
+                title="Attendance report"
+                onClick={() => navigate('/portals/owner/attendance-report')}
+              >
+                Report
+              </button>
+            
             <button
               type="button"
               className="portal-primaryBtn"
@@ -750,9 +841,12 @@ export default function OwnerSchedulePage() {
               <span className="portal-btnPlus" aria-hidden="true" />
               Add Shift
             </button>
+            </div>
           </div>
         </div>
       </PortalCard>
+
+      {/* Pending requests now handled on separate page: /portal/pending-requests */}
 
       {/* --- WEEK VIEW --- */}
       {viewMode === 'week' && (
@@ -788,26 +882,31 @@ export default function OwnerSchedulePage() {
                         <td key={`${s.staffId || s.name}-${c.date}`} className="portal-scheduleTd">
                           <div className="portal-shiftStack">
                             {shiftList.length > 0 ? (
-                              shiftList.map((label, idx) => (
-                                <ShiftPill
-                                  key={idx}
-                                  label={label}
-                                  onClick={() => {
-                                    const parts = label.split('-').map((t) => t.trim())
-                                    const defaults = getDefaultShiftWindow(c.isoDate || initialTodayIso)
-                                    setForm({
-                                      staffId: s.staffId,
-                                      date: c.isoDate || '',
-                                      oldDate: c.isoDate || '',
-                                      start: parts[0] || defaults.start,
-                                      end: parts[1] || defaults.end,
-                                      isEditing: true,
-                                      oldLabel: label,
-                                    })
-                                    setOpen(true)
-                                  }}
-                                />
-                              ))
+                              shiftList.map((label, idx) => {
+                                const meta = detectShiftMeta(label)
+                                return (
+                                  <ShiftPill
+                                    key={idx}
+                                    label={label}
+                                    onClick={() => {
+                                      if (String(meta.status).toLowerCase() === 'approved') return
+                                      const parts = (meta.label || '').split('-').map((t) => t.trim())
+                                      const defaults = getDefaultShiftWindow(c.isoDate || initialTodayIso)
+                                      setForm({
+                                        staffId: s.staffId,
+                                        date: c.isoDate || '',
+                                        oldDate: c.isoDate || '',
+                                        start: parts[0] || defaults.start,
+                                        end: parts[1] || defaults.end,
+                                        isEditing: true,
+                                        oldLabel: meta.label,
+                                        availabilityId: meta.availabilityId || '',
+                                      })
+                                      setOpen(true)
+                                    }}
+                                  />
+                                )
+                              })
                             ) : (
                               <div
                                 className="portal-off"
@@ -820,7 +919,8 @@ export default function OwnerSchedulePage() {
                                     start: defaults.start,
                                     end: defaults.end,
                                     isEditing: false,
-                                    oldLabel: '',
+                                        oldLabel: '',
+                                        availabilityId: '',
                                   })
                                   setOpen(true)
                                 }}
@@ -896,13 +996,15 @@ export default function OwnerSchedulePage() {
                         start: minutesToTimeString(safeStart),
                         end: minutesToTimeString(safeEnd),
                         isEditing: false,
-                        oldLabel: '',
+                          oldLabel: '',
+                          availabilityId: '',
                       })
                       setOpen(true)
                     }}
                   >
                     {s.dayShifts.map((label, idx) => {
-                      const parts = label.split('-').map((t) => t.trim())
+                      const meta = detectShiftMeta(label)
+                      const parts = (meta.label || '').split('-').map((t) => t.trim())
                       const startMin = parseTimeToMinutes(parts[0])
                       const endMin = parseTimeToMinutes(parts[1])
                       if (startMin === null || endMin === null) return null
@@ -910,15 +1012,20 @@ export default function OwnerSchedulePage() {
                       const widthPercent = ((endMin - startMin) / TIMELINE_DURATION) * 100
                       const startHour = Math.floor(startMin / 60)
                       const shiftType = startHour < 12 ? 'morning' : startHour < 16 ? 'afternoon' : 'evening'
+                      const pending = String(meta.status).toLowerCase() === 'pending'
+                      const approved = String(meta.status).toLowerCase() === 'approved'
+                      const blockClass = approved ? 'bg-gray-200 text-gray-500' : pending ? 'border-2 border-dashed border-red-400' : `portal-shiftBlock-${shiftType}`
                       return (
                         <div
                           key={idx}
-                          className={`portal-dayTimelineBlock portal-shiftBlock-${shiftType}`}
+                          className={`portal-dayTimelineBlock ${blockClass}`}
                           style={{
                             left: `${leftPercent}%`,
                             width: `${widthPercent}%`,
+                            cursor: approved ? 'default' : 'pointer',
                           }}
                           onClick={() => {
+                            if (approved) return
                             setForm({
                               staffId: s.staffId,
                               date: dayColumnIsoDate,
@@ -926,12 +1033,19 @@ export default function OwnerSchedulePage() {
                               start: parts[0],
                               end: parts[1],
                               isEditing: true,
-                              oldLabel: label,
+                              oldLabel: meta.label,
+                              availabilityId: meta.availabilityId || '',
                             })
                             setOpen(true)
                           }}
+                          title={meta.note || ''}
                         >
-                          {label}
+                          {approved ? 'Time Off' : (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              {meta.label}
+                              {pending ? <span style={{ fontSize: 12 }} aria-hidden>⚠️</span> : null}
+                            </span>
+                          )}
                         </div>
                       )
                     })}

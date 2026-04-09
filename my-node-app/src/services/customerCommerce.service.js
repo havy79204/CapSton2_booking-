@@ -785,22 +785,78 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
         params.currentHour = currentHour
         params.todayCheck = isToday ? 1 : 0
         
-        // Filter staff by availability for the selected date
-        // If today, also exclude staff whose shift has already ended
-        availabilityFilterClause = `
-          AND EXISTS (
-            SELECT 1
-            FROM StaffAvailability sa
-            WHERE sa.StaffId = s.StaffId
-              AND sa.WeekStartDate = @bookingDate
-              ${isToday ? `AND sa.EndHour > @currentHour` : ''}
-          )`
-        
-        console.log('[DEBUG] listAvailableStaff:', { dateInput, bookingDate: dateIso, isToday, currentHour })
+        // Detect actual StaffShifts column names and types so we build safe SQL
+        const colsRes = await query(
+          `SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'StaffShifts'`
+        )
+        const cols = (colsRes.recordset || []).map((r) => ({ name: String(r.COLUMN_NAME), type: String(r.DATA_TYPE).toLowerCase() }))
+        const colNames = cols.map((c) => c.name)
+
+        // Helper to pick the first matching candidate column name that exists
+        const pickColumn = (candidates) => {
+          for (const cand of candidates) {
+            if (colNames.includes(cand)) return cand
+          }
+          return null
+        }
+
+        const startCol = pickColumn(['StartHour', 'StartAt', 'StartTime', 'Start'])
+        const endCol = pickColumn(['EndHour', 'EndAt', 'EndTime', 'End'])
+        const durationCol = pickColumn(['DurationHours', 'Duration', 'DurationMinutes', 'DurationMins'])
+
+        if (startCol) {
+          const startType = cols.find((c) => c.name === startCol)?.type || ''
+          const endType = endCol ? (cols.find((c) => c.name === endCol)?.type || '') : ''
+          const durationType = durationCol ? (cols.find((c) => c.name === durationCol)?.type || '') : ''
+
+          const startExpr = startType.startsWith('time') || startType.includes('date')
+            ? `DATEPART(hour, sa.[${startCol}])`
+            : `TRY_CONVERT(INT, sa.[${startCol}])`
+          const endExpr = endCol
+            ? (endType.startsWith('time') || endType.includes('date')
+                ? `DATEPART(hour, sa.[${endCol}])`
+                : `TRY_CONVERT(INT, sa.[${endCol}])`)
+            : null
+          const durationExpr = durationCol
+            ? (durationType.startsWith('time') || durationType.includes('date')
+                ? `DATEPART(hour, sa.[${durationCol}])`
+                : `TRY_CONVERT(INT, sa.[${durationCol}])`)
+            : null
+
+          // Filter staff by availability for the selected date
+          // If today, also exclude staff whose shift has already ended
+          availabilityFilterClause = `
+            AND EXISTS (
+              SELECT 1
+              FROM StaffShifts sa
+              WHERE CONVERT(NVARCHAR(100), sa.StaffId) = CONVERT(NVARCHAR(100), s.StaffId)
+                AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) = @bookingDate
+                ${isToday ? `AND (${startExpr}
+                      + ISNULL(${durationExpr || '0'},
+                          CASE
+                            WHEN ${endExpr || startExpr} > ${startExpr}
+                              THEN ${endExpr || startExpr} - ${startExpr}
+                            ELSE 0
+                          END
+                        )) > @currentHour` : ''}
+            )`
+        } else {
+          // No recognizable Start column — skip availability filter to avoid invalid column references
+          availabilityFilterClause = ''
+          if (!(String(process.env.SILENT_LOGS || '').trim() === '1')) {
+            console.log('[DEBUG] listAvailableStaff: no Start column found in StaffShifts, skipping availability filter')
+          }
+        }
+
+        if (!(String(process.env.SILENT_LOGS || '').trim() === '1')) {
+          console.log('[DEBUG] listAvailableStaff:', { dateInput, bookingDate: dateIso, isToday, currentHour })
+        }
       }
     } catch (e) {
       // If date parsing fails, continue without date filter
-      console.log('[DEBUG] listAvailableStaff date parse error:', e.message)
+      if (!(String(process.env.SILENT_LOGS || '').trim() === '1')) {
+        console.log('[DEBUG] listAvailableStaff date parse error:', e.message)
+      }
     }
   }
   let staffFilterClause = ''
@@ -911,8 +967,7 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
     }
   }
 
-  const res = await query(
-    `SELECT
+  const sql = `SELECT
         s.StaffId,
         s.UserId,
         ${specialtySelectSql},
@@ -927,9 +982,17 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
      WHERE (s.Status IS NULL OR LOWER(LTRIM(RTRIM(s.Status))) NOT IN (N'nghỉ', 'inactive', 'off'))
      ${staffFilterClause}
      ${availabilityFilterClause}
-     ORDER BY u.Name, s.StaffId`,
-    params
-  )
+     ORDER BY u.Name, s.StaffId`
+
+  let res
+  try {
+    res = await query(sql, params)
+  } catch (err) {
+    console.error('[listAvailableStaff] query error:', err?.message || err)
+    console.error('[listAvailableStaff] SQL:', sql)
+    console.error('[listAvailableStaff] params:', params)
+    throw err
+  }
 
   const staffList = (res.recordset || [])
 
@@ -954,7 +1017,9 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
         staff.BookedSlots = await getStaffBookedSlots(row.StaffId, dateInput)
       } catch (e) {
         // If error occurs fetching booked slots, continue without them
-        console.log(`[DEBUG] Error fetching booked slots for staff ${row.StaffId}:`, e.message)
+        if (!(String(process.env.SILENT_LOGS || '').trim() === '1')) {
+          console.log(`[DEBUG] Error fetching booked slots for staff ${row.StaffId}:`, e.message)
+        }
       }
     }
 
@@ -1989,19 +2054,62 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
     }
 
     // Verify staff member is actually scheduled for this date
-    const staffAvailRes = await query(
-      `SELECT TOP 1 sa.StaffId
-       FROM StaffAvailability sa
-       WHERE sa.StaffId = @staffId
-         AND sa.WeekStartDate = @bookingDate
-         AND sa.StartHour <= @bookingHour
-         AND sa.EndHour > @bookingHour`,
-      {
-        staffId,
-        bookingDate: bookingDateStr,
-        bookingHour: bookingStart.getHours(),
-      }
-    )
+    // Build a safe SQL using actual column names (Start/End/Duration variants)
+    const colsRes = await query(`SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'StaffShifts'`)
+    const cols = (colsRes.recordset || []).map((r) => ({ name: String(r.COLUMN_NAME), type: String(r.DATA_TYPE).toLowerCase() }))
+    const colNames = cols.map((c) => c.name)
+    const pickColumn = (candidates) => {
+      for (const cand of candidates) if (colNames.includes(cand)) return cand
+      return null
+    }
+
+    const startCol = pickColumn(['StartHour', 'StartAt', 'StartTime', 'Start'])
+    const endCol = pickColumn(['EndHour', 'EndAt', 'EndTime', 'End'])
+    const durationCol = pickColumn(['DurationHours', 'Duration', 'DurationMinutes', 'DurationMins'])
+
+    if (!startCol) {
+      const err = new Error('The selected specialist is not scheduled to work on this date.')
+      err.status = 409
+      throw err
+    }
+
+    const startType = cols.find((c) => c.name === startCol)?.type || ''
+    const endType = endCol ? (cols.find((c) => c.name === endCol)?.type || '') : ''
+    const durationType = durationCol ? (cols.find((c) => c.name === durationCol)?.type || '') : ''
+
+    const startExpr = startType.startsWith('time') || startType.includes('date')
+      ? `DATEPART(hour, sa.[${startCol}])`
+      : `TRY_CONVERT(INT, sa.[${startCol}])`
+    const endExpr = endCol
+      ? (endType.startsWith('time') || endType.includes('date')
+          ? `DATEPART(hour, sa.[${endCol}])`
+          : `TRY_CONVERT(INT, sa.[${endCol}])`)
+      : null
+    const durationExpr = durationCol
+      ? (durationType.startsWith('time') || durationType.includes('date')
+          ? `DATEPART(hour, sa.[${durationCol}])`
+          : `TRY_CONVERT(INT, sa.[${durationCol}])`)
+      : null
+
+    const staffAvailSql = `SELECT TOP 1 sa.StaffId
+       FROM StaffShifts sa
+       WHERE CONVERT(NVARCHAR(100), sa.StaffId) = CONVERT(NVARCHAR(100), @staffId)
+         AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) = @bookingDate
+         AND ${startExpr} <= @bookingHour
+         AND (${startExpr}
+              + ISNULL(${durationExpr || '0'},
+                  CASE
+                    WHEN ${endExpr || startExpr} > ${startExpr}
+                      THEN ${endExpr || startExpr} - ${startExpr}
+                    ELSE 0
+                  END
+                )) > @bookingHour`
+
+    const staffAvailRes = await query(staffAvailSql, {
+      staffId,
+      bookingDate: bookingDateStr,
+      bookingHour: bookingStart.getHours(),
+    })
 
     if (!staffAvailRes.recordset || staffAvailRes.recordset.length === 0) {
       const err = new Error('The selected specialist is not scheduled to work on this date.')

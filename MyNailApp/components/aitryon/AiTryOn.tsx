@@ -20,6 +20,7 @@ type TryOnService = {
 type OverlayPlan = {
   overlays?: Array<{
     finger?: string;
+    confidence?: number;
     polygon?: Array<{ x: number; y: number }>;
     style?: { colorPalette?: string[] };
   }>;
@@ -27,6 +28,42 @@ type OverlayPlan = {
 
 function pointsToSvg(points: Array<{ x: number; y: number }>, width: number, height: number) {
   return points.map((p) => `${p.x * width},${p.y * height}`).join(' ');
+}
+
+function polygonAreaNormalized(points: Array<{ x: number; y: number }>) {
+  if (!Array.isArray(points) || points.length < 3) return 0;
+  let area = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    area += (Number(a?.x || 0) * Number(b?.y || 0)) - (Number(b?.x || 0) * Number(a?.y || 0));
+  }
+  return Math.abs(area) / 2;
+}
+
+function getRenderableOverlays(overlayPlan: OverlayPlan | null) {
+  const overlays = Array.isArray(overlayPlan?.overlays) ? overlayPlan!.overlays! : [];
+  return overlays.filter((ov) => {
+    const polygon = Array.isArray(ov?.polygon) ? ov.polygon : [];
+    if (polygon.length < 3) return false;
+
+    const area = polygonAreaNormalized(polygon);
+    // Keep only realistic nail areas to avoid floating boxes from low-quality detection.
+    if (!(area >= 0.0012 && area <= 0.08)) return false;
+
+    const xs = polygon.map((p) => Number(p?.x || 0));
+    const ys = polygon.map((p) => Number(p?.y || 0));
+    const w = Math.max(...xs) - Math.min(...xs);
+    const h = Math.max(...ys) - Math.min(...ys);
+    const ratio = Math.max(w, h) / Math.max(1e-6, Math.min(w, h));
+    // Nail boxes are typically elongated; near-square boxes are often bad detections.
+    if (ratio < 1.12) return false;
+
+    const confidence = Number(ov?.confidence ?? 0);
+    if (Number.isFinite(confidence) && confidence < 0.5) return false;
+
+    return true;
+  });
 }
 
 function absoluteAssetUrl(rawUrl?: string | null) {
@@ -52,6 +89,7 @@ function derivePaletteFromService(service: TryOnService | null) {
 }
 
 export default function AITryOn() {
+  const SHOW_REALTIME_OVERLAY = false;
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedImageDataUrl, setSelectedImageDataUrl] = useState<string | null>(null);
   const [templateImage, setTemplateImage] = useState<string | null>(null);
@@ -100,6 +138,8 @@ export default function AITryOn() {
     () => services.find((x) => String(x.serviceId) === String(selectedServiceId || '')) || null,
     [services, selectedServiceId],
   );
+
+  const renderableOverlays = useMemo(() => getRenderableOverlays(overlayPlan), [overlayPlan]);
 
   useEffect(() => {
     (async () => {
@@ -394,9 +434,9 @@ export default function AITryOn() {
             >
               <Image source={{ uri: selectedImage }} style={{ width: '100%', height: '100%' }} />
 
-              {overlayPlan?.overlays?.length ? (
+              {SHOW_REALTIME_OVERLAY && renderableOverlays.length ? (
                 <Svg width={stageWidth} height={300} style={StyleSheet.absoluteFillObject}>
-                  {overlayPlan.overlays.map((ov, idx) => {
+                  {renderableOverlays.map((ov, idx) => {
                     const polygon = Array.isArray(ov?.polygon) ? ov.polygon : [];
                     if (polygon.length < 3) return null;
 

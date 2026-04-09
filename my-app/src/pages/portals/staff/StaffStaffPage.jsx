@@ -23,7 +23,7 @@ function todayDateInputValue() {
 export default function StaffStaffPage() {
   const PAGE_SIZE = 10
   const [staffMembers, setStaffMembers] = useState([])
-  const [staffSummary, setStaffSummary] = useState({ totalStaff: 0, totalBookings: 0, totalSalary: 0 })
+  const [staffSummary, setStaffSummary] = useState({ totalStaff: 0, totalBookings: 0, totalRevenue: 0 })
   const [staffLoading, setStaffLoading] = useState(false)
   const [query, setQuery] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
@@ -38,7 +38,7 @@ export default function StaffStaffPage() {
       const params = new URLSearchParams({ keyword: query.trim(), page: '1', pageSize: '100' })
       const data = await api.get(`/api/staff/staff?${params.toString()}`)
       setStaffMembers(Array.isArray(data.items) ? data.items : [])
-      setStaffSummary(data.summary || { totalStaff: 0, totalBookings: 0, totalSalary: 0 })
+      setStaffSummary(data.summary || { totalStaff: 0, totalBookings: 0, totalRevenue: 0 })
     } catch (err) {
       console.error(err)
     } finally {
@@ -99,9 +99,9 @@ export default function StaffStaffPage() {
             <div className="staff-dashboardIcon"><IconCalendar /></div>
           </div>
         </PortalCard>
-        <PortalCard className="staff-dashboardCard" title="Total Salary">
+        <PortalCard className="staff-dashboardCard" title="Total Revenue">
           <div className="staff-dashboardStatRow">
-            <div className="staff-dashboardValue">{formatMoney(staffSummary.totalSalary)}</div>
+            <div className="staff-dashboardValue">{formatMoney(staffSummary.totalRevenue)}</div>
             <div className="staff-dashboardIcon"><IconDollar /></div>
           </div>
         </PortalCard>

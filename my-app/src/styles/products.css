@@ -195,8 +195,8 @@
   border-radius: 6px;
   border: 1px solid rgba(244, 216, 170, 0.42);
   background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(8px) saturate(140%);
   -webkit-backdrop-filter: blur(8px) saturate(140%);
+  backdrop-filter: blur(8px) saturate(140%);
   display: inline-flex;
   flex-direction: column;
   align-items: center;
@@ -312,8 +312,8 @@
     rgba(74, 52, 9, 0)
   );
 
-  backdrop-filter: blur(12px) saturate(200%);
   -webkit-backdrop-filter: blur(12px) saturate(200%);
+  backdrop-filter: blur(12px) saturate(200%);
 
   border: 1px solid rgba(255, 235, 153, 0);
 

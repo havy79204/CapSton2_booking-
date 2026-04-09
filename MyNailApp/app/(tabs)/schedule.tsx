@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { Colors } from '@/constants/theme';
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { get, post } from '@/services/apiClient';
+import { del, get, post } from '@/services/apiClient';
 import { subscribeStaffDataUpdates } from '../../lib/realtime';
 
 import Card from '@/components/ui/card';
@@ -116,29 +116,67 @@ export default function ScheduleScreen() {
     setShowModal(true);
   };
 
-  const handleRegisterSubmit = async (date: Date | undefined, payload: { note?: string; type?: string }) => {
+  const handleRegisterSubmit = async (date: Date | undefined, payload: { note?: string; type?: string; isRecurring?: number; endDate?: string | null }) => {
     const dateStr = date ? toLocalIso(date) : toLocalIso(new Date());
-
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const minRequestDate = new Date(today);
-    minRequestDate.setDate(minRequestDate.getDate() + 7);
-    const targetDate = new Date(dateStr + 'T00:00:00');
-    if (targetDate < minRequestDate) {
-      throw new Error('Đơn xin nghỉ phải gửi trước ít nhất 7 ngày.');
+    const start = date ? new Date(date) : new Date();
+    start.setHours(0, 0, 0, 0);
+
+    if (start.getTime() < today.getTime()) {
+      throw new Error('StartDate không được là ngày trong quá khứ');
     }
+
+    if (payload.endDate) {
+      const end = new Date(`${payload.endDate}T00:00:00`);
+      if (Number.isNaN(end.getTime())) {
+        throw new Error('EndDate không hợp lệ');
+      }
+      if (end.getTime() < start.getTime()) {
+        throw new Error('EndDate phải lớn hơn hoặc bằng StartDate');
+      }
+    }
+
+    // Removed previous restriction that required requests to be submitted 7 days in advance.
 
     try {
       await post('/staff/schedule/shifts', {
         date: dateStr,
         note: payload.note || '',
         shiftType: payload.type || 'full',
+        isRecurring: payload.isRecurring || 0,
+        endDate: payload.endDate || null,
       });
       await loadSchedule();
       return true;
     } catch (error: any) {
       throw new Error(error?.message || 'Không thể gửi yêu cầu nghỉ. Vui lòng thử lại.');
     }
+  };
+
+  const handleDeleteLeaveRequest = async (leaveItem: any, date: Date) => {
+    const offScheduleId = leaveItem?.meta?.offScheduleId;
+    if (!offScheduleId) return;
+
+    Alert.alert('Xóa đơn xin nghỉ', 'Bạn chắc chắn muốn hủy đơn xin nghỉ đang chờ duyệt?', [
+      { text: 'Không', style: 'cancel' },
+      {
+        text: 'Xóa',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await del('/staff/schedule/shifts', {
+              offScheduleId,
+              date: toLocalIso(date),
+              shiftType: leaveItem?.meta?.leaveType || 'full',
+            });
+            await loadSchedule(false);
+          } catch (error: any) {
+            Alert.alert('Không thể xóa', error?.message || 'Không thể xóa đơn xin nghỉ.');
+          }
+        },
+      },
+    ]);
   };
 
   if (loading) {
@@ -219,6 +257,14 @@ export default function ScheduleScreen() {
                           <Text style={styles.shiftTime}>{sh.type === 'leave-request' ? 'Đang chờ duyệt' : sh.type === 'leave' ? 'Nghỉ' : sh.time}</Text>
                           <Text style={styles.shiftNote}>{sh?.meta?.note || (sh.type === 'assigned' ? 'Ca làm việc' : 'Xin nghỉ')}</Text>
                         </View>
+                        {sh.type === 'leave-request' && sh?.meta?.offScheduleId && String(sh?.meta?.status || '').toLowerCase() === 'pending' ? (
+                          <TouchableOpacity
+                            style={styles.deleteLeaveBtn}
+                            onPress={() => handleDeleteLeaveRequest(sh, date)}
+                          >
+                            <Text style={styles.deleteLeaveBtnText}>Xóa</Text>
+                          </TouchableOpacity>
+                        ) : null}
                       </View>
                     ))}
                   </View>
@@ -271,6 +317,8 @@ const styles = StyleSheet.create({
   registerBtn: { backgroundColor: '#ec4899', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
   shiftsGrid: { marginTop: 10 },
   shiftItem: { padding: 10, borderRadius: 8, marginBottom: 8, flexDirection: 'row', alignItems: 'center' },
+  deleteLeaveBtn: { marginLeft: 'auto', backgroundColor: '#fff', borderWidth: 1, borderColor: '#fca5a5', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  deleteLeaveBtnText: { color: '#b91c1c', fontWeight: '700', fontSize: 12 },
   assigned: { backgroundColor: '#dcfce7', borderWidth: 1, borderColor: '#86efac' },
   leaveRequest: { backgroundColor: '#fef3c7', borderWidth: 1, borderColor: '#fcd34d' },
   leave: { backgroundColor: '#fff1f2', borderWidth: 1, borderColor: '#fecdd3' },
