@@ -187,6 +187,7 @@
 .hero-btn.secondary {
   background: rgba(255, 255, 255, 0.95);
   color: var(--color-primary);
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   border: 2px solid rgba(255, 255, 255, 0.3);
   box-shadow: 0 12px 32px rgba(255, 255, 255, 0.2);

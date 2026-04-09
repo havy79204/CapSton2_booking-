@@ -41,33 +41,58 @@ function defaultControlnetUnit(imageBase64) {
         input_image: imageBase64,
         module: String(process.env.CONTROLNET_MODULE || 'none'),
         model: String(process.env.CONTROLNET_MODEL || 'control_v11p_sd15_inpaint [ebff9138]'),
-        weight: Number(process.env.CONTROLNET_WEIGHT || 1),
+        weight: Number(process.env.CONTROLNET_WEIGHT || 1.12),
         resize_mode: 'Crop and Resize',
         lowvram: false,
-        processor_res: Number(process.env.CONTROLNET_PROCESSOR_RES || 512),
+        processor_res: Number(process.env.CONTROLNET_PROCESSOR_RES || 640),
         threshold_a: Number(process.env.CONTROLNET_THRESHOLD_A || 64),
         threshold_b: Number(process.env.CONTROLNET_THRESHOLD_B || 64),
         guidance_start: Number(process.env.CONTROLNET_GUIDANCE_START || 0),
-        guidance_end: Number(process.env.CONTROLNET_GUIDANCE_END || 1),
+        guidance_end: Number(process.env.CONTROLNET_GUIDANCE_END || 0.96),
         control_mode: Number(process.env.CONTROLNET_CONTROL_MODE || 0),
         pixel_perfect: true,
     }
 }
 
-function buildAutomatic1111Payload({ imageDataUrl, prompt, negativePrompt, overlayPlan }) {
+function resolveAutomatic1111Tune({ hasTemplate = false, overlayCount = 0 } = {}) {
+    const baseSteps = Number(process.env.CONTROLNET_STEPS || 32)
+    const baseCfg = Number(process.env.CONTROLNET_CFG_SCALE || 6.5)
+    const baseDenoise = Number(process.env.CONTROLNET_DENOISE || 0.52)
+
+    if (hasTemplate && overlayCount >= 3) {
+        return {
+            steps: Math.max(24, Math.min(60, baseSteps + 4)),
+            cfgScale: Math.max(4.5, Math.min(9.5, baseCfg)),
+            denoise: Math.max(0.35, Math.min(0.75, baseDenoise - 0.04)),
+        }
+    }
+
+    return {
+        steps: Math.max(20, Math.min(60, baseSteps)),
+        cfgScale: Math.max(4.5, Math.min(9.5, baseCfg)),
+        denoise: Math.max(0.35, Math.min(0.78, baseDenoise)),
+    }
+}
+
+function buildAutomatic1111Payload({ imageDataUrl, prompt, negativePrompt, overlayPlan, templateImageDataUrl = '' }) {
     const imageBase64 = stripDataUrlPrefix(imageDataUrl)
+    const templateImageBase64 = stripDataUrlPrefix(templateImageDataUrl || '')
+    const overlayCount = Array.isArray(overlayPlan ?.overlays) ? overlayPlan.overlays.length : 0
+    const tuning = resolveAutomatic1111Tune({ hasTemplate: Boolean(templateImageBase64), overlayCount })
 
     return {
         init_images: [imageBase64],
         prompt,
         negative_prompt: negativePrompt,
         sampler_name: String(process.env.CONTROLNET_SAMPLER || 'DPM++ 2M Karras'),
-        steps: Number(process.env.CONTROLNET_STEPS || 28),
-        cfg_scale: Number(process.env.CONTROLNET_CFG_SCALE || 7),
-        denoising_strength: Number(process.env.CONTROLNET_DENOISE || 0.58),
+        steps: tuning.steps,
+        cfg_scale: tuning.cfgScale,
+        denoising_strength: tuning.denoise,
         width: Number(process.env.CONTROLNET_WIDTH || 768),
         height: Number(process.env.CONTROLNET_HEIGHT || 1024),
         restore_faces: false,
+        seed: Number.isFinite(Number(process.env.CONTROLNET_SEED)) ? Number(process.env.CONTROLNET_SEED) : -1,
+        eta: Number(process.env.CONTROLNET_ETA || 0),
         alwayson_scripts: {
             controlnet: {
                 args: [{
@@ -87,7 +112,7 @@ async function generateWithAutomatic1111({ endpoint, imageDataUrl, templateImage
     const isFullPath = /\/sdapi\/v1\/img2img$/i.test(base)
     const url = isFullPath ? base : `${base}/sdapi/v1/img2img`
 
-    const payload = buildAutomatic1111Payload({ imageDataUrl, prompt, negativePrompt, overlayPlan })
+    const payload = buildAutomatic1111Payload({ imageDataUrl, prompt, negativePrompt, overlayPlan, templateImageDataUrl })
     const templateImageBase64 = stripDataUrlPrefix(templateImageDataUrl || '')
     if (templateImageBase64) {
         payload.style_reference_image = templateImageBase64

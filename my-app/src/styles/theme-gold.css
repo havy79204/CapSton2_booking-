@@ -5,13 +5,16 @@
 }
 
 .portal-card {
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
 
 .portal-sidebar {
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
 
 .portal-header {
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }

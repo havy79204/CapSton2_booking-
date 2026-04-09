@@ -1455,7 +1455,7 @@ async function dispatchOwnerInsights(options = {}) {
   try {
     const shiftRegisteredExists = await hasRecentOwnerNotification('hr.staff_shift_registered', 18 * 60)
     if (!shiftRegisteredExists) {
-      const shiftTable = await firstExistingTable(['StaffAvailability', 'StaffShifts'])
+      const shiftTable = await firstExistingTable(['StaffShifts'])
       if (shiftTable) {
         const shiftDateCol = await firstExistingColumn(shiftTable, ['WeekStartDate', 'ShiftDate', 'WorkDate', 'Date'])
         const shiftDayIndexCol = await firstExistingColumn(shiftTable, ['DayIndex'])
@@ -1574,7 +1574,7 @@ async function dispatchOwnerInsights(options = {}) {
   try {
     const lateExists = await hasRecentOwnerNotification('hr.staff_late_or_no_checkin', 2 * 60)
     if (!lateExists) {
-      const shiftTable = await firstExistingTable(['StaffAvailability', 'StaffShifts'])
+      const shiftTable = await firstExistingTable(['StaffShifts'])
       const attendanceTable = await firstExistingTable(['StaffAttendance', 'Attendance', 'AttendanceLogs', 'CheckIns', 'Timekeeping'])
       if (shiftTable && attendanceTable) {
         const shiftStaffCol = await firstExistingColumn(shiftTable, ['StaffId', 'UserId'])
@@ -1657,7 +1657,7 @@ async function dispatchOwnerInsights(options = {}) {
   try {
     const leaveExists = await hasRecentOwnerNotification('hr.staff_leave_exceed_days', 12 * 60)
     if (!leaveExists) {
-      const shiftTable = await firstExistingTable(['StaffAvailability', 'StaffShifts'])
+      const shiftTable = await firstExistingTable(['StaffShifts'])
       const attendanceTable = await firstExistingTable(['StaffAttendance', 'Attendance', 'AttendanceLogs', 'CheckIns', 'Timekeeping'])
       if (shiftTable && attendanceTable) {
         const shiftStaffCol = await firstExistingColumn(shiftTable, ['StaffId', 'UserId'])

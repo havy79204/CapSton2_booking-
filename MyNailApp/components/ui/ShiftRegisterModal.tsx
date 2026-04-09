@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
+import { Modal, View, Text, StyleSheet, TouchableOpacity, TextInput, Switch } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useToast } from '@/components/ui/Toast';
 
@@ -8,14 +8,15 @@ type Props = {
   onClose: () => void;
   selectedDate?: Date;
   mode?: 'shift' | 'leave';
-  onRegister?: (date: Date | undefined, payload: { time?: string; type?: string; note?: string }) => Promise<boolean> | boolean;
+  onRegister?: (date: Date | undefined, payload: { time?: string; type?: string; note?: string; isRecurring?: number; endDate?: string | null }) => Promise<boolean> | boolean;
 };
+
 
 const SHIFT_TIMES: Record<string, string> = {
   morning: '08:00 - 12:00',
-  afternoon: '13:00 - 17:00',
-  evening: '17:00 - 21:00',
-  full: '08:00 - 17:00',
+  afternoon: '13:00 - 16:00',
+  evening: '16:00 - 20:00',
+  full: '08:00 - 20:00',
 };
 
 function toYmd(d: Date) {
@@ -51,14 +52,18 @@ export default function ShiftRegisterModal({ isOpen, onClose, selectedDate, mode
   const [shiftType, setShiftType] = useState<keyof typeof SHIFT_TIMES>('morning');
   const [note, setNote] = useState('');
   const [dateInput, setDateInput] = useState('');
+  const [endDateInput, setEndDateInput] = useState('');
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date());
+  const [calendarTarget, setCalendarTarget] = useState<'start'|'end'>('start');
+  const [isRecurring, setIsRecurring] = useState(false);
   const toast = useToast();
 
   useEffect(() => {
     if (!selectedDate) {
       setDateInput('');
       setCalendarMonth(new Date());
+      setEndDateInput('');
       return;
     }
     setDateInput(toYmd(selectedDate));
@@ -79,7 +84,7 @@ export default function ShiftRegisterModal({ isOpen, onClose, selectedDate, mode
     }
 
     const payload = mode === 'leave'
-      ? { type: shiftType, note: note || 'Xin nghỉ ca' }
+      ? { type: shiftType, note: note || 'Xin nghỉ ca', isRecurring: isRecurring ? 1 : 0, endDate: endDateInput || null }
       : { time: SHIFT_TIMES[shiftType], type: shiftType, note: note || undefined };
 
     try {
@@ -108,7 +113,7 @@ export default function ShiftRegisterModal({ isOpen, onClose, selectedDate, mode
 
           {mode === 'leave' ? (
             <>
-              <Text style={styles.label}>Ngày xin nghỉ</Text>
+              <Text style={styles.label}>Ngày bắt đầu</Text>
               <View style={styles.dateRow}>
                 <TextInput
                   value={dateInput}
@@ -118,7 +123,7 @@ export default function ShiftRegisterModal({ isOpen, onClose, selectedDate, mode
                 />
                 <TouchableOpacity
                   style={styles.calendarBtn}
-                  onPress={() => setCalendarVisible((v) => !v)}
+                  onPress={() => { setCalendarTarget('start'); setCalendarVisible((v) => !v); }}
                 >
                   <Feather name="calendar" size={18} color="#fff" />
                 </TouchableOpacity>
@@ -145,7 +150,7 @@ export default function ShiftRegisterModal({ isOpen, onClose, selectedDate, mode
                   <View style={styles.dayGrid}>
                     {monthGrid.map((d, idx) => {
                       if (!d) return <View key={`empty-${idx}`} style={styles.dayCell} />;
-                      const picked = parseYmd(dateInput);
+                      const picked = calendarTarget === 'start' ? parseYmd(dateInput) : parseYmd(endDateInput);
                       const isSelected = Boolean(
                         picked
                         && picked.getFullYear() === calendarMonth.getFullYear()
@@ -158,7 +163,12 @@ export default function ShiftRegisterModal({ isOpen, onClose, selectedDate, mode
                           key={`day-${idx}`}
                           style={[styles.dayCell, isSelected ? styles.daySelected : null]}
                           onPress={() => {
-                            setDateInput(toYmd(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), d)));
+                            const picked = toYmd(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), d));
+                            if (calendarTarget === 'start') {
+                              setDateInput(picked);
+                            } else {
+                              setEndDateInput(picked);
+                            }
                             setCalendarVisible(false);
                           }}
                         >
@@ -191,8 +201,43 @@ export default function ShiftRegisterModal({ isOpen, onClose, selectedDate, mode
             ))}
           </View>
 
-          <Text style={styles.label}>{mode === 'leave' ? 'Lý do xin nghỉ' : 'Ghi chú (không bắt buộc)'}</Text>
-          <TextInput value={note} onChangeText={setNote} placeholder="Thêm ghi chú..." multiline style={styles.textarea} />
+          {/* Recurring toggle and end date (only for leave mode) */}
+          {mode === 'leave' ? (
+            <>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+                <Text style={[styles.label, { marginBottom: 0 }]}>Lặp lại hàng tuần</Text>
+                <Switch value={isRecurring} onValueChange={(v) => { setIsRecurring(v); if (!v) setEndDateInput(''); }} />
+              </View>
+
+              {isRecurring ? (
+                <>
+                  <Text style={styles.label}>Ngày kết thúc</Text>
+                  <View style={styles.dateRow}>
+                    <TextInput
+                      value={endDateInput}
+                      onChangeText={setEndDateInput}
+                      placeholder="YYYY-MM-DD"
+                      style={[styles.dateInput, { flex: 1 }]}
+                    />
+                    <TouchableOpacity
+                      style={styles.calendarBtn}
+                      onPress={() => { setCalendarTarget('end'); setCalendarVisible((v) => !v); }}
+                    >
+                      <Feather name="calendar" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : null}
+
+              <Text style={[styles.label, { marginTop: 12 }]}>Lý do xin nghỉ</Text>
+              <TextInput value={note} onChangeText={setNote} placeholder="Thêm ghi chú..." multiline style={styles.textarea} />
+            </>
+          ) : (
+            <>
+              <Text style={styles.label}>Ghi chú (không bắt buộc)</Text>
+              <TextInput value={note} onChangeText={setNote} placeholder="Thêm ghi chú..." multiline style={styles.textarea} />
+            </>
+          )}
 
           <View style={styles.actionRow}>
             <TouchableOpacity onPress={onClose} style={[styles.btn, styles.btnGhost, { marginRight: 8 }]}>

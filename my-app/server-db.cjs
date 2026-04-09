@@ -89,6 +89,44 @@ app.get('/api/owner/retail/shifts', (req, res) => {
   });
 });
 
+// Attendance report mock endpoint (aggregates last 30 days)
+app.get('/api/owner/attendance-report', (req, res) => {
+  console.log('📡 GET /api/owner/attendance-report - Aggregating attendance from SQLite...');
+  const query = `
+    SELECT
+      sh.staff_id AS StaffId,
+      COALESCE(st.name, '') AS StaffName,
+      COUNT(1) AS TotalShifts,
+      SUM(CASE WHEN LOWER(COALESCE(sh.type,'')) = 'present' THEN 1 ELSE 0 END) AS Present,
+      SUM(CASE WHEN LOWER(COALESCE(sh.type,'')) = 'late' THEN 1 ELSE 0 END) AS Late,
+      SUM(CASE WHEN LOWER(COALESCE(sh.type,'')) IN ('absent','leave','off') THEN 1 ELSE 0 END) AS Absent,
+      SUM(COALESCE((strftime('%s', sh.date || ' ' || sh.end_time) - strftime('%s', sh.date || ' ' || sh.start_time))/3600.0,0)) AS TotalHours
+    FROM shifts sh
+    LEFT JOIN staff st ON st.id = sh.staff_id
+    WHERE date(sh.date) >= date('now','-29 day')
+    GROUP BY sh.staff_id, st.name
+    ORDER BY st.name
+  `;
+
+  db.all(query, [], (err, rows) => {
+    if (err) {
+      console.error('❌ Attendance aggregation error:', err.message);
+      return res.status(500).json({ ok: false, error: 'Database error' });
+    }
+    // Ensure numeric values are proper JS numbers
+    const normalized = (rows || []).map(r => ({
+      StaffId: r.StaffId,
+      StaffName: r.StaffName,
+      TotalShifts: Number(r.TotalShifts || 0),
+      Present: Number(r.Present || 0),
+      Late: Number(r.Late || 0),
+      Absent: Number(r.Absent || 0),
+      TotalHours: Math.round((Number(r.TotalHours || 0)) * 10) / 10
+    }));
+    res.json({ ok: true, data: normalized });
+  });
+});
+
 app.post('/api/owner/retail/shifts', (req, res) => {
   console.log('📡 POST /api/owner/retail/shifts - Creating new shift in database...');
   

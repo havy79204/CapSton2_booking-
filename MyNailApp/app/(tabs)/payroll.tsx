@@ -1,8 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Platform, Modal, TextInput } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Card from '@/components/ui/card';
-import { get } from '@/services/apiClient';
+import { get, post } from '@/services/apiClient';
 import { subscribeStaffDataUpdates } from '../../lib/realtime';
 
 const LIVE_REFRESH_MS = 5000;
@@ -60,6 +60,9 @@ export default function PayrollScreen() {
   const [tab, setTab] = useState<'overview' | 'history' | 'tips'>('overview');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<PayrollResponse | null>(null);
+  const [showAddTip, setShowAddTip] = useState(false)
+  const [tipAmount, setTipAmount] = useState('')
+  const [postingTip, setPostingTip] = useState(false)
 
   const loadPayroll = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
@@ -156,6 +159,15 @@ export default function PayrollScreen() {
           <Text style={tab === 'tips' ? styles.tabTextActive : styles.tabText}>Tip</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Add Tip button shown when Tips tab selected */}
+      {tab === 'tips' && (
+        <View style={{ alignItems: 'flex-end', marginBottom: 12 }}>
+          <TouchableOpacity style={styles.addTipBtn} onPress={() => { setTipAmount(''); setShowAddTip(true) }}>
+            <Text style={{ color: '#fff', fontWeight: '700' }}>Ghi Tip</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {loading ? (
         <Card><ActivityIndicator /></Card>
@@ -275,6 +287,46 @@ export default function PayrollScreen() {
           ))
         )
       )}
+
+      <Modal visible={showAddTip} transparent animationType="slide">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 16 }}>
+            <Text style={{ fontWeight: '700', marginBottom: 8 }}>Thêm Tip</Text>
+            <TextInput
+              placeholder="Số tiền"
+              keyboardType="numeric"
+              value={tipAmount}
+              onChangeText={setTipAmount}
+              style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 8, marginBottom: 8 }}
+            />
+            {/* note removed — only amount is required */}
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+              <TouchableOpacity style={{ marginRight: 8 }} onPress={() => setShowAddTip(false)}>
+                <Text style={{ color: '#6b7280' }}>Huỷ</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={async () => {
+                  const amt = Number((tipAmount || '').replace(/[^0-9.]/g, ''))
+                  if (!Number.isFinite(amt) || amt <= 0) return
+                  try {
+                    setPostingTip(true)
+                    await post('/staff/payroll/tips', { amount: amt })
+                    setShowAddTip(false)
+                    loadPayroll(true)
+                  } catch (e) {
+                    // ignore errors for now
+                  } finally {
+                    setPostingTip(false)
+                  }
+                }}
+                style={[{ backgroundColor: '#10b981', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }, postingTip ? { opacity: 0.6 } : null]}
+              >
+                {postingTip ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: '700' }}>Ghi</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -300,4 +352,5 @@ const styles = StyleSheet.create({
     point: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#fff', borderWidth: 3, borderColor: '#ec4899' },
     tooltip: { position: 'absolute', backgroundColor: '#111827', paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6, zIndex: 10 },
     tooltipText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+    addTipBtn: { backgroundColor: '#7c3aed', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
 });

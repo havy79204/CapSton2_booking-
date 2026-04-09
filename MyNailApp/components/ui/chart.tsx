@@ -20,12 +20,13 @@ export function BarChart({ data, height = 120 }: { data: BarData[]; height?: num
   const [containerWidth, setContainerWidth] = useState(0)
   const [hoverIdx, setHoverIdx] = useState<number | null>(null)
 
-  const gap = 12
+  const GAP = 6
+  const RIGHT_PADDING = 36
   const barWidth = useMemo(() => {
-    if (!containerWidth || safeData.length === 0) return 28
-    const totalGap = gap * (safeData.length - 1)
-    const available = Math.max(0, containerWidth - totalGap)
-    return Math.max(24, Math.floor(available / safeData.length))
+    if (!containerWidth || safeData.length === 0) return 24
+    const totalGap = GAP * (safeData.length - 1)
+    const available = Math.max(0, containerWidth - totalGap - RIGHT_PADDING)
+    return Math.max(12, Math.floor(available / safeData.length))
   }, [containerWidth, safeData.length])
 
   return (
@@ -48,7 +49,7 @@ export function BarChart({ data, height = 120 }: { data: BarData[]; height?: num
           </View>
 
           <View
-            style={[styles.barContainer, { height: chartHeight }]}
+            style={[styles.barContainer, { height: chartHeight, paddingRight: RIGHT_PADDING }]}
             onLayout={(e: any) => setContainerWidth(e.nativeEvent.layout.width)}
           >
             {safeData.map((d, i) => {
@@ -60,7 +61,7 @@ export function BarChart({ data, height = 120 }: { data: BarData[]; height?: num
                   activeOpacity={0.9}
                   onPress={() => setHoverIdx(i)}
                   {...mouseProps}
-                  style={[styles.barColumn, { width: barWidth, marginRight: i === safeData.length - 1 ? 0 : gap }]}
+                  style={[styles.barColumn, { width: barWidth, marginRight: i === safeData.length - 1 ? 0 : GAP }]}
                 >
                   <View style={[styles.bar, { height: h, width: barWidth }]} />
                   <Text style={styles.barLabel}>{d.label}</Text>

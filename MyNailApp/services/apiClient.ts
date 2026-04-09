@@ -101,8 +101,11 @@ export function put(path: string, body?: any) {
   return request(path, { method: 'PUT', body: JSON.stringify(body) })
 }
 
-export function del(path: string) {
-  return request(path, { method: 'DELETE' })
+export function del(path: string, body?: any) {
+  return request(path, {
+    method: 'DELETE',
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  })
 }
 
 export default { post, get, put, del, API_BASE }

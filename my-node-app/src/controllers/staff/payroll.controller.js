@@ -38,7 +38,41 @@ const getPayrollDebug = asyncHandler(async (req, res) => {
     res.json({ ok: true, data })
 })
 
+const getTips = asyncHandler(async (req, res) => {
+    const staffId = await resolveStaffId(req)
+    if (!staffId) {
+        res.status(401).json({ ok: false, error: 'Unauthorized' })
+        return
+    }
+
+    const month = String(req.query.month || '').trim() || null
+    const tipService = require('../../services/tip.service')
+    const data = await tipService.listTipsForStaff(staffId, { month })
+    res.json({ ok: true, data })
+})
+
+const postTip = asyncHandler(async (req, res) => {
+    const staffId = await resolveStaffId(req)
+    if (!staffId) {
+        res.status(401).json({ ok: false, error: 'Unauthorized' })
+        return
+    }
+
+    const amount = Number(req.body?.amount || 0)
+    const at = req.body?.at || null
+    if (!Number.isFinite(amount) || amount <= 0) {
+        res.status(400).json({ ok: false, error: 'Invalid amount' })
+        return
+    }
+
+    const tipService = require('../../services/tip.service')
+    const inserted = await tipService.addTipForStaff(staffId, amount, at)
+    res.status(201).json({ ok: true, data: inserted })
+})
+
 module.exports = {
     getPayrollOverview,
     getPayrollDebug,
+    getTips,
+    postTip,
 }

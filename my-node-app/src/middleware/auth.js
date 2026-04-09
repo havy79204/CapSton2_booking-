@@ -23,10 +23,15 @@ function requireAuth(req, res, next) {
     // normalize a simple userId on the request for convenience (may be numeric or string)
     const maybeId = payload?.sub || payload?.userId || payload?.UserId || payload?.id || payload?.uid || null
     req.userId = maybeId !== undefined && maybeId !== null ? String(maybeId) : null
-    if (!env || env.nodeEnv !== 'production') {
-      try {
-        console.debug('[requireAuth] authenticated user payload keys:', Object.keys(payload || {}), 'userId:', req.userId)
-      } catch (e) { /* ignore logging errors */ }
+    try {
+      // Respect SILENT_LOGS=1 to suppress verbose auth logs in terminals
+      if (!(String(process.env.SILENT_LOGS || '').trim() === '1')) {
+        if (!env || env.nodeEnv !== 'production') {
+          console.debug('[requireAuth] authenticated user payload keys:', Object.keys(payload || {}), 'userId:', req.userId)
+        }
+      }
+    } catch (e) {
+      /* ignore logging errors */
     }
     next()
   } catch (err) {

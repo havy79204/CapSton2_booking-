@@ -46,6 +46,7 @@
   flex-direction: column;
   overflow: hidden;
   box-shadow: var(--shadow-md);
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
 .portal-brand {
@@ -658,13 +659,10 @@ input[class*="search"]::placeholder {
     rgba(80, 35, 3, 0.13)
   );
 
-  backdrop-filter: blur(14px) saturate(220%);
   -webkit-backdrop-filter: blur(14px) saturate(220%);
+  backdrop-filter: blur(14px) saturate(220%);
 
   border: none;
-
-  color: #fff;
-  font-weight: 800;
   letter-spacing: 0.3px;
 
   box-shadow:
@@ -890,7 +888,8 @@ input[class*="search"]::placeholder {
     #452a03bf 0%,
     var(--color-secondary) 100%
   );
-
+  
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -971,6 +970,8 @@ input[class*="search"]::placeholder {
   font-size: 12px;
 
   background: rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -1013,6 +1014,7 @@ input[class*="search"]::placeholder {
   padding: 24px;
 
   background: rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(30px);
   backdrop-filter: blur(30px);
 
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -1046,6 +1048,7 @@ input[class*="search"]::placeholder {
   font-weight: 900;
   font-size: 12px;
   background: rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -1127,6 +1130,7 @@ input[class*="search"]::placeholder {
   padding: 24px;
 
   background: rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(30px);
   backdrop-filter: blur(30px);
 
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -1219,6 +1223,7 @@ input[class*="search"]::placeholder {
     rgba(60, 48, 5, 0.359)
   );
 
+  -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 
   color: #fff;
@@ -1262,8 +1267,8 @@ input[class*="search"]::placeholder {
     rgba(80, 35, 3, 0.13)
   );
 
-  backdrop-filter: blur(14px) saturate(220%);
-  -webkit-backdrop-filter: blur(14px) saturate(220%);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
 
   border: none;
 
@@ -1391,6 +1396,7 @@ input[class*="search"]::placeholder {
   height: 100%;
 
   background: rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(30px);
   backdrop-filter: blur(30px);
 
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -1627,6 +1633,7 @@ input[class*="search"]::placeholder {
   padding: 24px;
 
   background: rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(30px);
   backdrop-filter: blur(30px);
 
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -1793,8 +1800,8 @@ input[class*="search"]::placeholder {
 }
 
 .portal-reportBarPair {
-  width: 100%;
-  height: 100%;
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -2015,15 +2022,26 @@ input[class*="search"]::placeholder {
 }
 
 .portal-switchKnob {
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
-  transform: translateX(0);
-  transition: transform 140ms ease;
+  /* Default: occupy available width in single-bar columns */
+  width: 100%;
+  max-width: 120px;
+  height: var(--bar-h, 120px);
+  border-radius: 14px;
+  background: var(--primary-2);
+  box-sizing: border-box;
+}
+ .portal-reportBarAlt {
+  background: var(--purple);
 }
 
+/* When bars are placed in a paired container, allow them to share space
+   instead of each forcing 100% width (which caused overflow) */
+.portal-reportBarPair > .portal-reportBar,
+.portal-reportBarPair > .portal-reportBarAlt {
+  width: auto;
+  max-width: none;
+  flex: 1 1 0;
+}
 .portal-switch.on .portal-switchKnob {
   transform: translateX(22px);
 }
@@ -2082,8 +2100,8 @@ input[class*="search"]::placeholder {
   padding: 24px;
   border-radius: 20px;
   background: rgba(54, 36, 2, 0.501);
-  backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
   /* viền mờ */
   border: 1px solid rgba(255, 255, 255, 0.15);
   /* soft shadowềm */
@@ -2147,6 +2165,7 @@ input[class*="search"]::placeholder {
   place-items: center;
   padding: 22px;
   z-index: 50;
+  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
 }
 
@@ -2418,8 +2437,8 @@ input[class*="search"]::placeholder {
     0 12px 26px rgba(20, 12, 5, 0.42);
   color: #fff7ea;
   pointer-events: auto;
-  backdrop-filter: blur(16px) saturate(150%);
   -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
 }
 .portal-toast-error {
   background: linear-gradient(
@@ -2510,8 +2529,8 @@ input[class*="search"]::placeholder {
   background: rgba(54, 36, 2, 0.501);
 
   /* hiệu ứng blur nền phía sau */
-  backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
 
   /* viền mờ */
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -2838,8 +2857,8 @@ input[class*="search"]::placeholder {
       rgba(80, 35, 3, 0.13)
     );
 
-    backdrop-filter: blur(14px) saturate(220%);
     -webkit-backdrop-filter: blur(14px) saturate(220%);
+    backdrop-filter: blur(14px) saturate(220%);
 
     border: 1px solid rgba(255, 235, 153, 0);
 
@@ -3263,6 +3282,7 @@ input[class*="search"]::placeholder {
 
 .portal-header {
   background: rgba(255, 255, 255, 0.92);
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
 }
