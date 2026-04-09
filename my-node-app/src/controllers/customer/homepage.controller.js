@@ -65,6 +65,13 @@ const createServiceReview = asyncHandler(async (req, res) => {
   res.status(201).json({ ok: true, data })
 })
 
+const deleteServiceReview = asyncHandler(async (req, res) => {
+  const { serviceId, reviewId } = req.params
+  const userId = String(req.user?.sub || '').trim()
+  const data = await homepageService.deleteServiceReview(serviceId, reviewId, userId)
+  res.json({ ok: true, data })
+})
+
 /**
  * GET /api/homepage/products/:productId/rating
  * Get rating for product
@@ -103,6 +110,13 @@ const createProductReview = asyncHandler(async (req, res) => {
     userId,
   })
   res.status(201).json({ ok: true, data })
+})
+
+const deleteProductReview = asyncHandler(async (req, res) => {
+  const { productId, reviewId } = req.params
+  const userId = String(req.user?.sub || '').trim()
+  const data = await homepageService.deleteProductReview(productId, reviewId, userId)
+  res.json({ ok: true, data })
 })
 
 /**
@@ -164,9 +178,11 @@ module.exports = {
   getProducts,
   getServiceReviews,
   createServiceReview,
+  deleteServiceReview,
   getProductRating,
   getProductReviews,
   createProductReview,
+  deleteProductReview,
   getReviews,
   getMyReviews,
   getStats

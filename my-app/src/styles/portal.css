@@ -19,7 +19,11 @@
   min-height: 100vh;
   background: var(--bg);
   color: var(--text);
-  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family:
+    "Segoe UI",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
 
   /* Light theme for the owner portal layout */
   --sidebar-bg: #ffffff;
@@ -27,7 +31,7 @@
   --sidebar-text: #64748b;
   --sidebar-text-strong: #1f2937;
   --sidebar-surface: rgba(251, 146, 60, 0.06);
-  --sidebar-hover: rgba(251, 146, 60, 0.10);
+  --sidebar-hover: rgba(251, 146, 60, 0.1);
   --sidebar-active: rgba(251, 146, 60, 0.16);
 }
 .portal-layout {
@@ -310,7 +314,7 @@
   justify-content: center !important;
   width: auto !important;
   height: auto !important;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
   outline: none !important;
   text-decoration: none !important;
   transition: none !important;
@@ -324,7 +328,7 @@
   border-style: none !important;
   border-width: 0 !important;
   border-radius: 8px !important;
-  box-shadow: 0 1px 4px rgba(255,140,0,0.3) !important;
+  box-shadow: 0 1px 4px rgba(255, 140, 0, 0.3) !important;
   outline: none !important;
   text-decoration: none !important;
   transform: none !important;
@@ -332,7 +336,7 @@
 
 .service-page .portal-primaryBtn:active {
   transform: none !important;
-  box-shadow: 0 1px 2px rgba(255,140,0,0.2) !important;
+  box-shadow: 0 1px 2px rgba(255, 140, 0, 0.2) !important;
 }
 
 /* ===== HIGH SPECIFICITY BUTTON OVERRIDES - CAM THEME ===== */
@@ -358,7 +362,7 @@ html body .products-pagination button {
   justify-content: center !important;
   width: auto !important;
   height: auto !important;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
   outline: none !important;
   text-decoration: none !important;
   transition: none !important;
@@ -378,7 +382,7 @@ html body .products-pagination button:hover {
   border-style: none !important;
   border-width: 0 !important;
   border-radius: 25px !important;
-  box-shadow: 0 1px 4px rgba(255,140,0,0.3) !important;
+  box-shadow: 0 1px 4px rgba(255, 140, 0, 0.3) !important;
   outline: none !important;
   text-decoration: none !important;
   transform: none !important;
@@ -391,7 +395,7 @@ html body .products-pagination button:hover {
   gap: 10px;
   background: #ffffff;
   border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border-radius: 0px;
   padding: 12px 16px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   transition: none;
@@ -486,7 +490,6 @@ input[class*="search"]::placeholder {
   color: #9ca3af !important;
   opacity: 0.8 !important;
 }
-
 
 .portal-headerRight {
   display: flex;
@@ -2202,14 +2205,22 @@ input[class*="search"]::placeholder {
 }
 
 .portal-modal::-webkit-scrollbar-thumb {
-  background: linear-gradient(135deg, rgba(245,230,211,0.6) 0%, rgba(240,220,195,0.8) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(245, 230, 211, 0.6) 0%,
+    rgba(240, 220, 195, 0.8) 100%
+  );
   border-radius: 4px;
   transition: all 0.2s ease;
   margin: 8px 0;
 }
 
 .portal-modal::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(135deg, rgba(245,230,211,0.8) 0%, rgba(240,220,195,0.9) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(245, 230, 211, 0.8) 0%,
+    rgba(240, 220, 195, 0.9) 100%
+  );
 }
 
 .portal-modal::-webkit-scrollbar-corner {
@@ -2800,7 +2811,6 @@ input[class*="search"]::placeholder {
   box-shadow: var(--shadow-sm);
 }
 
-
 .portal-ghostBtn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -3193,7 +3203,7 @@ input[class*="search"]::placeholder {
   border-color: rgba(37, 99, 235, 0.2);
 }
 
-.portal-badge.canceled {
+.portal-badge.cancelled {
   background: rgba(56, 1, 1, 0.099);
   color: #d50303;
   border-color: rgba(167, 0, 0, 0.414);
@@ -3243,7 +3253,7 @@ input[class*="search"]::placeholder {
   --surface: #ffffff;
   --text: #111827;
   --muted: rgba(17, 24, 39, 0.62);
-  --border: rgba(15, 23, 42, 0.10);
+  --border: rgba(15, 23, 42, 0.1);
   --surface-hover: rgba(15, 23, 42, 0.03);
   --field-bg: #ffffff;
   --focus-outline: rgba(255, 127, 80, 0.9);
@@ -3271,7 +3281,7 @@ input[class*="search"]::placeholder {
 }
 
 .portal-navLink:hover {
-  background: rgba(255, 127, 80, 0.10);
+  background: rgba(255, 127, 80, 0.1);
   color: rgba(15, 23, 42, 0.92);
 }
 
@@ -3293,7 +3303,7 @@ input[class*="search"]::placeholder {
 
 .portal-headerSubtitle {
   margin: 0;
-  color: rgba(17, 24, 39, 0.60);
+  color: rgba(17, 24, 39, 0.6);
   font-weight: 700;
   font-size: 13px;
   white-space: nowrap;
@@ -3354,7 +3364,7 @@ input[class*="search"]::placeholder {
 }
 
 .portal-label {
-  color: rgba(15, 23, 42, 0.70);
+  color: rgba(15, 23, 42, 0.7);
 }
 
 /* Search */
@@ -3370,7 +3380,7 @@ input[class*="search"]::placeholder {
 
 /* Table */
 .portal-table th {
-  color: rgba(15, 23, 42, 0.70);
+  color: rgba(15, 23, 42, 0.7);
   background: rgba(15, 23, 42, 0.02);
 }
 
@@ -3388,8 +3398,6 @@ input[class*="search"]::placeholder {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
   color: rgba(15, 23, 42, 0.92);
 }
-
-
 
 /* Reduce accidental huge SVGs anywhere */
 .portal svg {

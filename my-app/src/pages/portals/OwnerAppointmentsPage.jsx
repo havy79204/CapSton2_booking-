@@ -21,7 +21,8 @@ export default function OwnerAppointmentsPage() {
   const [viewMode, setViewMode] = useState('calendar')
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [appointmentToDelete, setAppointmentToDelete] = useState(null)
-  const [deletingAppointmentId, setDeletingAppointmentId] = useState('')
+  const [deletingAppointmentId, setDeletingAppointmentId] = useState(null)
+  const [promotionCode, setPromotionCode] = useState('')
 
   const TIME_SLOT_MINUTES = 30
   const TIME_CELL_HEIGHT = 64
@@ -132,7 +133,7 @@ export default function OwnerAppointmentsPage() {
   const fetchData = async () => {
     try {
       const [apptRes, staffRes, custRes, svcRes] = await Promise.all([
-        api.get('/api/owner/appointments'),
+        api.get('/api/owner/appointments'), // Use real endpoint with auth
         api.get('/api/owner/staff'),
         api.get('/api/owner/customers'),
         api.get('/api/owner/services'),
@@ -222,7 +223,12 @@ export default function OwnerAppointmentsPage() {
           date: appointmentDate,
           time: normalizeTime(a.time || a.BookingTime || a.startTime),
           status: (a.status || a.Status || 'pending').toLowerCase(),
-          serviceIds: sIds
+          serviceIds: sIds,
+          // Add price, discount, totalPrice fields
+          price: a.price || 0,
+          discount: a.discount || 0,
+          discountType: a.discountType || 'percentage',
+          totalPrice: a.totalPrice || 0
         };
       });
 
@@ -260,7 +266,7 @@ export default function OwnerAppointmentsPage() {
     if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') e.nativeEvent.stopImmediatePropagation();
     if (typeof console !== 'undefined' && console.debug) console.debug('OwnerAppointments: handleEditClick', { id: appt?.id, status: appt?.status, eventType: e.type, button: e.button });
     const rawStatus = String(appt?.status || '').trim().toLowerCase();
-    const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'canceled' : (appt?.status || 'pending');
+    const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'cancelled' : (appt?.status || 'pending');
     setEditingAppt({ ...appt, status: normalizedStatus });
     const currentIds = Array.isArray(appt.serviceIds) ? appt.serviceIds.map(String) : [];
     setSelectedServiceIds(currentIds);
@@ -323,50 +329,6 @@ export default function OwnerAppointmentsPage() {
     const date = formData.get('date');
     const time = formData.get('time');
 
-    const sameStaffAppts = appointments.filter(a => {
-      const apptDate = new Date(a.date || a.BookingTime);
-      const selected = new Date(date);
-      return String(a.staffId) === String(staffId) &&
-             apptDate.toDateString() === selected.toDateString() &&
-             String(a.id) !== String(editingAppt?.id);
-    });
-
-    // Only check for overlap when creating new appointment or when date/time/staff actually changed
-    const isNewAppointment = !editingAppt;
-    
-    // Robust schedule change detection
-    let hasScheduleChanged = false;
-    if (editingAppt) {
-      const staffChanged = String(editingAppt.staffId) !== String(staffId);
-      
-      // Handle date comparison properly
-      let currentDateStr = '';
-      if (editingAppt.date) {
-        const d = new Date(editingAppt.date);
-        currentDateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      }
-      const dateChanged = currentDateStr !== date; // date from form is YYYY-MM-DD
-      
-      // Handle time comparison - normalize both times
-      const currentTime = normalizeTime(editingAppt.time || '');
-      const newTime = normalizeTime(time);
-      const timeChanged = currentTime !== newTime;
-      
-      hasScheduleChanged = staffChanged || dateChanged || timeChanged;
-      
-      console.log('[DEBUG Schedule Check]', {
-        staffChanged, staffId, editingStaffId: editingAppt.staffId,
-        dateChanged, currentDateStr, formDate: date,
-        timeChanged, currentTime, newTime,
-        hasScheduleChanged
-      });
-    }
-
-    if ((isNewAppointment || hasScheduleChanged) && isOverlap({ time, duration: totalDuration }, sameStaffAppts)) {
-      alert("This staff member already has an appointment during this time!");
-      return;
-    }
-
     const payload = {
       customerUserId: formData.get('customerUserId'),
       serviceIds: selectedServiceIds,
@@ -375,22 +337,25 @@ export default function OwnerAppointmentsPage() {
       time: normalizeTime(time),
       notes: formData.get('notes') || "",
       duration: totalDuration,
+      promotionCode: promotionCode || null,
       // Determine status: prefer explicit form value; otherwise keep existing editingAppt status
       status: (function() {
         const raw = formData.get('status');
         if (raw !== null && String(raw).trim() !== '') {
           const s = String(raw).trim();
           const lower = s.toLowerCase();
-          if (lower === 'delete' || lower === 'deleted') return 'canceled';
+          if (lower === 'delete' || lower === 'deleted') return 'cancelled';
           return s;
         }
         return editingAppt?.status || 'pending';
       })()
     };
 
+    console.log('[DEBUG FRONTEND] Submitting payload:', payload);
+
     try {
-      const targetId = editingAppt?.id || editingAppt?.AppointmentId || editingAppt?.BookingId;
       if (editingAppt) {
+        const targetId = editingAppt.id || editingAppt.AppointmentId || editingAppt.BookingId;
         if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) console.debug('OwnerAppointments: updating', targetId, payload)
         await api.put(`/api/owner/appointments/${targetId}`, payload);
         window.dispatchEvent(new CustomEvent('portal:success-modal', { 
@@ -406,16 +371,22 @@ export default function OwnerAppointmentsPage() {
       setOpen(false);
       setEditingAppt(null);
       setSelectedServiceIds([]);
+      setPromotionCode('');
       await fetchData();
     } catch (err) {
-      alert("Error: " + (err.response?.data?.error || "Unable to save"));
+      console.error('[DEBUG FRONTEND] Error:', err);
+      const errorMessage = err.response?.data?.error || err.message || "Unable to save";
+      // Hiển thị popup toast thay vì alert
+      window.dispatchEvent(new CustomEvent('portal:toast', {
+        detail: { type: 'error', title: 'Error', message: errorMessage },
+      }));
     }
   }
 
   const filteredAppointments = useMemo(() => 
     appointments
       .filter(appt => {
-        // Show all appointments including canceled and completed
+        // Show all appointments including cancelled and completed
         // Only filter out appointments that are explicitly marked for deletion with a special flag
         return true;
       })
@@ -593,6 +564,9 @@ export default function OwnerAppointmentsPage() {
                   <th style={{ padding: '8px' }}>Service</th>
                   <th style={{ padding: '8px' }}>Customer</th>
                   <th style={{ padding: '8px' }}>Duration</th>
+                  <th style={{ padding: '8px' }}>Price</th>
+                  <th style={{ padding: '8px' }}>Discount</th>
+                  <th style={{ padding: '8px' }}>Total Price</th>
                   <th style={{ padding: '8px' }}>Status</th>
                   <th style={{ padding: '8px' }}>Actions</th>
                 </tr>
@@ -600,7 +574,7 @@ export default function OwnerAppointmentsPage() {
             <tbody>
               {listAppointments.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ padding: '12px', color: '#6b7280' }}>No appointments found.</td>
+                  <td colSpan={11} style={{ padding: '12px', color: '#6b7280' }}>No appointments found.</td>
                 </tr>
               )}
               {listAppointments.map(appt => {
@@ -613,6 +587,19 @@ export default function OwnerAppointmentsPage() {
                     <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.service}</td>
                     <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.customer}</td>
                     <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.duration}m</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle', textAlign: 'right' }}>
+                      {appt.price ? `${Number(appt.price).toLocaleString()}đ` : '—'}
+                    </td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle', textAlign: 'right' }}>
+                      {appt.discount && appt.discount > 0 ? (
+                        <span>
+                          {appt.discountType === 'percentage' ? `${appt.discount}%` : `${Number(appt.discount).toLocaleString()}đ`}
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle', textAlign: 'right', fontWeight: 'bold' }}>
+                      {appt.totalPrice ? `${Number(appt.totalPrice).toLocaleString()}đ` : '—'}
+                    </td>
                     <td style={{ padding: '8px', verticalAlign: 'middle', textTransform: 'capitalize' }}>{appt.status}</td>
                     <td style={{ padding: '8px', verticalAlign: 'middle' }}>
                       <button type="button" className="btn secondary" style={{ marginRight: '6px' }} onClick={(e) => handleEditClick(e, appt)}>Edit</button>
@@ -626,7 +613,7 @@ export default function OwnerAppointmentsPage() {
         </div>
       )}
 
-      <PortalModal open={open} onClose={() => {setOpen(false); setEditingAppt(null);}} title={editingAppt ? "Edit Appointment" : "Add New Appointment"}>
+      <PortalModal open={open} onClose={() => {setOpen(false); setEditingAppt(null); setPromotionCode('');}} title={editingAppt ? "Edit Appointment" : "Add New Appointment"}>
         <form className="appt-form" onSubmit={handleSubmit} style={{ maxHeight: '85vh', overflowY: 'auto', paddingRight: '10px' }}>
           <div style={{ display: 'flex', gap: '10px' }}>
             <div className="form-group" style={{ flex: 1 }}>
@@ -700,13 +687,33 @@ export default function OwnerAppointmentsPage() {
               <option value="pending">Pending</option>
               <option value="booked">Booked</option>
                 <option value="completed">Completed</option>
-                <option value="canceled">Canceled</option>
+                <option value="cancelled">Cancelled</option>
             </select>
           </div>
 
           <div className="form-group">
             <label>Notes</label>
             <textarea name="notes" rows="3" defaultValue={editingAppt?.notes || ""}></textarea>
+          </div>
+
+          <div className="form-group">
+            <label>Promotion Code</label>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <input
+                type="text"
+                value={promotionCode}
+                onChange={(e) => setPromotionCode(e.target.value.toUpperCase())}
+                placeholder="Enter promotion code"
+                style={{ flex: 1, padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }}
+              />
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => setPromotionCode('')}
+              >
+                Clear
+              </button>
+            </div>
           </div>
 
           <div className="form-actions">

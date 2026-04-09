@@ -26,12 +26,12 @@
 
 .products-page .portal-table th:nth-child(1),
 .products-page .portal-table td:nth-child(1) {
-  width: 22%;
+  width: 20%;
 }
 
 .products-page .portal-table th:nth-child(2),
 .products-page .portal-table td:nth-child(2) {
-  width: 16%;
+  width: 14%;
 }
 
 .products-page .portal-table th:nth-child(3),
@@ -50,12 +50,7 @@
 
 .products-page .portal-table th:nth-child(7),
 .products-page .portal-table td:nth-child(7) {
-  width: 9%;
-}
-
-.products-page .portal-table th:nth-child(8),
-.products-page .portal-table td:nth-child(8) {
-  width: 18%;
+  width: 20%;
 }
 
 .products-page .portal-table th {
@@ -118,21 +113,36 @@
 }
 
 .products-page .portal-table th:nth-child(7),
-.products-page .portal-table th:nth-child(8),
 .products-page .portal-table td:nth-child(7),
-.products-page .portal-table td:nth-child(8) {
+.products-page .portal-table td:nth-child(7) {
   text-align: center;
 }
 
-.products-page .portal-table td:nth-child(8) .portal-rowActions {
+.products-page .portal-table td:nth-child(7) .portal-rowActions {
   justify-content: center;
   gap: 8px;
   flex-wrap: nowrap;
 }
 
-.products-page .portal-table td:nth-child(8) .portal-ghostBtn {
+.products-page .portal-table td:nth-child(7) .portal-ghostBtn {
   min-width: 70px;
   padding: 7px 10px;
+}
+
+.products-warningIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.products-warningIcon svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2;
 }
 
 .products-filterRow {
@@ -349,4 +359,17 @@
   border-radius: 8px;
   font-weight: 700;
   margin-left: 8px;
+}
+
+/* Warning indicators for stock and rating */
+.products-page .portal-table td {
+  position: relative;
+}
+
+.products-page .portal-table td span[style*="color: #dc2626"] {
+  font-weight: 600;
+}
+
+.products-page .portal-table td span[style*="color: #f59e0b"] {
+  font-weight: 600;
 }

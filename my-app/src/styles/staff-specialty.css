@@ -62,19 +62,20 @@
 
 .staff-addModal .portal-specialtyChip:hover,
 .staff-detailModal .portal-specialtyChip:hover {
-  border-color: #b99466;
-  background: rgba(104, 71, 20, 0.6);
-  color: #fff7eb;
-  transform: translateY(-1px);
+  border-color: #ff7b00;
+  background: rgba(255, 123, 0, 0.15);
+  color: #ff7b00;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(255, 123, 0, 0.25);
 }
 
 .staff-addModal .portal-specialtyChip.is-selected,
 .staff-detailModal .portal-specialtyChip.is-selected {
-  border-color: #f0d4ac;
-  background: linear-gradient(145deg, #a67a4d 0%, #c89968 100%);
+  border-color: #ff7b00;
+  background: linear-gradient(145deg, #ff7b00 0%, #ffb347 100%);
   color: #ffffff;
-  font-weight: 500;
-  box-shadow: 0 4px 8px -1px rgba(83, 55, 23, 0.35);
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(255, 123, 0, 0.3);
 }
 
 .staff-addModal .portal-specialtyChip span,

@@ -1,5 +1,7 @@
 const { query, newId } = require('../config/query')
 const crypto = require('crypto')
+const fs = require('fs/promises')
+const path = require('path')
 const { env } = require('../config/config')
 const { getSettingsMap } = require('./settings.service')
 const { upsertPaymentRecord, resolveInvoiceIdForPayment } = require('./paymentPersistence.service')
@@ -7,7 +9,76 @@ const { notifyCustomerEvent, notifyOwnerEvent, scheduleBookingReminders } = requ
 const { setFrontendOriginForTxnRef } = require('./vnpayFrontendReturnStore.service')
 
 let _ordersChannelColumnPromise = null
+let _reviewImageColumnPromise = null
 const ACTIVE_SERVICE_WHERE = `(Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) = 'active')`
+const REVIEW_IMAGE_COLUMN_CANDIDATES = ['ReviewImages', 'ImageUrls', 'ImagesJson', 'ImageUrl']
+
+function parseImageDataUrl(dataUrl) {
+  const raw = String(dataUrl || '').trim()
+  const m = raw.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/i)
+  if (!m) return null
+  const kind = m[1].toLowerCase()
+  const base64 = m[2]
+  const buf = Buffer.from(base64, 'base64')
+  const ext = kind === 'jpeg' ? 'jpg' : kind
+  return { buf, ext }
+}
+
+function getReviewUploadDir() {
+  return path.join(__dirname, '..', '..', 'uploads', 'reviews')
+}
+
+async function saveReviewImagesFromDataUrls(imageDataUrls, options = {}) {
+  const maxImages = Math.max(1, Number(options.maxImages || 3))
+  const input = Array.isArray(imageDataUrls)
+    ? imageDataUrls
+    : imageDataUrls
+      ? [imageDataUrls]
+      : []
+
+  const cleaned = input
+    .map((x) => String(x || '').trim())
+    .filter(Boolean)
+    .slice(0, maxImages)
+
+  if (!cleaned.length) return []
+
+  const dir = getReviewUploadDir()
+  await fs.mkdir(dir, { recursive: true })
+
+  const saved = []
+  for (const dataUrl of cleaned) {
+    const parsed = parseImageDataUrl(dataUrl)
+    if (!parsed) continue
+    if (!parsed.buf || parsed.buf.length < 1024) continue
+    if (parsed.buf.length > 6 * 1024 * 1024) continue
+
+    const fileName = `review-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${parsed.ext}`
+    const filePath = path.join(dir, fileName)
+    await fs.writeFile(filePath, parsed.buf)
+    saved.push(`/uploads/reviews/${fileName}`)
+  }
+
+  return saved
+}
+
+function parseReviewImagesField(rawValue) {
+  if (Array.isArray(rawValue)) return rawValue.map((x) => String(x || '').trim()).filter(Boolean)
+  const raw = String(rawValue || '').trim()
+  if (!raw) return []
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed.map((x) => String(x || '').trim()).filter(Boolean)
+  } catch (_) {
+    // Ignore and fallback to CSV parsing.
+  }
+
+  return raw
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)
+}
 
 function requireUserId(userId) {
   const value = String(userId || '').trim()
@@ -199,7 +270,7 @@ function derivePaymentStatus(orderStatus, paymentMethod) {
   const status = String(orderStatus || '').trim().toLowerCase()
   const method = String(paymentMethod || '').trim().toLowerCase()
 
-  if (status === 'cancelled' || status === 'canceled' || status === 'failed') return 'Failed'
+  if (status === 'cancelled' || status === 'cancelled' || status === 'failed') return 'Failed'
   if (status === 'completed' || status === 'delivered' || status === 'paid' || status === 'confirmed') return 'Paid'
   if (method === 'cod' || method === 'store') return 'Pay On Delivery'
   return 'C Payment'
@@ -208,6 +279,16 @@ function derivePaymentStatus(orderStatus, paymentMethod) {
 function isCStatus(status) {
   const value = String(status || '').trim().toLowerCase()
   return value === 'c' || value === 'awaiting' || value === 'pending'
+}
+
+function isOrderCompletedStatus(status) {
+  const value = String(status || '').trim().toLowerCase()
+  return value.includes('complete')
+    || value.includes('deliver')
+    || value === 'done'
+    || value === 'success'
+    || value === 'paid'
+    || value === 'confirmed'
 }
 
 function calcOrderDiscountAmount(row) {
@@ -428,6 +509,59 @@ async function getOrdersChannelColumn() {
     return null
   })()
   return _ordersChannelColumnPromise
+}
+
+async function getSalonReviewImageColumn() {
+  if (_reviewImageColumnPromise) return _reviewImageColumnPromise
+  _reviewImageColumnPromise = (async () => {
+    try {
+      for (const name of REVIEW_IMAGE_COLUMN_CANDIDATES) {
+        if (await columnExists('SalonReviews', name)) return name
+      }
+
+      await query(`
+        IF COL_LENGTH('SalonReviews', 'ImageUrl') IS NULL
+        BEGIN
+          ALTER TABLE SalonReviews ADD ImageUrl NVARCHAR(MAX) NULL;
+        END
+      `)
+
+      if (await columnExists('SalonReviews', 'ImageUrl')) return 'ImageUrl'
+    } catch (err) {
+      // Do not fail rating flow if metadata lookup is slow/unavailable.
+      console.warn('[customerCommerce] Review image column lookup failed:', err?.message || err)
+    }
+    return null
+  })()
+  return _reviewImageColumnPromise
+}
+
+async function setReviewImagesByReviewId(reviewId, imageDataUrls) {
+  const normalizedReviewId = String(reviewId || '').trim()
+  const hasImages = Array.isArray(imageDataUrls)
+    ? imageDataUrls.some((x) => String(x || '').trim())
+    : Boolean(String(imageDataUrls || '').trim())
+
+  if (!normalizedReviewId || !hasImages) return []
+
+  const urls = await saveReviewImagesFromDataUrls(imageDataUrls, { maxImages: 3 })
+  if (!urls.length) return []
+
+  const column = await getSalonReviewImageColumn()
+  if (!column) return urls
+
+  try {
+    const value = JSON.stringify(urls)
+    await query(`UPDATE SalonReviews SET ${column} = @value WHERE ReviewId = @reviewId`, {
+      reviewId: normalizedReviewId,
+      value,
+    })
+  } catch (err) {
+    // Keep successful rating even if image persistence fails.
+    console.warn('[customerCommerce] Save review images failed:', err?.message || err)
+  }
+
+  return urls
 }
 
 function formatVnpayDate(date = new Date()) {
@@ -1761,6 +1895,9 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
 
 async function listBookings(userIdInput, limit = 20) {
   const userId = requireUserId(userIdInput)
+  const reviewImageColumn = await getSalonReviewImageColumn()
+  const bookingReviewImageSelectSql = reviewImageColumn ? `, sr.${reviewImageColumn} AS ReviewImagesRaw` : ', NULL AS ReviewImagesRaw'
+  const serviceReviewImageSelectSql = reviewImageColumn ? `, sr.${reviewImageColumn} AS ReviewImagesRaw` : ', NULL AS ReviewImagesRaw'
   const res = await query(
     `SELECT TOP (@limit)
         b.BookingId,
@@ -1788,6 +1925,20 @@ async function listBookings(userIdInput, limit = 20) {
   const results = []
 
   for (const row of rows) {
+    const bookingReviewRes = await query(
+      `SELECT TOP 1 sr.ReviewId, sr.Rating, sr.Comment, sr.CreatedAt${bookingReviewImageSelectSql}
+       FROM SalonReviews sr
+       WHERE sr.BookingId = @bookingId
+         AND sr.UserId = @userId
+         AND sr.BookingServiceId IS NULL
+         AND sr.ProductId IS NULL
+         AND sr.OrderId IS NULL
+         AND sr.Rating IS NOT NULL
+       ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC`,
+      { bookingId: row.BookingId, userId },
+    )
+    const bookingReview = bookingReviewRes.recordset?.[0] || null
+
     const svcRes = await query(
       `SELECT
           bs.BookingServiceId,
@@ -1796,12 +1947,25 @@ async function listBookings(userIdInput, limit = 20) {
           COALESCE(bs.Price, s.Price) AS Price,
           s.Name AS ServiceName,
           s.DurationMinutes,
-          s.ImageUrl
+          s.ImageUrl,
+          rv.Rating AS UserRating,
+          rv.Comment AS UserReviewComment,
+          rv.CreatedAt AS UserReviewAt,
+          rv.ReviewImagesRaw AS UserReviewImagesRaw
        FROM BookingServices bs
        LEFT JOIN Services s ON s.ServiceId = bs.ServiceId
+       OUTER APPLY (
+         SELECT TOP 1 sr.Rating, sr.Comment, sr.CreatedAt${serviceReviewImageSelectSql}
+         FROM SalonReviews sr
+         WHERE sr.BookingId = bs.BookingId
+           AND sr.BookingServiceId = bs.BookingServiceId
+           AND sr.ServiceId = bs.ServiceId
+           AND sr.UserId = @userId
+         ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC
+       ) rv
        WHERE bs.BookingId = @bookingId
        ORDER BY bs.BookingServiceId`,
-      { bookingId: row.BookingId }
+      { bookingId: row.BookingId, userId }
     )
 
     const services = (svcRes.recordset || []).map((s) => ({
@@ -1812,11 +1976,18 @@ async function listBookings(userIdInput, limit = 20) {
       DurationMinutes: Number(s.DurationMinutes || 0),
       Price: Number(s.Price || 0),
       ImageUrl: s.ImageUrl || null,
+      IsRated: Number(s.UserRating || 0) > 0,
+      Rating: Number(s.UserRating || (bookingReview?.Rating || 0)),
+      ReviewComment: s.UserReviewComment || bookingReview?.Comment || null,
+      ReviewAt: s.UserReviewAt || bookingReview?.CreatedAt || null,
+      ReviewImages: parseReviewImagesField(s.UserReviewImagesRaw || bookingReview?.ReviewImagesRaw),
     }))
 
     const subtotal = Number(row.InvoiceTotalAmount || services.reduce((sum, s) => sum + s.Price, 0))
     const discountAmount = Math.max(0, Number(row.InvoiceDiscountAmount || 0))
     const finalAmount = Number(row.InvoiceFinalAmount || Math.max(subtotal - discountAmount, 0))
+    const hasBookingReview = Number(bookingReview?.Rating || 0) > 0
+    const canRate = isOrderCompletedStatus(row.Status) && !hasBookingReview
 
     results.push({
       BookingId: row.BookingId,
@@ -1830,6 +2001,16 @@ async function listBookings(userIdInput, limit = 20) {
       DiscountAmount: discountAmount,
       TotalPrice: finalAmount,
       TotalDuration: services.reduce((sum, s) => sum + s.DurationMinutes, 0),
+      IsRated: hasBookingReview,
+      CanRate: canRate,
+      BookingReview: hasBookingReview
+        ? {
+            Rating: Number(bookingReview?.Rating || 0),
+            Comment: bookingReview?.Comment || null,
+            CreatedAt: bookingReview?.CreatedAt || null,
+            ReviewImages: parseReviewImagesField(bookingReview?.ReviewImagesRaw),
+          }
+        : null,
     })
   }
 
@@ -2378,6 +2559,19 @@ async function listOrders(userIdInput, limit = 20) {
   const orders = []
 
   for (const row of rows) {
+    const orderReviewRes = await query(
+      `SELECT TOP 1 sr.ReviewId, sr.Rating, sr.Comment, sr.CreatedAt
+       FROM SalonReviews sr
+       WHERE sr.OrderId = @orderId
+         AND sr.UserId = @userId
+         AND sr.OrderItemId IS NULL
+         AND sr.ServiceId IS NULL
+         AND sr.Rating IS NOT NULL
+       ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC`,
+      { orderId: row.OrderId, userId }
+    )
+    const orderReview = orderReviewRes.recordset?.[0] || null
+
     const itemsRes = await query(
       `SELECT
           oi.OrderItemId,
@@ -2386,12 +2580,24 @@ async function listOrders(userIdInput, limit = 20) {
           oi.Quantity,
           oi.Price,
           oi.ProductName,
-          p.ImageUrl
+          p.ImageUrl,
+          rv.Rating AS UserRating,
+          rv.Comment AS UserReviewComment,
+          rv.CreatedAt AS UserReviewAt
        FROM OrderItems oi
        LEFT JOIN Products p ON p.ProductId = oi.ProductId
+       OUTER APPLY (
+         SELECT TOP 1 sr.Rating, sr.Comment, sr.CreatedAt
+         FROM SalonReviews sr
+         WHERE sr.OrderId = oi.OrderId
+           AND sr.OrderItemId = oi.OrderItemId
+           AND sr.ProductId = oi.ProductId
+           AND sr.UserId = @userId
+         ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC
+       ) rv
        WHERE oi.OrderId = @orderId
        ORDER BY oi.OrderItemId`,
-      { orderId: row.OrderId }
+      { orderId: row.OrderId, userId }
     )
 
     const items = (itemsRes.recordset || []).map((item) => ({
@@ -2403,7 +2609,15 @@ async function listOrders(userIdInput, limit = 20) {
       Price: Number(item.Price || 0),
       ImageUrl: item.ImageUrl || null,
       LineTotal: Number(item.Quantity || 0) * Number(item.Price || 0),
+      IsRated: Number(item.UserRating || 0) > 0,
+      Rating: Number(item.UserRating || (orderReview?.Rating || 0)),
+      ReviewComment: item.UserReviewComment || orderReview?.Comment || null,
+      ReviewAt: item.UserReviewAt || orderReview?.CreatedAt || null,
     }))
+
+    const hasOrderReview = Number(orderReview?.Rating || 0) > 0
+    const isRated = hasOrderReview
+    const canRate = isOrderCompletedStatus(row.Status) && !hasOrderReview
 
     orders.push({
       OrderId: row.OrderId,
@@ -2423,6 +2637,15 @@ async function listOrders(userIdInput, limit = 20) {
       PaymentStatus: derivePaymentStatus(row.Status, row.PaymentMethod),
       GiftCardCode: row.GiftCardCode || null,
       GiftCardApplied: Number(row.GiftCardApplied || 0),
+      IsRated: isRated,
+      CanRate: canRate,
+      OrderReview: hasOrderReview
+        ? {
+            Rating: Number(orderReview?.Rating || 0),
+            Comment: orderReview?.Comment || null,
+            CreatedAt: orderReview?.CreatedAt || null,
+          }
+        : null,
       Items: items,
     })
   }
@@ -2550,7 +2773,7 @@ async function cancelOrder(userIdInput, orderIdInput) {
   return { OrderId: orderId, Status: 'Cancelled' }
 }
 
-async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInput) {
+async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInput, imageDataUrlsInput) {
   const userId = requireUserId(userIdInput)
   const bookingId = String(bookingIdInput || '').trim()
   const rating = Number(ratingInput) || 5
@@ -2569,9 +2792,9 @@ async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInpu
   }
 
   const bookingRes = await query(
-    `SELECT TOP 1 BookingId, CustomerUserId
-     FROM Bookings
-     WHERE BookingId = @bookingId AND CustomerUserId = @userId`,
+    `SELECT TOP 1 b.BookingId, b.CustomerUserId, ISNULL(b.Status, 'Pending') AS Status
+     FROM Bookings b
+     WHERE b.BookingId = @bookingId AND b.CustomerUserId = @userId`,
     { bookingId, userId }
   )
 
@@ -2582,79 +2805,385 @@ async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInpu
     throw err
   }
 
-  // Insert review into unified SalonReviews table so reviews are available
-  // for services, products, orders and bookings.
-  const reviewId = `REV-${newId()}`
-  // For booking reviews, create one SalonReviews entry per BookingService
-  const bsRes = await query(
-    `SELECT BookingServiceId, ServiceId FROM BookingServices WHERE BookingId = @bookingId`,
-    { bookingId }
+  if (!isOrderCompletedStatus(booking.Status)) {
+    const err = new Error(`Only completed bookings can be reviewed. Current status: ${booking.Status}`)
+    err.status = 409
+    throw err
+  }
+
+  const firstServiceRes = await query(
+    `SELECT TOP 1 bs.BookingServiceId, bs.ServiceId
+     FROM BookingServices bs
+     WHERE bs.BookingId = @bookingId
+     ORDER BY bs.BookingServiceId ASC`,
+    { bookingId },
+  )
+  const firstService = firstServiceRes.recordset?.[0]
+  const serviceId = String(firstService?.ServiceId || '').trim()
+  if (!serviceId) {
+    const err = new Error('Booking has no service to review')
+    err.status = 409
+    throw err
+  }
+
+  const existingRes = await query(
+    `SELECT TOP 1 sr.ReviewId
+     FROM SalonReviews sr
+     WHERE sr.BookingId = @bookingId
+       AND sr.UserId = @userId
+       AND sr.BookingServiceId IS NULL
+       AND sr.ProductId IS NULL
+       AND sr.OrderId IS NULL
+     ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC`,
+    { bookingId, userId },
+  )
+  const existingReviewId = String(existingRes.recordset?.[0]?.ReviewId || '').trim()
+
+  if (existingReviewId) {
+    await query(
+      `UPDATE SalonReviews
+       SET Rating = @rating,
+           Comment = @comment,
+           CreatedAt = SYSUTCDATETIME()
+       WHERE ReviewId = @reviewId`,
+      {
+        reviewId: existingReviewId,
+        rating,
+        comment: comment || null,
+      },
+    )
+    const reviewImages = await setReviewImagesByReviewId(existingReviewId, imageDataUrlsInput)
+    return { BookingId: bookingId, Rating: rating, Comment: comment || null, ReviewImages: reviewImages }
+  } else {
+    const reviewId = `BRV-${newId()}`
+    await query(
+      `INSERT INTO SalonReviews (ReviewId, UserId, ServiceId, Rating, Comment, CreatedAt, BookingId, BookingServiceId)
+       VALUES (@reviewId, @userId, @serviceId, @rating, @comment, SYSUTCDATETIME(), @bookingId, NULL)`,
+      {
+        reviewId,
+        userId,
+        serviceId,
+        bookingId,
+        rating,
+        comment: comment || null,
+      }
+    )
+    const reviewImages = await setReviewImagesByReviewId(reviewId, imageDataUrlsInput)
+    return { BookingId: bookingId, Rating: rating, Comment: comment || null, ReviewImages: reviewImages }
+  }
+}
+
+async function rateBookingService(userIdInput, bookingIdInput, bookingServiceIdInput, ratingInput, commentInput, imageDataUrlsInput) {
+  const userId = requireUserId(userIdInput)
+  const bookingId = String(bookingIdInput || '').trim()
+  const bookingServiceId = String(bookingServiceIdInput || '').trim()
+  const rating = Number(ratingInput) || 5
+  const comment = String(commentInput || '').trim()
+
+  if (!bookingId) {
+    const err = new Error('Missing bookingId')
+    err.status = 400
+    throw err
+  }
+  if (!bookingServiceId) {
+    const err = new Error('Missing bookingServiceId')
+    err.status = 400
+    throw err
+  }
+
+  if (rating < 1 || rating > 5) {
+    const err = new Error('Rating must be between 1 and 5')
+    err.status = 400
+    throw err
+  }
+
+  const svcRes = await query(
+    `SELECT TOP 1 b.BookingId, ISNULL(b.Status, 'Pending') AS Status, bs.BookingServiceId, bs.ServiceId
+     FROM Bookings b
+     INNER JOIN BookingServices bs ON bs.BookingId = b.BookingId
+     WHERE b.BookingId = @bookingId
+       AND b.CustomerUserId = @userId
+       AND bs.BookingServiceId = @bookingServiceId`,
+    { bookingId, userId, bookingServiceId },
   )
 
-  const rows = bsRes.recordset || []
-  if (rows.length === 0) {
-    // If no booking services found, fall back to a single row tied to BookingId via OrderId/BookingId
-    try {
-      // Set a marker ServiceId for booking-level reviews so the existing CK constraint
-      // (which requires either ServiceId or ProductId) is satisfied. Use a booking-prefixed
-      // marker to avoid colliding with real service ids.
-      const bookingServiceMarker = `BKG-${bookingId}`
-      await query(
-        `INSERT INTO [SalonReviews] (
-           [ReviewId], [UserId], [ServiceId], [ProductId], [OrderId], [BookingId], [OrderItemId], [BookingServiceId], [Rating], [Comment], [CreatedAt]
-         ) VALUES (
-           @reviewId, @userId, @serviceId, NULL, NULL, @bookingId, NULL, NULL, @rating, @comment, SYSUTCDATETIME()
-         )`,
-        {
-          reviewId,
-          userId: booking.CustomerUserId,
-          bookingId,
-          serviceId: bookingServiceMarker,
-          rating,
-          comment: comment || null,
-        }
-      )
-      return { ReviewId: reviewId, BookingId: bookingId, Rating: rating, Comment: comment || null }
-    } catch (err) {
-      console.error('[rateBooking] failed fallback SalonReviews insert', {
-        err: err?.message || err,
-        params: { reviewId, userId: booking.CustomerUserId, bookingId, rating, comment }
-      })
-      throw err
-    }
+  const bookingService = svcRes.recordset?.[0]
+  if (!bookingService) {
+    const err = new Error('Booking service not found')
+    err.status = 404
+    throw err
   }
 
-  const created = []
-  for (const r of rows) {
-    const rsReviewId = `REV-${newId()}`
-    try {
-      // Set ServiceId from the BookingServices row so the CK constraint passes.
-      await query(
-        `INSERT INTO [SalonReviews] (
-           [ReviewId], [UserId], [ServiceId], [ProductId], [OrderId], [OrderItemId], [BookingServiceId], [Rating], [Comment], [CreatedAt]
-         ) VALUES (
-           @reviewId, @userId, @serviceId, NULL, NULL, NULL, @bookingServiceId, @rating, @comment, SYSUTCDATETIME()
-         )`,
-        {
-          reviewId: rsReviewId,
-          userId: booking.CustomerUserId,
-          serviceId: r.ServiceId || `BKGSRV-${r.BookingServiceId}`,
-          bookingServiceId: r.BookingServiceId,
-          rating,
-          comment: comment || null,
-        }
-      )
-    } catch (err) {
-      console.error('[rateBooking] failed SalonReviews insert', {
-        err: err?.message || err,
-        params: { reviewId: rsReviewId, userId: booking.CustomerUserId, bookingServiceId: r.BookingServiceId, rating, comment }
-      })
-      throw err
-    }
-    created.push({ ReviewId: rsReviewId, BookingServiceId: r.BookingServiceId })
+  if (!isOrderCompletedStatus(bookingService.Status)) {
+    const err = new Error(`Only completed bookings can be reviewed. Current status: ${bookingService.Status}`)
+    err.status = 409
+    throw err
   }
 
-  return { BookingId: bookingId, Reviews: created }
+  const serviceId = String(bookingService.ServiceId || '').trim()
+  if (!serviceId) {
+    const err = new Error('Booking has no service to review')
+    err.status = 409
+    throw err
+  }
+
+  const existingRes = await query(
+    `SELECT TOP 1 ReviewId
+     FROM SalonReviews
+     WHERE BookingId = @bookingId
+       AND BookingServiceId = @bookingServiceId
+       AND ServiceId = @serviceId
+       AND UserId = @userId
+     ORDER BY CreatedAt DESC, ReviewId DESC`,
+    { bookingId, bookingServiceId, serviceId, userId },
+  )
+
+  const reviewId = String(existingRes.recordset?.[0]?.ReviewId || '').trim() || `BSV-${newId()}`
+
+  if (existingRes.recordset?.[0]) {
+    await query(
+      `UPDATE SalonReviews
+       SET Rating = @rating,
+           Comment = @comment,
+           CreatedAt = SYSUTCDATETIME()
+       WHERE ReviewId = @reviewId`,
+      { reviewId, rating, comment: comment || null },
+    )
+  } else {
+    await query(
+      `INSERT INTO SalonReviews (ReviewId, UserId, ServiceId, Rating, Comment, CreatedAt, BookingId, BookingServiceId)
+       VALUES (@reviewId, @userId, @serviceId, @rating, @comment, SYSUTCDATETIME(), @bookingId, @bookingServiceId)`,
+      {
+        reviewId,
+        userId,
+        serviceId,
+        rating,
+        comment: comment || null,
+        bookingId,
+        bookingServiceId,
+      }
+    )
+  }
+
+  const reviewImages = await setReviewImagesByReviewId(reviewId, imageDataUrlsInput)
+
+  return {
+    BookingId: bookingId,
+    BookingServiceId: bookingServiceId,
+    ServiceId: serviceId,
+    Rating: rating,
+    Comment: comment || null,
+    ReviewImages: reviewImages,
+  }
+}
+
+async function rateOrder(userIdInput, orderIdInput, ratingInput, commentInput, imageDataUrlsInput) {
+  const userId = requireUserId(userIdInput)
+  const orderId = String(orderIdInput || '').trim()
+  const rating = Number(ratingInput) || 5
+  const comment = String(commentInput || '').trim()
+
+  if (!orderId) {
+    const err = new Error('Missing orderId')
+    err.status = 400
+    throw err
+  }
+
+  if (rating < 1 || rating > 5) {
+    const err = new Error('Rating must be between 1 and 5')
+    err.status = 400
+    throw err
+  }
+
+  const orderRes = await query(
+    `SELECT TOP 1 o.OrderId, o.UserId, ISNULL(o.Status, 'Pending') AS Status
+     FROM Orders o
+     WHERE o.OrderId = @orderId AND o.UserId = @userId`,
+    { orderId, userId }
+  )
+
+  const order = orderRes.recordset?.[0]
+  if (!order) {
+    const err = new Error('Order not found')
+    err.status = 404
+    throw err
+  }
+
+  if (!isOrderCompletedStatus(order.Status)) {
+    const err = new Error(`Only completed orders can be reviewed. Current status: ${order.Status}`)
+    err.status = 409
+    throw err
+  }
+
+  const anyItemRes = await query(
+    `SELECT TOP 1 oi.OrderItemId, oi.ProductId
+     FROM OrderItems oi
+     WHERE oi.OrderId = @orderId
+     ORDER BY oi.OrderItemId ASC`,
+    { orderId }
+  )
+
+  const firstOrderItem = anyItemRes.recordset?.[0]
+  if (!firstOrderItem) {
+    const err = new Error('Order has no product to review')
+    err.status = 409
+    throw err
+  }
+
+  const orderTargetProductId = String(firstOrderItem.ProductId || '').trim()
+  if (!orderTargetProductId) {
+    const err = new Error('Order has no product to review')
+    err.status = 409
+    throw err
+  }
+
+  const existingRes = await query(
+    `SELECT TOP 1 sr.ReviewId
+     FROM SalonReviews sr
+     WHERE sr.OrderId = @orderId
+       AND sr.UserId = @userId
+       AND sr.OrderItemId IS NULL
+       AND sr.ServiceId IS NULL
+     ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC`,
+    { orderId, userId }
+  )
+  const existingReviewId = String(existingRes.recordset?.[0]?.ReviewId || '').trim()
+
+  if (existingReviewId) {
+    await query(
+      `UPDATE SalonReviews
+       SET Rating = @rating,
+           Comment = @comment,
+           CreatedAt = SYSUTCDATETIME()
+       WHERE ReviewId = @reviewId`,
+      {
+        reviewId: existingReviewId,
+        rating,
+        comment: comment || null,
+      }
+    )
+    const reviewImages = await setReviewImagesByReviewId(existingReviewId, imageDataUrlsInput)
+    return {
+      OrderId: orderId,
+      Rating: rating,
+      Comment: comment || null,
+      ReviewImages: reviewImages,
+    }
+  } else {
+    const reviewId = `ORV-${newId()}`
+    await query(
+      `INSERT INTO SalonReviews (ReviewId, UserId, ProductId, Rating, Comment, CreatedAt, OrderId, OrderItemId)
+       VALUES (@reviewId, @userId, @productId, @rating, @comment, SYSUTCDATETIME(), @orderId, NULL)`,
+      {
+        reviewId,
+        userId,
+        productId: orderTargetProductId,
+        orderId,
+        rating,
+        comment: comment || null,
+      }
+    )
+    const reviewImages = await setReviewImagesByReviewId(reviewId, imageDataUrlsInput)
+    return {
+      OrderId: orderId,
+      Rating: rating,
+      Comment: comment || null,
+      ReviewImages: reviewImages,
+    }
+  }
+}
+
+async function rateOrderItem(userIdInput, orderIdInput, orderItemIdInput, ratingInput, commentInput, imageDataUrlsInput) {
+  const userId = requireUserId(userIdInput)
+  const orderId = String(orderIdInput || '').trim()
+  const orderItemId = String(orderItemIdInput || '').trim()
+  const rating = Number(ratingInput) || 5
+  const comment = String(commentInput || '').trim()
+
+  if (!orderId) {
+    const err = new Error('Missing orderId')
+    err.status = 400
+    throw err
+  }
+  if (!orderItemId) {
+    const err = new Error('Missing orderItemId')
+    err.status = 400
+    throw err
+  }
+  if (rating < 1 || rating > 5) {
+    const err = new Error('Rating must be between 1 and 5')
+    err.status = 400
+    throw err
+  }
+
+  const itemRes = await query(
+    `SELECT TOP 1 o.OrderId, ISNULL(o.Status, 'Pending') AS Status, oi.OrderItemId, oi.ProductId
+     FROM Orders o
+     INNER JOIN OrderItems oi ON oi.OrderId = o.OrderId
+     WHERE o.OrderId = @orderId
+       AND o.UserId = @userId
+       AND oi.OrderItemId = @orderItemId`,
+    { orderId, userId, orderItemId }
+  )
+  const item = itemRes.recordset?.[0]
+  if (!item) {
+    const err = new Error('Order item not found')
+    err.status = 404
+    throw err
+  }
+
+  if (!isOrderCompletedStatus(item.Status)) {
+    const err = new Error(`Only completed orders can be reviewed. Current status: ${item.Status}`)
+    err.status = 409
+    throw err
+  }
+
+  const productId = String(item.ProductId || '').trim()
+  if (!productId) {
+    const err = new Error('Order item has no product to review')
+    err.status = 409
+    throw err
+  }
+
+  const existingRes = await query(
+    `SELECT TOP 1 ReviewId
+     FROM SalonReviews
+     WHERE OrderId = @orderId
+       AND OrderItemId = @orderItemId
+       AND ProductId = @productId
+       AND UserId = @userId
+     ORDER BY CreatedAt DESC, ReviewId DESC`,
+    { orderId, orderItemId, productId, userId }
+  )
+  const reviewId = String(existingRes.recordset?.[0]?.ReviewId || '').trim() || `PRV-${newId()}`
+
+  if (existingRes.recordset?.[0]) {
+    await query(
+      `UPDATE SalonReviews
+       SET Rating = @rating,
+           Comment = @comment,
+           CreatedAt = SYSUTCDATETIME()
+       WHERE ReviewId = @reviewId`,
+      { reviewId, rating, comment: comment || null }
+    )
+  } else {
+    await query(
+      `INSERT INTO SalonReviews (ReviewId, UserId, ProductId, Rating, Comment, CreatedAt, OrderId, OrderItemId)
+       VALUES (@reviewId, @userId, @productId, @rating, @comment, SYSUTCDATETIME(), @orderId, @orderItemId)`,
+      { reviewId, userId, productId, rating, comment: comment || null, orderId, orderItemId }
+    )
+  }
+
+  const reviewImages = await setReviewImagesByReviewId(reviewId, imageDataUrlsInput)
+
+  return {
+    OrderId: orderId,
+    OrderItemId: orderItemId,
+    ProductId: productId,
+    Rating: rating,
+    Comment: comment || null,
+    ReviewImages: reviewImages,
+  }
 }
 
 module.exports = {
@@ -2673,6 +3202,9 @@ module.exports = {
   listBookings,
   createBooking,
   rateBooking,
+  rateBookingService,
+  rateOrder,
+  rateOrderItem,
   listOrders,
   cancelBooking,
   cancelOrder,

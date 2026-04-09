@@ -40,6 +40,12 @@ function parseNumber(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback
 }
 
+function parseNullableNumber(v, fallback = 0) {
+  if (v === '' || v === null || v === undefined) return fallback
+  const n = Number(v)
+  return Number.isFinite(n) ? n : fallback
+}
+
 
 
 const WEEKDAY_FIELDS = [
@@ -199,11 +205,18 @@ export default function OwnerSettingsPage() {
             return { threshold: thres, rate: finalRate }
           }).sort((a, b) => a.threshold - b.threshold)
           return tiers
+        } else if (String(map.CommissionSource || '').trim() === 'policyTable') {
+          return []
         } else {
           const fallback = [
             { threshold: parseNumber(map.CommissionTierLow, 500000), rate: parseNumber(map.CommissionRateLow, 0.10) * 100 },
-            { threshold: parseNumber(map.CommissionTierHigh, 2000000), rate: parseNumber(map.CommissionRateHigh, 0.15) * 100 },
           ]
+          if (map.CommissionTierHigh !== null && map.CommissionTierHigh !== undefined) {
+            fallback.push({
+              threshold: parseNumber(map.CommissionTierHigh, 2000000),
+              rate: parseNumber(map.CommissionRateHigh, 0.15) * 100,
+            })
+          }
           return fallback
         }
       })(),
@@ -602,10 +615,14 @@ export default function OwnerSettingsPage() {
                       type="number"
                       min="0"
                       step="100000"
-                      value={tier.threshold}
+                      value={tier.threshold ?? ''}
                       onChange={(e) => {
+                        const nextValue = e.target.value
                         const newTiers = [...bookingRules.commissionTiers]
-                        newTiers[idx] = { ...tier, threshold: Number(e.target.value || 0) }
+                        newTiers[idx] = {
+                          ...tier,
+                          threshold: nextValue === '' ? '' : Number(nextValue),
+                        }
                         setBookingRules((p) => ({ ...p, commissionTiers: newTiers }))
                       }}
                     />
@@ -619,10 +636,14 @@ export default function OwnerSettingsPage() {
                       min="0"
                       max="100"
                       step="0.5"
-                      value={tier.rate}
+                      value={tier.rate ?? ''}
                       onChange={(e) => {
+                        const nextValue = e.target.value
                         const newTiers = [...bookingRules.commissionTiers]
-                        newTiers[idx] = { ...tier, rate: Number(e.target.value || 0) }
+                        newTiers[idx] = {
+                          ...tier,
+                          rate: nextValue === '' ? '' : Number(nextValue),
+                        }
                         setBookingRules((p) => ({ ...p, commissionTiers: newTiers }))
                       }}
                     />
@@ -648,7 +669,8 @@ export default function OwnerSettingsPage() {
             type="button"
             className="portal-tierAddBtn"
             onClick={() => {
-              const newThreshold = Math.max(...bookingRules.commissionTiers.map(t => t.threshold)) + 1000000
+              const baseThresholds = bookingRules.commissionTiers.map((t) => parseNullableNumber(t.threshold, 0))
+              const newThreshold = Math.max(0, ...baseThresholds) + 1000000
               setBookingRules((p) => ({
                 ...p,
                 commissionTiers: [...p.commissionTiers, { threshold: newThreshold, rate: 10 }],
@@ -680,8 +702,15 @@ export default function OwnerSettingsPage() {
                     if (!bookingRules.commissionTiers || bookingRules.commissionTiers.length === 0) {
                       throw new Error('At least one commission tier is required.')
                     }
-                    const sortedTiers = [...bookingRules.commissionTiers].sort((a, b) => a.threshold - b.threshold)
+                    const normalizedTiers = bookingRules.commissionTiers.map((t) => ({
+                      threshold: parseNullableNumber(t.threshold, 0),
+                      rate: parseNullableNumber(t.rate, 0),
+                    }))
+                    const sortedTiers = [...normalizedTiers].sort((a, b) => a.threshold - b.threshold)
                     for (let i = 0; i < sortedTiers.length; i++) {
+                      if (sortedTiers[i].threshold < 0) {
+                        throw new Error(`Tier ${i + 1} threshold must be greater than or equal to 0.`)
+                      }
                       if (sortedTiers[i].rate < 0 || sortedTiers[i].rate > 100) {
                         throw new Error(`Tier ${i + 1} rate must be between 0 and 100.`)
                       }
@@ -703,8 +732,8 @@ export default function OwnerSettingsPage() {
                         // Backward compatibility: save first tier as Low, second as High
                         CommissionTierLow: sortedTiers[0].threshold,
                         CommissionRateLow: sortedTiers[0].rate / 100,
-                        CommissionTierHigh: sortedTiers.length > 1 ? sortedTiers[1].threshold : sortedTiers[0].threshold,
-                        CommissionRateHigh: sortedTiers.length > 1 ? sortedTiers[1].rate / 100 : sortedTiers[0].rate / 100,
+                        CommissionTierHigh: sortedTiers.length > 1 ? sortedTiers[1].threshold : null,
+                        CommissionRateHigh: sortedTiers.length > 1 ? sortedTiers[1].rate / 100 : null,
                       },
                       'Booking rules saved.'
                     )

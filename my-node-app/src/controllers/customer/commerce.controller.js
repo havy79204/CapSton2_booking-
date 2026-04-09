@@ -47,6 +47,14 @@ const getStaff = asyncHandler(async (req, res) => {
   }
 
   const data = await commerceService.listAvailableStaff(serviceIds, selectedDate)
+  
+  // Add no-cache headers
+  res.set({
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  })
+  
   res.json({ ok: true, data, debug: { selectedDate, serviceIds } })
 })
 
@@ -92,11 +100,19 @@ const getBookings = asyncHandler(async (req, res) => {
 
 const postBooking = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
-  const data = await commerceService.createBooking(userId, req.body || {}, {
-    ipAddress: getClientIp(req),
-    frontendOrigin: getFrontendOrigin(req),
-  })
-  res.status(201).json({ ok: true, data })
+  console.log('[DEBUG CONTROLLER] postBooking called with body:', req.body)
+  try {
+    const data = await commerceService.createBooking(userId, req.body || {}, {
+      ipAddress: getClientIp(req),
+      frontendOrigin: getFrontendOrigin(req),
+    })
+    console.log('[DEBUG CONTROLLER] Booking created successfully:', data)
+    res.status(201).json({ ok: true, data })
+  } catch (error) {
+    console.error('[DEBUG CONTROLLER] Error creating booking:', error.message, 'status:', error.status)
+    const statusCode = error.status || 500
+    res.status(statusCode).json({ ok: false, error: error.message })
+  }
 })
 
 const getOrders = asyncHandler(async (req, res) => {

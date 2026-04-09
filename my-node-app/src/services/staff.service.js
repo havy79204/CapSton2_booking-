@@ -1151,39 +1151,12 @@ async function listStaff(options = {}) {
   const skillMap = await getStaffSkillMap(staffIds, skillSchema)
   
   // Calculate commission from completed service revenue using Booking Rules CommissionTiers.
-  // If a concrete period (day/week/month/year) is requested, prefer Attendance Report's
-  // TotalHours as the authoritative working hours source to keep consistency.
-  let attendanceMap = new Map()
-  if (period !== 'all') {
-    try {
-      // Convert startAt/endAt to ISO date strings if present
-      const toIsoDateOnly = (d) => {
-        const dt = new Date(d)
-        const y = dt.getFullYear()
-        const m = String(dt.getMonth() + 1).padStart(2, '0')
-        const day = String(dt.getDate()).padStart(2, '0')
-        return `${y}-${m}-${day}`
-      }
-      const startDateText = startAt ? toIsoDateOnly(startAt) : undefined
-      const endDateText = endAt ? toIsoDateOnly(new Date(endAt.getTime() - 1)) : undefined
-      const attendanceRows = await attendanceService.getAttendanceReport(undefined, startDateText, endDateText)
-      attendanceMap = new Map((attendanceRows || []).map((r) => [String(r.StaffId || r.StaffIdText || '').trim(), r]))
-    } catch (err) {
-      console.error('[listStaff] attendance fetch error:', err && err.message)
-    }
-  }
-
   const itemsWithCommission = baseItems.map((item) => {
     const commissionBaseRevenue = Number(item.totalCommissionRevenue || 0)
     const appliedRate = resolveCommissionRateByRevenue(commissionBaseRevenue, settingsMap)
     const totalCommission = commissionBaseRevenue * appliedRate
-    // Prefer attendance TotalHours when available for the requested period
-    const attendanceRow = attendanceMap.get(String(item.id || '').trim())
-    const workingHoursFromAttendance = attendanceRow ? Number(attendanceRow.TotalHours || 0) : undefined
-    const effectiveWorkingHours = Number(workingHoursFromAttendance ?? item.workingHours ?? 0)
-    const salary = Math.round(effectiveWorkingHours * 25000)
-    const totalRevenue = salary + Math.round(totalCommission)
-
+    const totalSalary = (item.workingHours * 25000) + Math.round(totalCommission)
+    
     return {
       ...item,
       workingHours: effectiveWorkingHours,

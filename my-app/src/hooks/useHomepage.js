@@ -1,6 +1,36 @@
 import { useState, useEffect } from 'react'
 import { api, resolveApiImageUrl } from '../lib/api'
 
+function normalizeReviewImages(review) {
+  const rawValue = review?.ReviewImages ?? review?.ReviewImagesRaw ?? review?.ImageUrl ?? null
+
+  let rawList = []
+  if (Array.isArray(rawValue)) {
+    rawList = rawValue
+  } else if (typeof rawValue === 'string') {
+    const trimmed = rawValue.trim()
+    if (trimmed) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (Array.isArray(parsed)) {
+          rawList = parsed
+        } else {
+          rawList = [trimmed]
+        }
+      } catch {
+        rawList = trimmed
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean)
+      }
+    }
+  }
+
+  return rawList
+    .map((img) => resolveApiImageUrl(img))
+    .filter(Boolean)
+}
+
 export function useHomepage() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -171,6 +201,7 @@ export function useServiceReviews(serviceId, limit = 50) {
         const normalizedReviews = (Array.isArray(result?.reviews) ? result.reviews : []).map((review) => ({
           ...review,
           Avatar: resolveApiImageUrl(review?.Avatar),
+          ReviewImages: normalizeReviewImages(review),
           _avatarVersion: avatarVersion,
         }))
         setReviews(normalizedReviews)
@@ -197,6 +228,22 @@ export function useServiceReviews(serviceId, limit = 50) {
       const normalizedReviews = (Array.isArray(result?.reviews) ? result.reviews : []).map((review) => ({
         ...review,
         Avatar: resolveApiImageUrl(review?.Avatar),
+        ReviewImages: normalizeReviewImages(review),
+        _avatarVersion: avatarVersion,
+      }))
+      setReviews(normalizedReviews)
+      setRatingSummary(result?.ratingSummary || { AverageRating: 0, ReviewCount: 0 })
+      return result
+    },
+    async deleteReview(reviewId) {
+      const rid = String(reviewId || '').trim()
+      if (!rid) return null
+      const result = await api.delete(`/api/homepage/services/${serviceId}/reviews/${encodeURIComponent(rid)}`)
+      const avatarVersion = Date.now()
+      const normalizedReviews = (Array.isArray(result?.reviews) ? result.reviews : []).map((review) => ({
+        ...review,
+        Avatar: resolveApiImageUrl(review?.Avatar),
+        ReviewImages: normalizeReviewImages(review),
         _avatarVersion: avatarVersion,
       }))
       setReviews(normalizedReviews)
@@ -261,6 +308,7 @@ export function useProductReviews(productId, limit = 50) {
         const normalizedReviews = (Array.isArray(result?.reviews) ? result.reviews : []).map((review) => ({
           ...review,
           Avatar: resolveApiImageUrl(review?.Avatar),
+          ReviewImages: normalizeReviewImages(review),
           _avatarVersion: avatarVersion,
         }))
         setReviews(normalizedReviews)
@@ -287,6 +335,22 @@ export function useProductReviews(productId, limit = 50) {
       const normalizedReviews = (Array.isArray(result?.reviews) ? result.reviews : []).map((review) => ({
         ...review,
         Avatar: resolveApiImageUrl(review?.Avatar),
+        ReviewImages: normalizeReviewImages(review),
+        _avatarVersion: avatarVersion,
+      }))
+      setReviews(normalizedReviews)
+      setRatingSummary(result?.ratingSummary || { AverageRating: 0, ReviewCount: 0 })
+      return result
+    },
+    async deleteReview(reviewId) {
+      const rid = String(reviewId || '').trim()
+      if (!rid) return null
+      const result = await api.delete(`/api/homepage/products/${productId}/reviews/${encodeURIComponent(rid)}`)
+      const avatarVersion = Date.now()
+      const normalizedReviews = (Array.isArray(result?.reviews) ? result.reviews : []).map((review) => ({
+        ...review,
+        Avatar: resolveApiImageUrl(review?.Avatar),
+        ReviewImages: normalizeReviewImages(review),
         _avatarVersion: avatarVersion,
       }))
       setReviews(normalizedReviews)

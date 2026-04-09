@@ -16,6 +16,14 @@ function formatAverageRating(value) {
   return n.toFixed(1)
 }
 
+function formatRatingWithCount(ratingValue, countValue) {
+  const count = Number(countValue || 0)
+  const safeCount = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+  if (safeCount <= 0) return 'No review'
+  const rating = formatAverageRating(ratingValue)
+  return `${rating}(${safeCount})`
+}
+
 function digitsOnly(value) {
   const raw = String(value ?? '').trim()
   if (!raw) return ''
@@ -99,8 +107,7 @@ export default function OwnerProductsPage() {
     categoryId: '',
     kind: '',
     status: '',
-    sellPriceVnd: '0',
-    importPriceVnd: '',
+    supplier: 'Default',
     images: [],
     description: '',
   })
@@ -227,8 +234,7 @@ export default function OwnerProductsPage() {
         categoryId: String(saved.form.categoryId || ''),
         kind: String(saved.form.kind || ''),
         status: String(saved.form.status || ''),
-        sellPriceVnd: String(saved.form.sellPriceVnd || '0'),
-        importPriceVnd: String(saved.form.importPriceVnd || ''),
+        supplier: String(saved.form.supplier || 'Default'),
         images: Array.isArray(saved.form.images) ? saved.form.images.filter(Boolean).slice(0, 8) : [],
         description: String(saved.form.description || ''),
       })
@@ -311,21 +317,21 @@ export default function OwnerProductsPage() {
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(sortedFiltered.length / pageSize)), [sortedFiltered.length])
 
-  const totalProductsCount = useMemo(() => items.length, [items])
+  const totalProductsCount = useMemo(() => filtered.length, [filtered])
 
   const activeProductsCount = useMemo(
-    () => items.filter((p) => String(p?.status || '').toLowerCase() === 'active').length,
-    [items]
+    () => filtered.filter((p) => String(p?.status || '').toLowerCase() === 'active').length,
+    [filtered]
   )
 
   const outOfStockProductsCount = useMemo(
-    () => items.filter((p) => Number(p?.stock || 0) <= 0).length,
-    [items]
+    () => filtered.filter((p) => Number(p?.stock || 0) <= 0).length,
+    [filtered]
   )
 
   const lowStockProductsCount = useMemo(
-    () => items.filter((p) => Number(p?.stock || 0) > 0 && Number(p?.stock || 0) <= 10).length,
-    [items]
+    () => filtered.filter((p) => Number(p?.stock || 0) > 0 && Number(p?.stock || 0) <= 10).length,
+    [filtered]
   )
 
   const categoriesById = useMemo(() => {
@@ -421,7 +427,15 @@ export default function OwnerProductsPage() {
   function openCreate() {
     setEditing(null)
     setError('')
-    setForm({ name: '', categoryId: '', kind: '', status: '', sellPriceVnd: '0', importPriceVnd: '', images: [], description: '' })
+    setForm({
+      name: '',
+      categoryId: '',
+      kind: '',
+      status: '',
+      supplier: 'Default',
+      images: [],
+      description: '',
+    })
     setSelectedImageIdx(-1)
     setOpen(true)
   }
@@ -443,8 +457,7 @@ export default function OwnerProductsPage() {
       categoryId: fallbackCategoryId,
       kind: item?.kind || item?.categoryName || '',
       status: item?.status || '',
-      sellPriceVnd: String(item?.price ?? '0'),
-      importPriceVnd: '',
+      supplier: item?.supplier || 'Default',
       images: Array.isArray(item?.images) ? item.images : item?.imageUrl ? [item.imageUrl] : [],
       description: item?.description || '',
     })
@@ -474,30 +487,16 @@ export default function OwnerProductsPage() {
       return
     }
 
-    const price = Number(digitsOnly(form.sellPriceVnd) || 0)
-    if (!Number.isFinite(price) || price <= 0) {
-      setError('Price must be greater than 0')
-      return
-    }
-
-    const importPriceRaw = digitsOnly(form.importPriceVnd)
-    const importPrice = Number(importPriceRaw || 0)
-    if (importPriceRaw && (!Number.isFinite(importPrice) || importPrice < 0)) {
-      setError('Import price must be 0 or greater')
-      return
-    }
-
     try {
       setError('')
       const payload = {
         name: normalizedName,
         ...(form.categoryId ? { categoryId: form.categoryId } : {}),
         status: form.status,
-        price: String(price),
+        supplier: String(form.supplier || 'Default').trim() || 'Default',
         images: Array.isArray(form.images) ? form.images : [],
         description: form.description,
       }
-      if (importPriceRaw) payload.importPriceVnd = String(importPrice)
 
       if (editing?.id) {
         await api.put(`/api/owner/retail/products/${editing.id}`, payload)
@@ -725,7 +724,12 @@ export default function OwnerProductsPage() {
             className="portal-searchInput"
             placeholder="Search by name / category..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              const value = e.target.value
+              if (!hasDangerousInput(value)) {
+                setQuery(value)
+              }
+            }}
           />
         </div>
 
@@ -798,39 +802,57 @@ export default function OwnerProductsPage() {
                     {renderSortToggle('rating', 'rating')}
                   </div>
                 </th>
-                <th className="products-statusCol">Status</th>
                 <th className="products-actionsCol">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {pagedItems.map((p) => (
-                <tr key={p.id}>
-                  <td className="portal-invName">{p.name}</td>
-                  <td>
-                      <span className="portal-invPill">{p.categoryName || p.kind || '-'}</span>
-                  </td>
-                  <td>{formatVnd(p.price)} ₫</td>
-                  <td>{p.stock ?? 0}</td>
-                  <td>{Number(p.soldCount ?? 0)}</td>
-                  <td>{formatAverageRating(p.averageRating)}</td>
-                  <td>
-                    <span className="portal-invPill">{p.status || '-'}</span>
-                  </td>
-                  <td className="products-actionsCell">
-                    <div className="portal-rowActions">
-                      <button type="button" className="portal-ghostBtn" onClick={() => openEdit(p)}>
-                        Edit
-                      </button>
-                      <button type="button" className="portal-ghostBtn" onClick={() => openVariantsForProduct(p)}>
-                        Variants
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {pagedItems.map((p) => {
+                const stockNum = Number(p?.stock || 0)
+                const isOutOfStock = stockNum <= 0
+                const isLowStock = stockNum > 0 && stockNum <= 10
+                const ratingNum = Number(p?.averageRating || 0)
+                const isLowRating = ratingNum > 0 && ratingNum < 3
+
+                return (
+                  <tr key={p.id}>
+                    <td className="portal-invName">{p.name}</td>
+                    <td>
+                        <span className="portal-invPill">{p.categoryName || p.kind || '-'}</span>
+                    </td>
+                    <td>{formatVnd(p.price)} ₫</td>
+                    <td style={{ color: isOutOfStock ? '#dc2626' : isLowStock ? '#f59e0b' : 'inherit' }}>
+                      {stockNum}
+                      {(isOutOfStock || isLowStock) && (
+                        <span className="products-warningIcon" aria-hidden="true">
+                          <IconAlertTriangle />
+                        </span>
+                      )}
+                    </td>
+                    <td>{Number(p.soldCount ?? 0)}</td>
+                    <td style={{ color: isLowRating ? '#f59e0b' : 'inherit' }}>
+                      {formatRatingWithCount(p.averageRating, p.reviewCount ?? p.totalReviews ?? p.reviewsCount ?? 0)}
+                      {isLowRating && (
+                        <span className="products-warningIcon" aria-hidden="true">
+                          <IconAlertTriangle />
+                        </span>
+                      )}
+                    </td>
+                    <td className="products-actionsCell">
+                      <div className="portal-rowActions">
+                        <button type="button" className="portal-ghostBtn" onClick={() => openEdit(p)}>
+                          Edit
+                        </button>
+                        <button type="button" className="portal-ghostBtn" onClick={() => openVariantsForProduct(p)}>
+                          Variants
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
               {pagedItems.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="products-emptyRow">No products found</td>
+                  <td colSpan={7} className="products-emptyRow">No products found</td>
                 </tr>
               ) : null}
             </tbody>
@@ -895,7 +917,16 @@ export default function OwnerProductsPage() {
 
           <label className="portal-field">
             <span className="portal-label">Product Name <span className="products-required">*</span></span>
-            <input className="portal-input" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
+            <input 
+              className="portal-input" 
+              value={form.name} 
+              onChange={(e) => {
+                const value = e.target.value
+                if (!hasDangerousInput(value)) {
+                  setForm((p) => ({ ...p, name: value }))
+                }
+              }} 
+            />
           </label>
 
           <div className="portal-modalGrid2">
@@ -926,11 +957,6 @@ export default function OwnerProductsPage() {
                   </option>
                 ))}
               </select>
-              {form.categoryId && categoriesById.get(String(form.categoryId))?.description ? (
-                <div className="portal-pageSubtitle" style={{ marginTop: 6 }}>
-                  {categoriesById.get(String(form.categoryId))?.description}
-                </div>
-              ) : null}
             </label>
 
             <label className="portal-field" style={{ marginTop: 12 }}>
@@ -950,28 +976,17 @@ export default function OwnerProductsPage() {
             </label>
           </div>
 
-          <div className="portal-modalGrid2">
-            <label className="portal-field" style={{ marginTop: 12 }}>
-              <span className="portal-label">Price (VND) <span className="products-required">*</span></span>
-              <input
-                className="portal-input"
-                inputMode="numeric"
-                value={form.sellPriceVnd}
-                onChange={(e) => setForm((p) => ({ ...p, sellPriceVnd: digitsOnly(e.target.value) }))}
-              />
-            </label>
 
-            <label className="portal-field" style={{ marginTop: 12 }}>
-              <span className="portal-label">Import Price (VND)</span>
-              <input
-                className="portal-input"
-                inputMode="numeric"
-                placeholder="Optional"
-                value={form.importPriceVnd}
-                onChange={(e) => setForm((p) => ({ ...p, importPriceVnd: digitsOnly(e.target.value) }))}
-              />
-            </label>
-          </div>
+
+          <label className="portal-field" style={{ marginTop: 12 }}>
+            <span className="portal-label">Supplier</span>
+            <input
+              className="portal-input"
+              placeholder="Default"
+              value={form.supplier || ''}
+              onChange={(e) => setForm((p) => ({ ...p, supplier: e.target.value }))}
+            />
+          </label>
 
           <label className="portal-field" style={{ marginTop: 12 }}>
             <span className="portal-label">Images</span>

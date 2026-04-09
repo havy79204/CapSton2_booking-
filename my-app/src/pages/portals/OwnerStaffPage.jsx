@@ -1249,12 +1249,6 @@ export default function OwnerStaffPage() {
                 </th>
                 <th>
                   <div className="staff-sortHeader">
-                    <span>Total Revenue</span>
-                    {renderSortToggle('revenue', 'total revenue')}
-                  </div>
-                </th>
-                <th>
-                  <div className="staff-sortHeader">
                     <span>Rating</span>
                     {renderSortToggle('rating', 'rating')}
                   </div>
@@ -1292,6 +1286,12 @@ export default function OwnerStaffPage() {
                       })()}
                     </td>
                     <td>
+                      {(() => {
+                        const ratingDisplay = formatRating(m.rating, m.ratingCount)
+                        return <span className={`staff-ratingValue ${ratingDisplay.hasValue ? '' : 'is-empty'}`.trim()}>{ratingDisplay.text}</span>
+                      })()}
+                    </td>
+                    <td>
                       <div className="staff-actions">
                         <button type="button" className="portal-ghostBtn" onClick={() => openDetail(m, 'view')}>
                           Detail
@@ -1304,7 +1304,7 @@ export default function OwnerStaffPage() {
 
               {visibleStaffMembers.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="staff-emptyRow">No staff found</td>
+                  <td colSpan={8} className="staff-emptyRow">No staff found</td>
                 </tr>
               ) : null}
             </tbody>

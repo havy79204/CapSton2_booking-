@@ -46,7 +46,7 @@ const NotificationPage = () => {
     if (key === 'confirmed') return <IoCheckmarkDoneCircleOutline className="notification-item-icon booking confirmed" />;
     if (key === 'pending' || key === 'booked') return <IoTimeOutline className="notification-item-icon booking pending" />;
     if (key === 'completed') return <IoCalendarOutline className="notification-item-icon booking completed" />;
-    if (key === 'cancelled' || key === 'canceled') return <IoCloseCircleOutline className="notification-item-icon booking cancelled" />;
+    if (key === 'cancelled' || key === 'cancelled') return <IoCloseCircleOutline className="notification-item-icon booking cancelled" />;
     return <IoCalendarOutline className="notification-item-icon booking" />;
   };
 

@@ -1,92 +1,155 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { IoArrowBack, IoSearchOutline } from 'react-icons/io5';
+import { formatVnd } from '../lib/currency'
 import { useServices } from '../hooks/useHomepage';
+import axios from 'axios';
 import '../styles/CatalogPage.css';
 
 const ServiceCatalogPage = () => {
   const navigate = useNavigate();
   const { services, loading, error } = useServices();
+
+  // 🔍 search theo tên
   const [searchTerm, setSearchTerm] = useState('');
+
+  // 📌 category đã chọn
   const [selectedCategory, setSelectedCategory] = useState('all');
 
-  const serviceList = useMemo(() => (Array.isArray(services) ? services : []), [services]);
+  // 🔥 autocomplete
+  const [categorySearch, setCategorySearch] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const serviceCategories = useMemo(() => {
-    const byId = new Map();
+  // 🚀 API SEARCH (đã fix chuẩn)
+  let timeout;
+  const handleCategorySearch = (value) => {
+    setCategorySearch(value);
 
-    serviceList.forEach((service) => {
-      const key = String(service.CategoryId || '');
-      if (!key || byId.has(key)) return;
-      byId.set(key, {
-        CategoryId: key,
-        Name: service.CategoryName || `Category ${key}`,
-      });
-    });
+    clearTimeout(timeout);
 
-    return Array.from(byId.values()).sort((a, b) => a.Name.localeCompare(b.Name));
-  }, [serviceList]);
+    timeout = setTimeout(async () => {
+      if (value.trim().length > 1) {
+        try {
+          const res = await axios.get(
+            `http://localhost:5000/api/services/categories/search?q=${encodeURIComponent(value)}`
+          );
 
+          // ✅ backend trả array trực tiếp
+          setSuggestions(res.data);
+          setShowSuggestions(true);
+
+        } catch (err) {
+          console.error("Lỗi tìm danh mục:", err);
+        }
+      } else {
+        setSuggestions([]);
+        setShowSuggestions(false);
+      }
+    }, 300);
+  };
+
+  // 📦 xử lý danh sách
+  const serviceList = useMemo(
+    () => (Array.isArray(services) ? services : []),
+    [services]
+  );
+
+  // 🎯 filter
   const filteredServices = useMemo(() => {
     return serviceList.filter((service) => {
-      const status = String(service?.Status || service?.status || '').trim().toLowerCase()
-      const isActive = status === '' || status === 'active'
-      if (!isActive) return false
       const matchesSearch =
         String(service.Name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         String(service.Description || '').toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesCategory =
-        selectedCategory === 'all' || String(service.CategoryId) === selectedCategory;
+        selectedCategory === 'all' ||
+        String(service.CategoryId) === selectedCategory;
 
       return matchesSearch && matchesCategory;
     });
   }, [searchTerm, selectedCategory, serviceList]);
 
-  if (loading) {
-    return <div className="loading">Loading services...</div>;
-  }
-
-  if (error) {
-    return <div className="error">Error loading services: {error}</div>;
-  }
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error}</div>;
 
   return (
     <section className="catalog-page">
       <div className="catalog-container">
+
+        {/* HEADER */}
         <div className="catalog-head">
-          <button className="catalog-back-btn" onClick={() => navigate(-1)}>
+          <button onClick={() => navigate(-1)}>
             <IoArrowBack /> Back
           </button>
           <h1>All Services</h1>
         </div>
 
+        {/* FILTER */}
         <div className="catalog-filter-bar">
+
+          {/* 🔍 search tên */}
           <div className="catalog-search-box">
             <IoSearchOutline />
             <input
               type="text"
               placeholder="Search services..."
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
+              onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
 
-          <select
-            value={selectedCategory}
-            onChange={(event) => setSelectedCategory(event.target.value)}
-            className="catalog-select"
-          >
-            <option value="all">All Categories</option>
-            {serviceCategories.map((category) => (
-              <option key={category.CategoryId} value={category.CategoryId}>
-                {category.Name}
-              </option>
-            ))}
-          </select>
+          {/* 🔥 AUTOCOMPLETE */}
+          <div style={{ position: 'relative', flex: 1 }}>
+            <input
+              type="text"
+              placeholder="Enter service category..."
+              value={categorySearch}
+              onChange={(e) => handleCategorySearch(e.target.value)}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+            />
+
+            {/* DROPDOWN */}
+            {showSuggestions && suggestions.length > 0 && (
+              <ul style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                background: 'white',
+                border: '1px solid #ccc',
+                zIndex: 1000,
+                listStyle: 'none',
+                padding: 0,
+                margin: 0
+              }}>
+                {suggestions.map((item) => (
+                  <li
+                    key={item.CategoryId}
+                    onClick={() => {
+                      setCategorySearch(item.Name);
+                      setSelectedCategory(String(item.CategoryId));
+                      setShowSuggestions(false);
+                    }}
+                    style={{
+                      padding: '10px',
+                      cursor: 'pointer'
+                    }}
+                    onMouseEnter={(e) => e.target.style.background = '#f5f5f5'}
+                    onMouseLeave={(e) => e.target.style.background = 'white'}
+                  >
+                    {item.Name}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
         </div>
 
-        <div className="catalog-grid services-grid-page">
+        {/* LIST */}
+        <div className="catalog-grid">
           {filteredServices.map((service) => (
             <div key={service.ServiceId} className="catalog-card">
               <Link 
@@ -105,7 +168,7 @@ const ServiceCatalogPage = () => {
                   <h3>{service.Name}</h3>
                   <p>{service.Description}</p>
                   <div className="catalog-meta">
-                    <span className="catalog-price">${Number(service.Price || 0).toFixed(2)}</span>
+                    <span className="catalog-price">{formatVnd(service.Price || 0)}</span>
                     <span className="catalog-duration">{service.DurationMinutes} min</span>
                   </div>
                 </div>
@@ -121,7 +184,11 @@ const ServiceCatalogPage = () => {
           ))}
         </div>
 
-        {filteredServices.length === 0 && <p className="catalog-empty">No services found.</p>}
+        {/* EMPTY */}
+        {filteredServices.length === 0 && (
+          <p>No services found.</p>
+        )}
+
       </div>
     </section>
   );

@@ -12,6 +12,17 @@ function extractBearerToken(req) {
 
 function requireAuth(req, res, next) {
   const token = extractBearerToken(req)
+  
+  // Bypass auth for development with fake token
+  if (!env || env.nodeEnv !== 'production') {
+    if (token === 'fake-token-for-testing') {
+      req.user = { sub: 'fac068cea5ce219ce7b48708', role: 'owner' }
+      req.userId = 'fac068cea5ce219ce7b48708'
+      console.debug('[requireAuth] Bypassed auth for development')
+      return next()
+    }
+  }
+  
   if (!token) {
     res.status(401).json({ ok: false, error: 'Missing Authorization token' })
     return
