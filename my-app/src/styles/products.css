@@ -129,6 +129,22 @@
   padding: 7px 10px;
 }
 
+.products-warningIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.products-warningIcon svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2;
+}
+
 .products-filterRow {
   display: grid;
   grid-template-columns: repeat(2, minmax(220px, 1fr));
@@ -343,4 +359,17 @@
   border-radius: 8px;
   font-weight: 700;
   margin-left: 8px;
+}
+
+/* Warning indicators for stock and rating */
+.products-page .portal-table td {
+  position: relative;
+}
+
+.products-page .portal-table td span[style*="color: #dc2626"] {
+  font-weight: 600;
+}
+
+.products-page .portal-table td span[style*="color: #f59e0b"] {
+  font-weight: 600;
 }
