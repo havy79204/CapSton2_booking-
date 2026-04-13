@@ -45,7 +45,7 @@ export default function ProfileScreen() {
 
       // no-op: specialties expected on /auth/me for staff users
 
-      const reviewRes = await get('/staff/dashboard/reviews?limit=3');
+      const reviewRes = await get('/staff/dashboard/reviews?limit=5');
       setLatestReviews(Array.isArray(reviewRes?.data) ? reviewRes.data : []);
     } catch {
       setLatestReviews([]);
@@ -182,7 +182,12 @@ export default function ProfileScreen() {
 
       <View style={{ marginTop: 16 }}>
         <Card>
-          <Text style={styles.cardTitle}>Review mới nhất</Text>
+          <View style={styles.reviewHeaderRow}>
+            <Text style={styles.cardTitle}>Review mới nhất</Text>
+            <TouchableOpacity onPress={onViewAllReviews}>
+              <Text style={styles.viewAllText}>Xem tất cả</Text>
+            </TouchableOpacity>
+          </View>
           <View style={{ marginTop: 8 }}>
             {latestReviews.length ? latestReviews.map((r, idx) => (
               <View key={String(idx)} style={{ paddingVertical: 10, borderBottomWidth: idx === latestReviews.length - 1 ? 0 : 1, borderColor: '#f3f4f6' }}>
@@ -257,5 +262,7 @@ const styles = StyleSheet.create({
   menuText: { marginLeft: 12, fontWeight: '700' },
   logoutBtn: { backgroundColor: '#fee2e2', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
   logoutText: { color: '#ef4444', fontWeight: '800' },
+  reviewHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  viewAllText: { color: '#2563eb', fontWeight: '700' },
   cardTitleSmall: { fontWeight: '700', marginBottom: 8 },
 })

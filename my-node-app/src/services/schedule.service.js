@@ -1100,17 +1100,7 @@ async function requestStaffLeave({ staffId, date, note, shiftType, isRecurring, 
         throw err
     }
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const minLeaveDate = new Date(today)
-    minLeaveDate.setDate(minLeaveDate.getDate() + 7)
     leaveDate.setHours(0, 0, 0, 0)
-
-    if (leaveDate < minLeaveDate) {
-        const err = new Error('Leave request must be submitted at least 7 days in advance')
-        err.status = 400
-        throw err
-    }
 
     const dayIndexOneBased = normalizeDayIndexOneBased((leaveDate.getDay() + 6) % 7)
     const startDateIso = toIsoDate(leaveDate)
@@ -1123,20 +1113,7 @@ async function requestStaffLeave({ staffId, date, note, shiftType, isRecurring, 
         : leaveShift.startHour
     const safeNote = `LEAVE_REQUEST[${leaveShift.shiftType}]${note ? `: ${String(note).trim()}` : ''}`
 
-    // Disallow leave requests on dates that already have an assigned shift
-    const shiftDateIso = toIsoDate(leaveDate)
-    const assignedCheck = await query(
-                `SELECT TOP 1 1 AS ok
-                 FROM StaffAvailability
-                 WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
-                     AND WeekStartDate = @shiftDate`,
-        { staffId, shiftDate: shiftDateIso }
-    )
-    if (assignedCheck.recordset && assignedCheck.recordset.length) {
-        const err = new Error('Cannot request leave for a date that already has a scheduled shift')
-        err.status = 409
-        throw err
-    }
+    // Allow leave requests regardless of assigned shifts or advance-day constraints.
 
     const existing = await query(
         `SELECT TOP 1 OffScheduleId

@@ -28,6 +28,15 @@ function sumHours(pairs) {
   return (pairs || []).reduce((s, p) => s + Number(p.durationHours || 0), 0)
 }
 
+function toLocalDateKey(value) {
+  const dt = new Date(value)
+  if (Number.isNaN(dt.getTime())) return ''
+  const y = dt.getFullYear()
+  const m = String(dt.getMonth() + 1).padStart(2, '0')
+  const d = String(dt.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
 async function resolveStaffIdFromRequest(req) {
   const userId = String(req.userId || req.user?.userId || req.user?.sub || '').trim()
   if (!userId) return ''
@@ -58,8 +67,14 @@ const postTimeLog = asyncHandler(async (req, res) => {
   ).catch(() => ({ recordset: [] }))
   const last = (lastR.recordset || [])[0] || null
   if (last && String(last.Type || '').toUpperCase() === type) {
-    res.status(409).json({ ok: false, error: 'Duplicate consecutive entry' })
-    return
+    // Only treat as duplicate when same type happens on the same local day.
+    // This prevents cross-day lock when yesterday ended with an unpaired IN.
+    const lastDay = toLocalDateKey(last.At)
+    const currentDay = toLocalDateKey(at)
+    if (lastDay && currentDay && lastDay === currentDay) {
+      res.status(409).json({ ok: false, error: 'Duplicate consecutive entry' })
+      return
+    }
   }
 
   const timeLogId = newId()

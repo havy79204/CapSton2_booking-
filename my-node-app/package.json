@@ -8,7 +8,8 @@
         "predev": "npm run guard:optional-chaining",
         "prestart": "npm run guard:optional-chaining",
         "start": "node src/index.js",
-        "dev": "nodemon src/index.js"
+            "dev": "nodemon src/index.js",
+            "migrate": "node scripts/runMigrations.js"
     },
     "keywords": [],
     "author": "",

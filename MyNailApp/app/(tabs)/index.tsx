@@ -202,9 +202,9 @@ export default function HomeScreen() {
 
       <View style={styles.section}>
         <Card>
-          <Text style={styles.sectionTitle}>Danh sách lịch hẹn 7 ngày gần nhất</Text>
-          {recentAppointments.length === 0 && <Text style={styles.emptyText}>Không có lịch hẹn trong 7 ngày qua.</Text>}
-          {recentAppointments.slice(0, 8).map((apt) => (
+          <Text style={styles.sectionTitle}>Danh sách 10 lịch hẹn gần nhất</Text>
+          {recentAppointments.length === 0 && <Text style={styles.emptyText}>Không có lịch hẹn gần đây.</Text>}
+          {recentAppointments.slice(0, 10).map((apt) => (
             <View key={`${apt.id}-${apt.date}-${apt.time}`} style={styles.appRow}>
               <Avatar initials={apt.initials} />
               <View style={styles.appInfo}>

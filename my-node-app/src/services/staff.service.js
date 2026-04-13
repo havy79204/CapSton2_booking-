@@ -1152,10 +1152,12 @@ async function listStaff(options = {}) {
   
   // Calculate commission from completed service revenue using Booking Rules CommissionTiers.
   const itemsWithCommission = baseItems.map((item) => {
+    const effectiveWorkingHours = Number(item.workingHours || 0)
     const commissionBaseRevenue = Number(item.totalCommissionRevenue || 0)
     const appliedRate = resolveCommissionRateByRevenue(commissionBaseRevenue, settingsMap)
     const totalCommission = commissionBaseRevenue * appliedRate
-    const totalSalary = (item.workingHours * 25000) + Math.round(totalCommission)
+    const salary = (effectiveWorkingHours * 25000) + Math.round(totalCommission)
+    const totalRevenue = salary
     
     return {
       ...item,

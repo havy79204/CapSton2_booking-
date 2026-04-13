@@ -11,6 +11,9 @@ import {
 } from 'react-icons/io5';
 import { resolveApiImageUrl } from '../lib/api.js';
 import { useServiceReviews, useServices } from '../hooks/useHomepage';
+import { useAuthMe } from '../hooks/useAuthMe';
+import PortalModal from '../components/Layout portal/PortalModal.jsx';
+import { formatVnd } from '../lib/currency';
 import '../styles/ServiceDetail.css';
 import '../styles/OwnerServiceDetail.css';
 
@@ -162,6 +165,18 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, onDeleteReview, cur
   });
   const [reviewImageDataUrls, setReviewImageDataUrls] = useState([]);
   const [hoveredRating, setHoveredRating] = useState(0);
+  const [editingReviewId, setEditingReviewId] = useState('');
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [reviewDataToSubmit, setReviewDataToSubmit] = useState(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [reviewToDelete, setReviewToDelete] = useState(null);
+  const [activeOwnMenuReviewId, setActiveOwnMenuReviewId] = useState('');
+  const [messageModalOpen, setMessageModalOpen] = useState(false);
+  const [messageModalTitle, setMessageModalTitle] = useState('');
+  const [messageModalText, setMessageModalText] = useState('');
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notificationTitle, setNotificationTitle] = useState('');
+  const [notificationMessage, setNotificationMessage] = useState('');
 
   const handleRatingClick = (rating) => {
     setNewReview({ ...newReview, rating });
@@ -185,15 +200,8 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, onDeleteReview, cur
       reviewId: editingReviewId || undefined,
       rating: newReview.rating,
       comment: newReview.comment
-    })
-      .then(() => {
-        const isEditing = Boolean(editingReviewId);
-        setNewReview({ rating: 5, comment: '' });
-        alert('Review submitted successfully!');
-      })
-      .catch((err) => {
-        alert(err?.message || 'Failed to submit review');
-      });
+    });
+    setConfirmModalOpen(true);
   };
 
   const cancelSubmitReview = () => {
@@ -296,6 +304,52 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, onDeleteReview, cur
     } catch (err) {
       setMessageModalTitle('Error');
       setMessageModalText(err?.message || 'Failed to delete review');
+      setMessageModalOpen(true);
+    }
+  };
+
+  const showNotification = (title, message) => {
+    setNotificationTitle(title || 'Notice');
+    setNotificationMessage(message || '');
+    setNotificationOpen(true);
+  };
+
+  const handleReviewImageChange = async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const toKeep = files.slice(0, 3 - reviewImageDataUrls.length);
+    const readers = toKeep.map((file) => new Promise((res) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result || ''));
+      fr.onerror = () => res('');
+      fr.readAsDataURL(file);
+    }));
+    const results = await Promise.all(readers);
+    const urls = results.filter(Boolean);
+    if (urls.length) setReviewImageDataUrls((prev) => [...prev, ...urls].slice(0, 3));
+    try { event.target.value = null; } catch (e) {}
+  };
+
+  const removeSelectedReviewImage = (index) => {
+    setReviewImageDataUrls((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const confirmSubmitReview = async () => {
+    const data = reviewDataToSubmit;
+    setConfirmModalOpen(false);
+    setReviewDataToSubmit(null);
+    if (!data || !onSubmitReview) return;
+    try {
+      await onSubmitReview(data);
+      setNewReview({ rating: 5, comment: '' });
+      setReviewImageDataUrls([]);
+      setEditingReviewId('');
+      setMessageModalTitle('Submitted');
+      setMessageModalText('Your review has been submitted.');
+      setMessageModalOpen(true);
+    } catch (err) {
+      setMessageModalTitle('Error');
+      setMessageModalText(err?.message || 'Failed to submit review');
       setMessageModalOpen(true);
     }
   };

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ScrollView, Platform, Linking } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Feather } from '@expo/vector-icons';
@@ -123,6 +124,8 @@ export default function AITryOn() {
       }
     })();
   }, []);
+
+  const router = useRouter();
 
   useEffect(() => {
     (async () => {
@@ -414,7 +417,7 @@ export default function AITryOn() {
 
           {/* Removed temporary Test UI picker per request */}
 
-          <TouchableOpacity style={styles.linkBtn} onPress={() => Alert.alert('Lịch sử', `Bạn đã có ${history.length} lần thử mẫu được lưu.`)}>
+          <TouchableOpacity style={styles.linkBtn} onPress={() => router.push('/aitryon/history')}>
             <Feather name="clock" size={16} color="#374151" />
             <Text style={styles.linkBtnText}>Xem lịch sử thử mẫu</Text>
           </TouchableOpacity>

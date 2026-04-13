@@ -1,7 +1,7 @@
 const fs = require('fs/promises')
 const path = require('path')
 const crypto = require('crypto')
-const { query } = require('../config/query')
+const { query, newId } = require('../config/query')
 let sharp
 try {
     sharp = require('sharp')
@@ -270,10 +270,10 @@ function buildOverlaySvg({ width, height, overlayPlan, templateImageDataUrl = ''
                 `<polygon points="${list}" fill="${escapeXml(fill)}" fill-opacity="${baseSolidOpacity.toFixed(3)}" stroke="#ffffff" stroke-opacity="0.72" stroke-width="1" />`
 
             const tintOpacity = useTextureFill ?
-                (0.1 + (1 - strength) * 0.2 + Math.max(0, coverage - 1) * 0.08) :
-                (0.12 + Math.max(0, coverage - 1) * 0.08)
-            const colorTint = `<polygon points="${list}" fill="${escapeXml(fill)}" fill-opacity="${Math.min(0.32, tintOpacity).toFixed(3)}" stroke="none" />`
-            const softGloss = `<polygon points="${list}" fill="#ffffff" fill-opacity="${(0.04 + strength * 0.05).toFixed(3)}" stroke="none" />`
+                (0.05 + (1 - strength) * 0.12 + Math.max(0, coverage - 1) * 0.05) :
+                (0.1 + Math.max(0, coverage - 1) * 0.06)
+            const colorTint = `<polygon points="${list}" fill="${escapeXml(fill)}" fill-opacity="${Math.min(0.18, tintOpacity).toFixed(3)}" stroke="none" />`
+            const softGloss = `<polygon points="${list}" fill="#ffffff" fill-opacity="${(0.03 + strength * 0.03).toFixed(3)}" stroke="none" />`
 
             return [
                 basePoly,
@@ -1010,9 +1010,11 @@ function buildImageGenerationPrompt({ design = {}, overlayPlan, userPrompt = '' 
 
     return [
         'Edit this hand photo for realistic nail try-on with very high identity preservation.',
-        'MUST keep same hand pose, finger thickness, nail length, nail shape, skin tone, lighting, shadows and background exactly.',
+        'MUST keep same hand pose, finger thickness, skin tone, lighting, shadows and background exactly.',
+        'Keep natural nail bed/cuticle anatomy, but allow extending free-edge nail length to match template style when template nails are longer.',
         'MUST apply style ONLY on current nail plates from provided overlays. Do not reshape fingers or nails.',
         'MUST keep cuticle boundaries and side-wall contours of each nail accurate and sharp.',
+        'All visible nails must be fully rendered and styled; do not skip any visible nail.',
         'Do not paint skin, finger joints, or any area outside nail plate boundaries.',
         'Polish layer should fully cover each nail plate from cuticle to tip with clean anti-aliased edges.',
         'If uncertain, preserve original pixels outside nail regions unchanged.',
@@ -1032,6 +1034,9 @@ function buildTemplateStyleInstruction({ hasTemplateReference = false, floralInt
         'Do not simplify, remove, or merge decorative accents from the template.',
         'Transfer the same count of decorated nails and similar motif placement style.',
         'Keep decorations visible on every detected nail unless template clearly leaves that nail plain.',
+        'If template has 3D charms/rhinestones/bows, keep those accents visible with similar size and placement on corresponding nails.',
+        'Do not collapse different motifs into one repeated simple motif; preserve motif diversity from template.',
+        'Match nail extension length proportion to template when template nails are visibly longer.',
     ]
 
     if (floralIntent) {
@@ -1047,12 +1052,13 @@ function buildTemplateCoverageInstruction({ hasTemplateReference = false, mapped
 
     const text = String(userPrompt || '').toLowerCase()
     const wantsAllNails = /all\s*5|all\s*nails|5\s*nails|đều|toàn bộ|tat ca|ca\s*5/.test(text)
-    const likelyFullSet = Number(mappedCount) >= 4 || wantsAllNails
-    if (!likelyFullSet || Number(overlayCount) < 4) return ''
+    const likelyFullSet = Number(mappedCount) >= 3 || wantsAllNails
+    if (!likelyFullSet) return ''
 
     return [
         `Coverage rule: apply decorative style to ALL visible nails (${overlayCount}/${overlayCount}).`,
         'Do not leave any visible nail plain when template appears full-set decorated.',
+        'If any nail is missed in first pass, regenerate so final image has complete set coverage.',
     ].join('\n')
 }
 
@@ -1070,6 +1076,149 @@ function buildServiceText(selectedService = null) {
     if (duration > 0) fields.push(`service duration minutes: ${duration}`)
 
     return fields.join('\n')
+}
+
+function getPolygonCenter(polygon = []) {
+    const points = Array.isArray(polygon) ? polygon : []
+    if (!points.length) return { x: 0.5, y: 0.5 }
+    const sx = points.reduce((s, p) => s + clamp01(p ?.x, 0.5), 0)
+    const sy = points.reduce((s, p) => s + clamp01(p ?.y, 0.5), 0)
+    return { x: sx / points.length, y: sy / points.length }
+}
+
+function scalePolygonAroundCenter(polygon = [], scaleX = 1, scaleY = 1) {
+    const points = Array.isArray(polygon) ? polygon : []
+    if (!points.length) return []
+    const c = getPolygonCenter(points)
+    return points.map((p) => ({
+        x: clamp01(c.x + (clamp01(p ?.x, c.x) - c.x) * scaleX, c.x),
+        y: clamp01(c.y + (clamp01(p ?.y, c.y) - c.y) * scaleY, c.y),
+    }))
+}
+
+function overlayFromPolygon(baseOverlay = {}, finger = 'unknown', polygon = []) {
+    const points = Array.isArray(polygon) ? polygon : []
+    const xs = points.map((p) => clamp01(p ?.x, 0.5))
+    const ys = points.map((p) => clamp01(p ?.y, 0.5))
+    const minX = Math.min(...xs)
+    const maxX = Math.max(...xs)
+    const minY = Math.min(...ys)
+    const maxY = Math.max(...ys)
+
+    return {
+        ...baseOverlay,
+        finger,
+        polygon: points,
+        transform: {
+            x: Number(((minX + maxX) / 2).toFixed(5)),
+            y: Number(((minY + maxY) / 2).toFixed(5)),
+            width: Number((maxX - minX).toFixed(5)),
+            height: Number((maxY - minY).toFixed(5)),
+            rotationDeg: Number((baseOverlay ?.transform ?.rotationDeg || 0).toFixed(2)),
+        },
+    }
+}
+
+function ensureFiveFingerOverlayPlan(overlayPlan = null) {
+    const safePlan = sanitizeOverlayPlan({}, overlayPlan) || overlayPlan
+    if (!safePlan || typeof safePlan !== 'object') return { overlayPlan: safePlan, synthesized: 0 }
+
+    const order = ['thumb', 'index', 'middle', 'ring', 'pinky']
+    const src = Array.isArray(safePlan ?.overlays) ? safePlan.overlays : []
+    const byFinger = new Map()
+
+    for (const ov of src) {
+        const finger = normalizeFingerName(ov ?.finger)
+        if (!finger || !order.includes(finger)) continue
+        const prev = byFinger.get(finger)
+        const currConf = Number(ov ?.confidence || 0)
+        const prevConf = Number(prev ?.confidence || 0)
+        if (!prev || currConf >= prevConf) byFinger.set(finger, ov)
+    }
+
+    if (byFinger.size >= 5 || byFinger.size === 0) {
+        return { overlayPlan: { ...safePlan, overlays: Array.from(byFinger.values()) }, synthesized: 0 }
+    }
+
+    const canonicalCenters = {
+        thumb: { x: 0.24, y: 0.62 },
+        index: { x: 0.40, y: 0.48 },
+        middle: { x: 0.52, y: 0.43 },
+        ring: { x: 0.63, y: 0.47 },
+        pinky: { x: 0.74, y: 0.56 },
+    }
+
+    const pairs = Array.from(byFinger.entries()).map(([finger, ov]) => ({
+        finger,
+        canonical: canonicalCenters[finger],
+        real: getPolygonCenter(ov ?.polygon),
+    })).filter((x) => x.canonical)
+
+    const canXs = pairs.map((p) => p.canonical.x)
+    const canYs = pairs.map((p) => p.canonical.y)
+    const realXs = pairs.map((p) => p.real.x)
+    const realYs = pairs.map((p) => p.real.y)
+
+    const canMinX = Math.min(...canXs)
+    const canMaxX = Math.max(...canXs)
+    const canMinY = Math.min(...canYs)
+    const canMaxY = Math.max(...canYs)
+    const realMinX = Math.min(...realXs)
+    const realMaxX = Math.max(...realXs)
+    const realMinY = Math.min(...realYs)
+    const realMaxY = Math.max(...realYs)
+
+    const spanCanX = Math.max(0.06, canMaxX - canMinX)
+    const spanCanY = Math.max(0.06, canMaxY - canMinY)
+    const spanRealX = Math.max(0.06, realMaxX - realMinX)
+    const spanRealY = Math.max(0.06, realMaxY - realMinY)
+
+    const scaleX = spanRealX / spanCanX
+    const scaleY = spanRealY / spanCanY
+    const offsetX = realMinX - canMinX * scaleX
+    const offsetY = realMinY - canMinY * scaleY
+
+    const predictCenter = (finger) => {
+        const c = canonicalCenters[finger] || { x: 0.5, y: 0.5 }
+        return {
+            x: clamp01(offsetX + c.x * scaleX, c.x),
+            y: clamp01(offsetY + c.y * scaleY, c.y),
+        }
+    }
+
+    let synthesized = 0
+    for (const targetFinger of order) {
+        if (byFinger.has(targetFinger)) continue
+
+        const targetIdx = order.indexOf(targetFinger)
+        const sourceFinger = Array.from(byFinger.keys()).sort((a, b) => {
+            return Math.abs(order.indexOf(a) - targetIdx) - Math.abs(order.indexOf(b) - targetIdx)
+        })[0]
+        const sourceOverlay = sourceFinger ? byFinger.get(sourceFinger) : null
+        if (!sourceOverlay) continue
+
+        const srcCenter = getPolygonCenter(sourceOverlay ?.polygon)
+        const dstCenter = predictCenter(targetFinger)
+        const dx = dstCenter.x - srcCenter.x
+        const dy = dstCenter.y - srcCenter.y
+        const moved = (Array.isArray(sourceOverlay ?.polygon) ? sourceOverlay.polygon : []).map((p) => ({
+            x: clamp01(clamp01(p ?.x, srcCenter.x) + dx, srcCenter.x + dx),
+            y: clamp01(clamp01(p ?.y, srcCenter.y) + dy, srcCenter.y + dy),
+        }))
+
+        // Synthesize missing nails slightly longer to better match long template styles.
+        const elongated = scalePolygonAroundCenter(moved, 1.06, 1.2)
+        const synthetic = overlayFromPolygon({
+            ...sourceOverlay,
+            confidence: Math.max(0.18, Number(sourceOverlay ?.confidence || 0) * 0.72),
+        }, targetFinger, elongated)
+
+        byFinger.set(targetFinger, synthetic)
+        synthesized += 1
+    }
+
+    const overlays = order.map((finger) => byFinger.get(finger)).filter(Boolean)
+    return { overlayPlan: { ...safePlan, overlays }, synthesized }
 }
 
 async function listTryOnServices({ limit = 24 } = {}) {
@@ -1135,6 +1284,8 @@ async function generateNailTryOnImage({ imageDataUrl, handHint = '', design = {}
     const hintedPreview = await buildPreviewFromClientHint({ imageDataUrl, design: safeDesign, analysis, overlayPlan })
     const preview = hintedPreview || await createTryOnPreview({ imageDataUrl, handHint, design: safeDesign })
     const resolvedTemplateImageDataUrl = await resolveTemplateImageDataUrl({ templateImageDataUrl, templateImageUrl }).catch(() => '')
+    const repairedOverlay = ensureFiveFingerOverlayPlan(preview ?.overlayPlan)
+    const workingOverlayPlan = repairedOverlay ?.overlayPlan || preview ?.overlayPlan
     let fingerTextureMap = {}
     let templateMappedCount = 0
     const serviceText = buildServiceText(selectedService)
@@ -1145,19 +1296,29 @@ async function generateNailTryOnImage({ imageDataUrl, handHint = '', design = {}
     let generatedImageDataUrl = null
     let provider = 'none'
     const warnings = []
-    const overlayReliable = isOverlayPlanReliable(preview.analysis, preview.overlayPlan)
-    const enableLocalOverlayComposer = ['1', 'true', 'yes', 'on'].includes(String(process.env.AI_TRYON_ENABLE_LOCAL_OVERLAY_COMPOSER || '0').trim().toLowerCase())
+    const overlayReliable = isOverlayPlanReliable(preview.analysis, workingOverlayPlan)
+    const enableLocalOverlayComposer = ['1', 'true', 'yes', 'on'].includes(String(process.env.AI_TRYON_ENABLE_LOCAL_OVERLAY_COMPOSER || '1').trim().toLowerCase())
     const enableOverlayReinforcement = enableLocalOverlayComposer &&
         !['0', 'false', 'no', 'off'].includes(String(process.env.AI_TRYON_ENABLE_OVERLAY_REINFORCEMENT || '1').trim().toLowerCase())
     const similarityStrength = Number.isFinite(Number(process.env.AI_TRYON_SIMILARITY_STRENGTH)) ?
         Math.max(0.5, Math.min(1, Number(process.env.AI_TRYON_SIMILARITY_STRENGTH))) :
-        0.95
+        0.99
     const overlayCoverageBoost = Number.isFinite(Number(process.env.AI_TRYON_OVERLAY_COVERAGE_BOOST)) ?
         Math.max(0.9, Math.min(1.25, Number(process.env.AI_TRYON_OVERLAY_COVERAGE_BOOST))) :
-        1.08
+        1.18
+    const allowLowConfidenceOverlayTransfer = !['0', 'false', 'no', 'off'].includes(String(process.env.AI_TRYON_ALLOW_LOW_CONFIDENCE_OVERLAY || '0').trim().toLowerCase())
+    const isFallbackOverlayAnalysis = isLikelyFallbackAnalysis(preview.analysis)
+    const allowGuardedLowConfidenceTransfer = allowLowConfidenceOverlayTransfer && !isFallbackOverlayAnalysis
+
+    if (Number(repairedOverlay ?.synthesized || 0) > 0) {
+        warnings.push(`OverlayRepair: synthesized ${repairedOverlay.synthesized} missing nail overlay(s) to keep full-set coverage.`)
+    }
 
     if (!overlayReliable) {
-        warnings.push('OverlayQuality: low confidence nail mapping detected, overlay reinforcement disabled to avoid artifacts.')
+        warnings.push('OverlayQuality: low confidence nail mapping detected; using guarded reinforcement to reduce missed nails.')
+    }
+    if (isFallbackOverlayAnalysis) {
+        warnings.push('OverlayQuality: fallback nail detection found, skip aggressive overlay transfer to avoid block artifacts.')
     }
 
     if (resolvedTemplateImageDataUrl) {
@@ -1182,9 +1343,9 @@ async function generateNailTryOnImage({ imageDataUrl, handHint = '', design = {}
         }
     }
 
-    const overlayCount = Array.isArray(preview ?.overlayPlan ?.overlays) ? preview.overlayPlan.overlays.length : 0
+    const overlayCount = Array.isArray(workingOverlayPlan ?.overlays) ? workingOverlayPlan.overlays.length : 0
     prompt = [
-        buildImageGenerationPrompt({ design: safeDesign, overlayPlan: preview.overlayPlan, userPrompt }),
+        buildImageGenerationPrompt({ design: safeDesign, overlayPlan: workingOverlayPlan, userPrompt }),
         serviceText ? `Selected salon service:\n${serviceText}` : '',
         buildTemplateStyleInstruction({ hasTemplateReference: Boolean(resolvedTemplateImageDataUrl), floralIntent }),
         buildTemplateCoverageInstruction({
@@ -1193,6 +1354,7 @@ async function generateNailTryOnImage({ imageDataUrl, handHint = '', design = {}
             overlayCount,
             userPrompt,
         }),
+        resolvedTemplateImageDataUrl ? `Template transfer requirement: preserve decorations and extension style across all visible nails (mapping ${templateMappedCount}/5).` : '',
         resolvedTemplateImageDataUrl ? 'Use the extra reference nail image as style guide while preserving the user hand shape.' : '',
     ].filter(Boolean).join('\n\n')
 
@@ -1202,7 +1364,7 @@ async function generateNailTryOnImage({ imageDataUrl, handHint = '', design = {}
             templateImageDataUrl: resolvedTemplateImageDataUrl,
             prompt,
             negativePrompt,
-            overlayPlan: preview.overlayPlan,
+            overlayPlan: workingOverlayPlan,
             selectedService,
         })
 
@@ -1230,25 +1392,27 @@ async function generateNailTryOnImage({ imageDataUrl, handHint = '', design = {}
     // Replicate/Flux image refine removed: using Gemini + ControlNet + local-overlay only.
     // If you need a post-refinement step, implement a Gemini-driven enhancer or keep client-side overlay reinforcement.
 
-    if (!generatedImageDataUrl && overlayReliable && enableLocalOverlayComposer) {
+    if (!generatedImageDataUrl && (overlayReliable || allowGuardedLowConfidenceTransfer) && enableLocalOverlayComposer) {
         try {
+            const fallbackSimilarity = overlayReliable ? similarityStrength : Math.max(0.82, similarityStrength * 0.9)
+            const fallbackCoverage = overlayReliable ? overlayCoverageBoost : Math.min(1.1, Math.max(1.0, overlayCoverageBoost * 0.9))
             generatedImageDataUrl = await renderLocalOverlayFallbackImage({
                 imageDataUrl,
-                overlayPlan: preview.overlayPlan,
+                overlayPlan: workingOverlayPlan,
                 templateImageDataUrl: resolvedTemplateImageDataUrl,
                 fingerTextureMap,
-                similarityStrength,
-                coverageBoost: overlayCoverageBoost,
+                similarityStrength: fallbackSimilarity,
+                coverageBoost: fallbackCoverage,
                 useLabels: false,
             })
             if (generatedImageDataUrl) {
                 provider = 'local-overlay-fallback'
-                warnings.push('AI image provider unavailable, used local overlay fallback render.')
+                warnings.push(`AI image provider unavailable, used local overlay fallback render (strength ${fallbackSimilarity.toFixed(2)}, coverage ${fallbackCoverage.toFixed(2)}).`)
             }
         } catch (error) {
             warnings.push(`LocalFallback: ${String(error?.message || error)}`)
         }
-    } else if (!generatedImageDataUrl && overlayReliable && !enableLocalOverlayComposer) {
+    } else if (!generatedImageDataUrl && (overlayReliable || allowGuardedLowConfidenceTransfer) && !enableLocalOverlayComposer) {
         warnings.push('LocalFallback: disabled (AI_TRYON_ENABLE_LOCAL_OVERLAY_COMPOSER=false) to prevent polygon artifacts.')
     } else if (!generatedImageDataUrl && !overlayReliable) {
         warnings.push('LocalFallback: skipped because overlay quality is low (prevents misplaced shapes).')
@@ -1259,25 +1423,27 @@ async function generateNailTryOnImage({ imageDataUrl, handHint = '', design = {}
     }
 
     // Enforce stronger style similarity on successful AI output.
-    if (generatedImageDataUrl && resolvedTemplateImageDataUrl && provider !== 'local-overlay-fallback' && overlayReliable && enableOverlayReinforcement) {
+    if (generatedImageDataUrl && resolvedTemplateImageDataUrl && provider !== 'local-overlay-fallback' && enableOverlayReinforcement && (overlayReliable || allowGuardedLowConfidenceTransfer)) {
         try {
+            const reinforceSimilarity = overlayReliable ? similarityStrength : Math.max(0.84, similarityStrength * 0.92)
+            const reinforceCoverage = overlayReliable ? overlayCoverageBoost : Math.min(1.12, Math.max(1.02, overlayCoverageBoost * 0.92))
             const reinforced = await renderLocalOverlayFallbackImage({
                 imageDataUrl: generatedImageDataUrl,
-                overlayPlan: preview.overlayPlan,
+                overlayPlan: workingOverlayPlan,
                 templateImageDataUrl: resolvedTemplateImageDataUrl,
                 fingerTextureMap,
-                similarityStrength,
-                coverageBoost: overlayCoverageBoost,
+                similarityStrength: reinforceSimilarity,
+                coverageBoost: reinforceCoverage,
                 useLabels: false,
             })
             if (reinforced) {
                 generatedImageDataUrl = reinforced
-                warnings.push(`SimilarityBoost: applied template reinforcement at strength ${similarityStrength.toFixed(2)} and coverage ${overlayCoverageBoost.toFixed(2)}.`)
+                warnings.push(`SimilarityBoost: applied template reinforcement at strength ${reinforceSimilarity.toFixed(2)} and coverage ${reinforceCoverage.toFixed(2)}.`)
             }
         } catch (error) {
             warnings.push(`SimilarityBoost: ${String(error?.message || error)}`)
         }
-    } else if (generatedImageDataUrl && resolvedTemplateImageDataUrl && provider !== 'local-overlay-fallback' && !overlayReliable) {
+    } else if (generatedImageDataUrl && resolvedTemplateImageDataUrl && provider !== 'local-overlay-fallback' && !overlayReliable && !allowGuardedLowConfidenceTransfer) {
         warnings.push('SimilarityBoost: skipped due to low-quality overlay mapping to avoid visual artifacts.')
     } else if (generatedImageDataUrl && resolvedTemplateImageDataUrl && provider !== 'local-overlay-fallback' && !enableOverlayReinforcement) {
         warnings.push('SimilarityBoost: disabled by configuration (set AI_TRYON_ENABLE_OVERLAY_REINFORCEMENT=true to enable).')
@@ -1287,8 +1453,40 @@ async function generateNailTryOnImage({ imageDataUrl, handHint = '', design = {}
         await saveImageDataUrl(generatedImageDataUrl, 'render') :
         null
 
+    // Save template reference image (if present) as its own file so history can show it
+    let savedTemplateImageUrl = null
+    try {
+        if (resolvedTemplateImageDataUrl) {
+            savedTemplateImageUrl = await saveImageDataUrl(resolvedTemplateImageDataUrl, 'template')
+        }
+    } catch (e) {
+        // ignore template save errors
+        savedTemplateImageUrl = null
+    }
+
+    // Persist try-on record to DB (if DB available)
+    try {
+        const tryOnId = newId()
+        const paramsJson = JSON.stringify({ design: safeDesign || {}, userPrompt: String(userPrompt || ''), selectedService })
+        await query(`
+            INSERT INTO TryOnRecords (TryOnId, UserId, SourceImageUrl, TemplateImageUrl, ResultImageUrl, DesignId, Params)
+            VALUES (@tryOnId, @userId, @sourceImageUrl, @templateImageUrl, @resultImageUrl, @designId, @params)
+        `, {
+            tryOnId,
+            userId: null,
+            sourceImageUrl: preview?.uploadedImageUrl || null,
+            templateImageUrl: savedTemplateImageUrl || null,
+            resultImageUrl: generatedImageUrl || null,
+            designId: safeDesign?.id || null,
+            params: paramsJson,
+        }).catch(() => {})
+    } catch (e) {
+        // ignore DB errors, keep try-on flow working
+    }
+
     return {
         ...preview,
+        overlayPlan: workingOverlayPlan,
         generation: {
             provider,
             prompt,
@@ -1301,36 +1499,128 @@ async function generateNailTryOnImage({ imageDataUrl, handHint = '', design = {}
     }
 }
 
+// --- Persistence helpers for try-on history ---
+async function listTryOnHistory({ userId = null, limit = 50, offset = 0 } = {}) {
+    const sqlText = `SELECT TryOnId, UserId, SourceImageUrl, TemplateImageUrl, ResultImageUrl, DesignId, Params, CreatedAt FROM TryOnRecords WHERE (@userId IS NULL OR UserId = @userId) ORDER BY CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
+    try {
+        const res = await query(sqlText, { userId: userId || null, limit: Number(limit || 50), offset: Number(offset || 0) })
+        return (res.recordset || []).map((r) => ({
+            tryOnId: r.TryOnId,
+            userId: r.UserId,
+            sourceImageUrl: r.SourceImageUrl,
+            templateImageUrl: r.TemplateImageUrl || null,
+            resultImageUrl: r.ResultImageUrl,
+            designId: r.DesignId,
+            params: r.Params,
+            createdAt: r.CreatedAt,
+        }))
+    } catch (e) {
+        return []
+    }
+}
+
+async function getTryOnRecordById({ id } = {}) {
+    if (!id) return null
+    try {
+        const res = await query(`SELECT TryOnId, UserId, SourceImageUrl, TemplateImageUrl, ResultImageUrl, DesignId, Params, CreatedAt FROM TryOnRecords WHERE TryOnId = @id`, { id })
+        const row = (res.recordset || [])[0]
+        if (!row) return null
+        return {
+            tryOnId: row.TryOnId,
+            userId: row.UserId,
+            sourceImageUrl: row.SourceImageUrl,
+            templateImageUrl: row.TemplateImageUrl || null,
+            resultImageUrl: row.ResultImageUrl,
+            designId: row.DesignId,
+            params: row.Params,
+            createdAt: row.CreatedAt,
+        }
+    } catch (e) {
+        return null
+    }
+}
+
+async function deleteTryOnRecord({ id, userId = null } = {}) {
+    if (!id) return
+    try {
+        await query(`DELETE FROM TryOnRecords WHERE TryOnId = @id AND (@userId IS NULL OR UserId = @userId)`, { id, userId: userId || null })
+    } catch (e) {
+        // ignore
+    }
+}
+
 module.exports = {
     listTryOnServices,
     analyzeHandAndNails,
     createTryOnPreview,
     generateNailTryOnImage,
+    // history
+    listTryOnHistory,
+    getTryOnRecordById,
+    deleteTryOnRecord,
 }
 
 function sanitizeOverlayPlan(analysis = {}, overlayPlan = null) {
     if (!overlayPlan || typeof overlayPlan !== 'object') return null
 
     const overlays = Array.isArray(overlayPlan ?.overlays) ? overlayPlan.overlays : []
-    const cleaned = overlays.filter((ov) => {
+    const evaluate = (ov) => {
         const points = Array.isArray(ov ?.polygon) ? ov.polygon : []
-        if (points.length < 3) return false
+        if (points.length < 3) return null
 
         const xs = points.map((p) => clamp01(p ?.x, 0.5))
         const ys = points.map((p) => clamp01(p ?.y, 0.5))
         const width = Math.max(...xs) - Math.min(...xs)
         const height = Math.max(...ys) - Math.min(...ys)
         const area = Math.max(0, width * height)
-
-        if (area < 0.0012 || area > 0.09) return false
-
         const ratio = Math.max(width, height) / Math.max(1e-6, Math.min(width, height))
-        if (ratio < 1.1) return false
-
         const confidence = Number(ov ?.confidence || 0)
-        if (Number.isFinite(confidence) && confidence < 0.35) return false
+        const finger = normalizeFingerName(ov ?.finger) || String(ov ?.finger || '').toLowerCase() || 'unknown'
+
+        return {
+            ov,
+            points,
+            width,
+            height,
+            area,
+            ratio,
+            confidence: Number.isFinite(confidence) ? confidence : 0,
+            finger,
+        }
+    }
+
+    const scored = overlays.map((ov) => evaluate(ov)).filter(Boolean)
+
+    const pickUniqueByFinger = (candidates) => {
+        const byFinger = new Map()
+        for (const c of candidates) {
+            const prev = byFinger.get(c.finger)
+            if (!prev || c.confidence > prev.confidence) {
+                byFinger.set(c.finger, c)
+            }
+        }
+        return Array.from(byFinger.values()).slice(0, 5).map((x) => x.ov)
+    }
+
+    // Strict pass for normal quality
+    const strictCandidates = scored.filter((m) => {
+        if (m.area < 0.0012 || m.area > 0.09) return false
+        if (m.ratio < 0.95 || m.ratio > 7.5) return false
+        if (m.confidence < 0.2) return false
         return true
     })
+    let cleaned = pickUniqueByFinger(strictCandidates)
+
+    // Relaxed rescue pass: prevent dropping to only 3 nails on real user hands
+    if (cleaned.length < 4) {
+        const relaxedCandidates = scored.filter((m) => {
+            if (m.area < 0.00045 || m.area > 0.14) return false
+            if (m.ratio < 0.7 || m.ratio > 9.5) return false
+            if (m.confidence < 0.05) return false
+            return true
+        })
+        cleaned = pickUniqueByFinger(relaxedCandidates)
+    }
 
     if (!cleaned.length) return null
     return {

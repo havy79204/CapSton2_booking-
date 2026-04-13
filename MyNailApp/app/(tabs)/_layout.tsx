@@ -130,6 +130,12 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <MaterialIcons size={28} name="account-balance-wallet" color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="aitryon/history"
+        options={{
+          href: null,
+        }}
+      />
       {/* 'staff' route is handled by file-based routing; do not declare it here to avoid duplicate screens */}
     </Tabs>
     </View>

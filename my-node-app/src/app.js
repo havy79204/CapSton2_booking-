@@ -31,6 +31,16 @@ function createApp() {
     express.static(path.join(__dirname, '..', 'uploads')),
   )
 
+  // Also expose uploads under /api/uploads so clients using API_BASE + '/uploads/...' work
+  app.use(
+    '/api/uploads',
+    (req, res, next) => {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+      next()
+    },
+    express.static(path.join(__dirname, '..', 'uploads')),
+  )
+
   app.get('/health', async (req, res) => {
     let db = { ok: false }
     const tables = {}

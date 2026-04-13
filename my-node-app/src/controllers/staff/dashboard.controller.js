@@ -150,7 +150,7 @@ const getSummary = asyncHandler(async(req, res) => {
        ORDER BY b.BookingTime ASC`, { staffId, dayStart, nextDay },
         ),
         query(
-            `SELECT TOP 20
+            `SELECT TOP 50
           b.BookingId,
           b.BookingTime,
           b.Status,
@@ -168,9 +168,8 @@ const getSummary = asyncHandler(async(req, res) => {
        INNER JOIN BookingServices bs ON bs.BookingId = b.BookingId
        LEFT JOIN Users u ON u.UserId = b.CustomerUserId
        WHERE bs.StaffId = @staffId
-         AND b.BookingTime >= @weekStart AND b.BookingTime < @nextDay
        GROUP BY b.BookingId, b.BookingTime, b.Status, u.Name
-       ORDER BY b.BookingTime DESC`, { staffId, weekStart, nextDay },
+       ORDER BY b.BookingTime DESC`, { staffId },
         ),
         query(
             `SELECT
@@ -245,11 +244,12 @@ const getSummary = asyncHandler(async(req, res) => {
         sr.Comment,
         sr.CreatedAt,
         b.BookingId,
-        cu.Name AS CustomerName,
+        COALESCE(cu2.Name, cu.Name) AS CustomerName,
         sv.Name AS ServiceName
      FROM SalonReviews sr
      LEFT JOIN Bookings b ON b.BookingId = sr.BookingId
      LEFT JOIN Users cu ON cu.UserId = b.CustomerUserId
+     LEFT JOIN Users cu2 ON cu2.UserId = sr.UserId
      OUTER APPLY (
        SELECT TOP 1 s.Name
        FROM BookingServices bs
@@ -416,22 +416,22 @@ const getSummary = asyncHandler(async(req, res) => {
         weekly,
         yearlyIncome,
         serviceDistribution: (serviceDistRes.recordset || []).map((r) => ({
-            label: String(r.Label || 'Khac'),
-            count: Number(r.Cnt || 0),
-            value: totalServiceCount > 0 ? Math.round((Number(r.Cnt || 0) * 100) / totalServiceCount) : 0,
+          label: String(r.Label || 'Khac'),
+          count: Number(r.Cnt || 0),
+          value: totalServiceCount > 0 ? Math.round((Number(r.Cnt || 0) * 100) / totalServiceCount) : 0,
         })),
         ratings: (ratingsRes.recordset || []).map((r) => ({
-            rating: `${Number(r.Rating || 0)}*`,
-            count: Number(r.Cnt || 0),
+          rating: `${Number(r.Rating || 0)}*`,
+          count: Number(r.Cnt || 0),
         })),
         recentReviews: (recentReviewsRes.recordset || []).map((r) => ({
-            id: r.ReviewId,
-            rating: Number(r.Rating || 0),
-            comment: String(r.Comment || '').trim(),
-            createdAt: r.CreatedAt ? new Date(r.CreatedAt).toISOString() : null,
-            bookingId: r.BookingId || null,
-            customerName: String(r.CustomerName || 'Khach hang'),
-            serviceName: String(r.ServiceName || 'Dich vu'),
+          id: r.ReviewId,
+          rating: Number(r.Rating || 0),
+          comment: String(r.Comment || '').trim(),
+          createdAt: r.CreatedAt ? new Date(r.CreatedAt).toISOString() : null,
+          bookingId: r.BookingId || null,
+          customerName: String(r.CustomerName || 'Khach hang'),
+          serviceName: String(r.ServiceName || 'Dich vu'),
         })),
     }
 
@@ -464,12 +464,13 @@ const getReviewDetails = asyncHandler(async(req, res) => {
         sr.Comment,
         sr.CreatedAt,
         b.BookingId,
-        cu.Name AS CustomerName,
+        COALESCE(cu2.Name, cu.Name) AS CustomerName,
       sv.Name AS ServiceName,
       ROW_NUMBER() OVER (ORDER BY sr.CreatedAt DESC, sr.ReviewId DESC) AS RowNo
      FROM SalonReviews sr
      LEFT JOIN Bookings b ON b.BookingId = sr.BookingId
-     LEFT JOIN Users cu ON cu.UserId = b.CustomerUserId
+    LEFT JOIN Users cu ON cu.UserId = b.CustomerUserId
+    LEFT JOIN Users cu2 ON cu2.UserId = sr.UserId
      OUTER APPLY (
        SELECT TOP 1 s.Name
        FROM BookingServices bs

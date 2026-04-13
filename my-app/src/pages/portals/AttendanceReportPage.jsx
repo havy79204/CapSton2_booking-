@@ -33,13 +33,6 @@ function formatDurationMinutes(minutes) {
   return `${h}h ${String(mm).padStart(2, '0')}m`
 }
 
-function formatScheduleWindow(startAt, endAt) {
-  const s = formatTime(startAt)
-  const e = formatTime(endAt)
-  if (s === '-' && e === '-') return '-'
-  return `${s} - ${e}`
-}
-
 export default function AttendanceReportPage() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
@@ -199,7 +192,6 @@ export default function AttendanceReportPage() {
                       <tr>
                         <th>Date</th>
                         <th>Shift</th>
-                        <th>Schedule</th>
                         <th>Check-in</th>
                         <th>Check-out</th>
                         <th>Total</th>
@@ -209,14 +201,13 @@ export default function AttendanceReportPage() {
                     <tbody>
                       {(detailRows || []).length === 0 ? (
                         <tr>
-                          <td colSpan={7} style={{ textAlign: 'center' }}>No detail data in the selected range</td>
+                          <td colSpan={6} style={{ textAlign: 'center' }}>No detail data in the selected range</td>
                         </tr>
                       ) : (
                         (detailRows || []).map((item, idx) => (
                           <tr key={`${item.WorkDate || item.workDate || 'x'}-${item.ScheduleStartAt || item.scheduleStartAt || 'x'}-${idx}`}>
                             <td>{formatDate(item.WorkDate || item.workDate)}</td>
                             <td>{item.ShiftName || item.shiftName || '-'}</td>
-                            <td>{formatScheduleWindow(item.ScheduleStartAt || item.scheduleStartAt, item.ScheduleEndAt || item.scheduleEndAt)}</td>
                             <td>{formatTime(item.CheckInAt || item.checkInAt)}</td>
                             <td>{formatTime(item.CheckOutAt || item.checkOutAt)}</td>
                             <td>{formatDurationMinutes(item.DurationMinutes ?? item.durationMinutes ?? 0)}</td>
