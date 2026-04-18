@@ -362,7 +362,7 @@ export default function AIChatbox() {
                   <div className="message-bubble">
                     {payload ? (
                       <div className="analysis-content">
-                        <div className="analysis-text">{payload.text || 'Phân tích ảnh hoàn tất.'}</div>
+                        <div className="analysis-text">{payload.text || 'Image analysis is complete.'}</div>
                         {Array.isArray(payload?.analysis?.advice) && payload.analysis.advice.length > 0 && (
                           <div className="analysis-section">
                             <div className="analysis-label">Lời khuyên:</div>

@@ -4,6 +4,7 @@ const { createApp } = require('./app')
 const { getPool } = require('./config/db')
 const { initSocketServer } = require('./realtime/socket')
 const { dispatchDueNotificationEmails, dispatchOwnerInsights } = require('./services/notifications.service')
+const { initializeInventoryService } = require('./services/inventory.service')
 
 const os = require('os')
 
@@ -40,6 +41,13 @@ async function main() {
   const app = createApp()
   const server = http.createServer(app)
   initSocketServer(server)
+
+  // Initialize inventory service (cleanup legacy data, etc.)
+  try {
+    await initializeInventoryService()
+  } catch (err) {
+    console.warn('[index] initializeInventoryService failed:', err?.message || err)
+  }
 
   // Bind to all interfaces so devices on the same LAN can reach this server.
   server.listen(env.port, '0.0.0.0', () => {

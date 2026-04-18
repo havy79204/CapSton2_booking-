@@ -1,5 +1,5 @@
 .footer {
-  background-color: #e8d5c4;
+  background: #e4d4c8;
   padding: 3rem 0 0;
   color: #3a3a3a;
 }
@@ -11,6 +11,13 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 3rem;
+}
+
+.footer-section {
+  border: 1px solid rgba(111, 78, 55, 0.12);
+  border-radius: 16px;
+  padding: 1.25rem 1.35rem;
+  backdrop-filter: blur(2px);
 }
 
 .footer-section h2,
@@ -26,36 +33,37 @@
 .footer-logo h2 {
   font-size: 1.6rem;
   font-weight: 700;
-  color: #2c2c2c;
+  color: #2a1f18;
 }
 
-.footer-links,
+.footer-description {
+  margin: 0;
+  color: #4f463f;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  max-width: 360px;
+}
+
 .footer-contact {
   list-style: none;
   padding: 0;
   margin: 0;
 }
 
-.footer-links li,
 .footer-contact li {
   margin-bottom: 0.8rem;
 }
 
-.footer-links a {
-  text-decoration: none;
-  color: #5a5a5a;
-  font-size: 0.95rem;
-  transition: color 0.3s;
-  cursor: pointer;
-}
-
-.footer-links a:hover {
-  color: #3a3a3a;
-}
-
 .footer-contact li {
   color: #5a5a5a;
   font-size: 0.95rem;
+}
+
+.footer-note {
+  margin: 0.9rem 0 0;
+  color: #6b6b6b;
+  font-size: 0.9rem;
+  line-height: 1.55;
 }
 
 .social-icons {
@@ -76,21 +84,29 @@
   font-weight: 500;
   transition: all 0.3s;
   font-size: 1.1rem;
+  box-shadow: 0 8px 18px rgba(58, 44, 35, 0.18);
 }
 
 .social-icon:hover {
-  background-color: #3a3a3a;
+  filter: brightness(1.06);
   transform: translateY(-3px);
+}
+
+.social-icon.website,
+.social-icon.facebook,
+.social-icon.instagram {
+  background: linear-gradient(135deg, #665247 0%, #4b3b33 100%);
 }
 
 .social-icon.disabled {
   opacity: 0.55;
   cursor: not-allowed;
   pointer-events: none;
+  box-shadow: none;
 }
 
 .footer-bottom {
-  border-top: 1px solid #c4b5a0;
+  border-top: 1px solid rgba(107, 87, 68, 0.22);
   padding: 1.5rem 0;
 }
 
@@ -129,6 +145,12 @@
   .footer-container {
     grid-template-columns: 1fr;
     gap: 2rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .footer-section {
+    padding: 1rem;
   }
 
   .footer-bottom-content {

@@ -113,6 +113,30 @@ const getInventoryImportTemplate = asyncHandler(async (_req, res) => {
   res.send(buffer)
 })
 
+const getInventorySnapshotExport = asyncHandler(async (req, res) => {
+  const buffer = await inventoryService.getInventorySnapshotExportBuffer(req.query || {})
+  const fileDate = new Date().toISOString().slice(0, 10)
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  res.setHeader('Content-Disposition', `attachment; filename="inventory-snapshot-${fileDate}.xlsx"`)
+  res.send(buffer)
+})
+
+const getInventoryMovementExport = asyncHandler(async (req, res) => {
+  const buffer = await inventoryService.getInventoryMovementExportBuffer(req.query || {})
+  const fileDate = new Date().toISOString().slice(0, 10)
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  res.setHeader('Content-Disposition', `attachment; filename="inventory-movement-${fileDate}.xlsx"`)
+  res.send(buffer)
+})
+
+const getInventoryLowStockExport = asyncHandler(async (req, res) => {
+  const buffer = await inventoryService.getInventoryLowStockExportBuffer(req.query || {})
+  const fileDate = new Date().toISOString().slice(0, 10)
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  res.setHeader('Content-Disposition', `attachment; filename="inventory-low-stock-${fileDate}.xlsx"`)
+  res.send(buffer)
+})
+
 module.exports = {
   getInventory,
   postInventoryItem,
@@ -125,4 +149,7 @@ module.exports = {
   putInventoryLot,
   deleteInventoryLot,
   getInventoryImportTemplate,
+  getInventorySnapshotExport,
+  getInventoryMovementExport,
+  getInventoryLowStockExport,
 }

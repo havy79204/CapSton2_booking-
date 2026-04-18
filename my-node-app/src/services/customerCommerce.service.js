@@ -10,8 +10,42 @@ const { setFrontendOriginForTxnRef } = require('./vnpayFrontendReturnStore.servi
 
 let _ordersChannelColumnPromise = null
 let _reviewImageColumnPromise = null
+let _cartVariantColumnPromise = null
+let _orderItemVariantColumnPromise = null
+let _orderItemVariantNameColumnPromise = null
 const ACTIVE_SERVICE_WHERE = `(Status IS NULL OR LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), Status)))) = 'active')`
 const REVIEW_IMAGE_COLUMN_CANDIDATES = ['ReviewImages', 'ImageUrls', 'ImagesJson', 'ImageUrl']
+const ORDER_STATUSES = {
+  PENDING: 'PENDING',
+  PROCESSING: 'PROCESSING',
+  SHIPPING: 'SHIPPING',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+}
+
+function normalizeOrderLifecycleStatus(rawStatus) {
+  const value = String(rawStatus || '').trim().toLowerCase()
+  if (!value) return ORDER_STATUSES.PENDING
+  if (value === 'pending' || value === 'c' || value === 'awaiting') return ORDER_STATUSES.PENDING
+  if (value === 'processing' || value === 'confirm' || value === 'confirmed') return ORDER_STATUSES.PROCESSING
+  if (value === 'shipping' || value === 'shipped' || value === 'delivering' || value === 'in transit') return ORDER_STATUSES.SHIPPING
+  if (value === 'completed' || value === 'complete' || value === 'delivered' || value === 'done' || value === 'success' || value === 'paid') return ORDER_STATUSES.COMPLETED
+  if (value === 'cancelled' || value === 'cancel') return ORDER_STATUSES.CANCELLED
+  return ORDER_STATUSES.PENDING
+}
+
+function canTransitionOrderStatus(from, to) {
+  const fromStatus = normalizeOrderLifecycleStatus(from)
+  const toStatus = normalizeOrderLifecycleStatus(to)
+  const rules = {
+    [ORDER_STATUSES.PENDING]: [ORDER_STATUSES.PROCESSING, ORDER_STATUSES.CANCELLED],
+    [ORDER_STATUSES.PROCESSING]: [ORDER_STATUSES.SHIPPING, ORDER_STATUSES.CANCELLED],
+    [ORDER_STATUSES.SHIPPING]: [ORDER_STATUSES.COMPLETED],
+    [ORDER_STATUSES.COMPLETED]: [],
+    [ORDER_STATUSES.CANCELLED]: [],
+  }
+  return (rules[fromStatus] || []).includes(toStatus)
+}
 
 function parseImageDataUrl(dataUrl) {
   const raw = String(dataUrl || '').trim()
@@ -267,28 +301,21 @@ function normalizePaymentMethod(raw) {
 }
 
 function derivePaymentStatus(orderStatus, paymentMethod) {
-  const status = String(orderStatus || '').trim().toLowerCase()
+  const status = normalizeOrderLifecycleStatus(orderStatus)
   const method = String(paymentMethod || '').trim().toLowerCase()
 
-  if (status === 'cancelled' || status === 'cancelled' || status === 'failed') return 'Failed'
-  if (status === 'completed' || status === 'delivered' || status === 'paid' || status === 'confirmed') return 'Paid'
+  if (status === ORDER_STATUSES.CANCELLED) return 'Failed'
+  if (status === ORDER_STATUSES.COMPLETED) return 'Paid'
   if (method === 'cod' || method === 'store') return 'Pay On Delivery'
-  return 'C Payment'
+  return 'Pending'
 }
 
 function isCStatus(status) {
-  const value = String(status || '').trim().toLowerCase()
-  return value === 'c' || value === 'awaiting' || value === 'pending'
+  return normalizeOrderLifecycleStatus(status) === ORDER_STATUSES.PENDING
 }
 
 function isOrderCompletedStatus(status) {
-  const value = String(status || '').trim().toLowerCase()
-  return value.includes('complete')
-    || value.includes('deliver')
-    || value === 'done'
-    || value === 'success'
-    || value === 'paid'
-    || value === 'confirmed'
+  return normalizeOrderLifecycleStatus(status) === ORDER_STATUSES.COMPLETED
 }
 
 function calcOrderDiscountAmount(row) {
@@ -501,6 +528,16 @@ async function columnExists(tableName, columnName) {
   return Boolean(res.recordset?.length)
 }
 
+async function tableExists(tableName) {
+  const res = await query(
+    `SELECT 1 AS ok
+     FROM INFORMATION_SCHEMA.TABLES
+     WHERE TABLE_NAME = @tableName`,
+    { tableName }
+  )
+  return Boolean(res.recordset?.length)
+}
+
 async function getOrdersChannelColumn() {
   if (_ordersChannelColumnPromise) return _ordersChannelColumnPromise
   _ordersChannelColumnPromise = (async () => {
@@ -534,6 +571,97 @@ async function getSalonReviewImageColumn() {
     return null
   })()
   return _reviewImageColumnPromise
+}
+
+async function getCartVariantColumn() {
+  if (_cartVariantColumnPromise) return _cartVariantColumnPromise
+  _cartVariantColumnPromise = (async () => {
+    if (await columnExists('CartItems', 'VariantId')) return 'VariantId'
+
+    try {
+      await query(`
+        IF COL_LENGTH('CartItems', 'VariantId') IS NULL
+        BEGIN
+          ALTER TABLE CartItems ADD VariantId NVARCHAR(100) NULL;
+        END
+      `)
+    } catch (err) {
+      console.warn('[customerCommerce] Unable to ensure CartItems.VariantId:', err?.message || err)
+    }
+
+    return (await columnExists('CartItems', 'VariantId')) ? 'VariantId' : null
+  })()
+  return _cartVariantColumnPromise
+}
+
+async function getOrderItemVariantColumn() {
+  if (_orderItemVariantColumnPromise) return _orderItemVariantColumnPromise
+  _orderItemVariantColumnPromise = (async () => {
+    if (await columnExists('OrderItems', 'VariantId')) return 'VariantId'
+    return null
+  })()
+  return _orderItemVariantColumnPromise
+}
+
+async function getOrderItemVariantNameColumn() {
+  if (_orderItemVariantNameColumnPromise) return _orderItemVariantNameColumnPromise
+  _orderItemVariantNameColumnPromise = (async () => {
+    if (await columnExists('OrderItems', 'VariantName')) return 'VariantName'
+    return null
+  })()
+  return _orderItemVariantNameColumnPromise
+}
+
+async function getCartVariantOptionsByProductIds(productIds) {
+  const uniqueProductIds = [...new Set(
+    (Array.isArray(productIds) ? productIds : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  )]
+
+  if (!uniqueProductIds.length) return new Map()
+  if (!(await tableExists('ProductVariants'))) return new Map()
+
+  const bind = {}
+  const inParts = uniqueProductIds.map((productId, index) => {
+    const key = `productId${index}`
+    bind[key] = productId
+    return `@${key}`
+  })
+
+  const res = await query(
+    `SELECT
+       pv.ProductId,
+       pv.VariantId,
+       pv.VariantName,
+       COALESCE(vlots.TotalQty, COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Stock), 0), 0) AS Stock,
+       COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Price), TRY_CONVERT(DECIMAL(19,2), p.Price), 0) AS Price
+     FROM ProductVariants pv
+     INNER JOIN Products p ON p.ProductId = pv.ProductId
+     OUTER APPLY (
+       SELECT COALESCE(SUM(COALESCE(l.RemainingQty, 0)), 0) AS TotalQty
+       FROM InventoryLots l
+       WHERE l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+     ) vlots
+     WHERE pv.ProductId IN (${inParts.join(', ')})
+     ORDER BY pv.ProductId, COALESCE(vlots.TotalQty, COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Stock), 0), 0) DESC, pv.VariantName ASC`,
+    bind
+  )
+
+  const map = new Map()
+  for (const row of res.recordset || []) {
+    const key = String(row.ProductId || '').trim()
+    if (!key) continue
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push({
+      VariantId: row.VariantId,
+      VariantName: row.VariantName || '',
+      Stock: Number(row.Stock || 0),
+      PriceVnd: row.Price === null || row.Price === undefined ? null : Number(row.Price),
+    })
+  }
+
+  return map
 }
 
 async function setReviewImagesByReviewId(reviewId, imageDataUrls) {
@@ -895,102 +1023,91 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
     : []
 
   const params = {}
-  
-  // Handle date filtering if provided
+
+  const formatHourValue = (value) => {
+    if (value === null || value === undefined) return ''
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const hour = Math.trunc(value)
+      const minute = Math.round((value - hour) * 60)
+      return `${String(hour).padStart(2, '0')}:${String(Math.max(0, Math.min(59, minute))).padStart(2, '0')}`
+    }
+
+    const raw = String(value).trim()
+    if (!raw) return ''
+
+    if (/^\d{1,2}$/.test(raw)) {
+      const n = Number(raw)
+      if (Number.isFinite(n) && n >= 0 && n <= 23) return `${String(Math.trunc(n)).padStart(2, '0')}:00`
+    }
+
+    const hhmm = raw.match(/^(\d{1,2}):(\d{2})/)
+    if (hhmm) return `${hhmm[1].padStart(2, '0')}:${hhmm[2]}`
+
+    const dt = new Date(raw)
+    if (!Number.isNaN(dt.getTime())) {
+      return `${String(dt.getUTCHours()).padStart(2, '0')}:${String(dt.getUTCMinutes()).padStart(2, '0')}`
+    }
+
+    return ''
+  }
+
+  // Handle date filtering if provided (supports both StaffAvailability and StaffShifts)
   let availabilityFilterClause = ''
-  let dateForAnalysis = null
-  
   if (dateInput) {
     try {
-      // Import here to avoid circular dependency
       const { toIsoDate } = require('../utils/date')
       const dateObj = new Date(dateInput)
       if (!Number.isNaN(dateObj.getTime())) {
-        dateForAnalysis = dateObj
-        const dateIso = toIsoDate(dateObj)
-        params.bookingDate = dateIso
-        
-        // Get current date to check if it's today
-        const today = new Date()
-        const todayIso = toIsoDate(today)
-        const isToday = dateIso === todayIso
-        
-        const currentHour = isToday ? today.getHours() : -1
-        params.currentHour = currentHour
-        params.todayCheck = isToday ? 1 : 0
-        
-        // Detect actual StaffShifts column names and types so we build safe SQL
-        const colsRes = await query(
-          `SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'StaffShifts'`
-        )
-        const cols = (colsRes.recordset || []).map((r) => ({ name: String(r.COLUMN_NAME), type: String(r.DATA_TYPE).toLowerCase() }))
-        const colNames = cols.map((c) => c.name)
+        params.bookingDate = toIsoDate(dateObj)
 
-        // Helper to pick the first matching candidate column name that exists
-        const pickColumn = (candidates) => {
-          for (const cand of candidates) {
-            if (colNames.includes(cand)) return cand
-          }
-          return null
+        const [hasStaffAvailability, hasAvailabilityDayIndex, hasStaffShifts, hasShiftDayIndex] = await Promise.all([
+          query(`SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'StaffAvailability'`)
+            .then((x) => Boolean(x.recordset?.length))
+            .catch(() => false),
+          columnExists('StaffAvailability', 'DayIndex').catch(() => false),
+          query(`SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'StaffShifts'`)
+            .then((x) => Boolean(x.recordset?.length))
+            .catch(() => false),
+          columnExists('StaffShifts', 'DayIndex').catch(() => false),
+        ])
+
+        const existsParts = []
+
+        if (hasStaffAvailability) {
+          const availabilityDateExpr = hasAvailabilityDayIndex
+            ? 'DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE))'
+            : 'CAST(sa.WeekStartDate AS DATE)'
+          const availabilityDatePredicate = hasAvailabilityDayIndex
+            ? `${availabilityDateExpr} = @bookingDate`
+            : '@bookingDate BETWEEN CAST(sa.WeekStartDate AS DATE) AND DATEADD(DAY, 6, CAST(sa.WeekStartDate AS DATE))'
+
+          existsParts.push(`EXISTS (
+            SELECT 1
+            FROM StaffAvailability sa
+            WHERE CONVERT(NVARCHAR(100), sa.StaffId) = CONVERT(NVARCHAR(100), s.StaffId)
+              AND ${availabilityDatePredicate}
+          )`)
         }
 
-        const startCol = pickColumn(['StartHour', 'StartAt', 'StartTime', 'Start'])
-        const endCol = pickColumn(['EndHour', 'EndAt', 'EndTime', 'End'])
-        const durationCol = pickColumn(['DurationHours', 'Duration', 'DurationMinutes', 'DurationMins'])
+        if (hasStaffShifts) {
+          const shiftDateExpr = hasShiftDayIndex
+            ? 'DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE))'
+            : 'CAST(sa.WeekStartDate AS DATE)'
 
-        if (startCol) {
-          const startType = cols.find((c) => c.name === startCol)?.type || ''
-          const endType = endCol ? (cols.find((c) => c.name === endCol)?.type || '') : ''
-          const durationType = durationCol ? (cols.find((c) => c.name === durationCol)?.type || '') : ''
-
-          const startExpr = startType.startsWith('time') || startType.includes('date')
-            ? `DATEPART(hour, sa.[${startCol}])`
-            : `TRY_CONVERT(INT, sa.[${startCol}])`
-          const endExpr = endCol
-            ? (endType.startsWith('time') || endType.includes('date')
-                ? `DATEPART(hour, sa.[${endCol}])`
-                : `TRY_CONVERT(INT, sa.[${endCol}])`)
-            : null
-          const durationExpr = durationCol
-            ? (durationType.startsWith('time') || durationType.includes('date')
-                ? `DATEPART(hour, sa.[${durationCol}])`
-                : `TRY_CONVERT(INT, sa.[${durationCol}])`)
-            : null
-
-          // Filter staff by availability for the selected date
-          // If today, also exclude staff whose shift has already ended
-          availabilityFilterClause = `
-            AND EXISTS (
-              SELECT 1
-              FROM StaffShifts sa
-              WHERE CONVERT(NVARCHAR(100), sa.StaffId) = CONVERT(NVARCHAR(100), s.StaffId)
-                AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) = @bookingDate
-                ${isToday ? `AND (${startExpr}
-                      + ISNULL(${durationExpr || '0'},
-                          CASE
-                            WHEN ${endExpr || startExpr} > ${startExpr}
-                              THEN ${endExpr || startExpr} - ${startExpr}
-                            ELSE 0
-                          END
-                        )) > @currentHour` : ''}
-            )`
-        } else {
-          // No recognizable Start column — skip availability filter to avoid invalid column references
-          availabilityFilterClause = ''
-          if (!(String(process.env.SILENT_LOGS || '').trim() === '1')) {
-            console.log('[DEBUG] listAvailableStaff: no Start column found in StaffShifts, skipping availability filter')
-          }
+          existsParts.push(`EXISTS (
+            SELECT 1
+            FROM StaffShifts sa
+            WHERE CONVERT(NVARCHAR(100), sa.StaffId) = CONVERT(NVARCHAR(100), s.StaffId)
+              AND ${shiftDateExpr} = @bookingDate
+          )`)
         }
 
-        if (!(String(process.env.SILENT_LOGS || '').trim() === '1')) {
-          console.log('[DEBUG] listAvailableStaff:', { dateInput, bookingDate: dateIso, isToday, currentHour })
+        if (existsParts.length > 0) {
+          availabilityFilterClause = ` AND (${existsParts.join(' OR ')})`
         }
       }
-    } catch (e) {
-      // If date parsing fails, continue without date filter
-      if (!(String(process.env.SILENT_LOGS || '').trim() === '1')) {
-        console.log('[DEBUG] listAvailableStaff date parse error:', e.message)
-      }
+    } catch (_err) {
+      availabilityFilterClause = ''
     }
   }
   let staffFilterClause = ''
@@ -1128,9 +1245,89 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
     throw err
   }
 
+  // If strict skill matching yields no rows, fallback to availability-only staff list.
+  if ((res.recordset || []).length === 0 && staffFilterClause.trim()) {
+    const fallbackSql = `SELECT
+        s.StaffId,
+        s.UserId,
+        ${specialtySelectSql},
+        s.Status AS StaffStatus,
+        u.Name,
+        u.Phone,
+        u.Email,
+        u.AvatarUrl
+     FROM Staff s
+     LEFT JOIN Users u ON u.UserId = s.UserId
+      ${specialtyJoinSql}
+     WHERE (s.Status IS NULL OR LOWER(LTRIM(RTRIM(s.Status))) NOT IN (N'nghỉ', 'inactive', 'off'))
+     ${availabilityFilterClause}
+     ORDER BY u.Name, s.StaffId`
+
+    try {
+      res = await query(fallbackSql, params)
+    } catch (err) {
+      console.error('[listAvailableStaff] fallback query error:', err?.message || err)
+    }
+  }
+
+  // If only date availability filtering caused empty result, fall back to all active staff.
+  if ((res.recordset || []).length === 0 && !staffFilterClause.trim() && availabilityFilterClause.trim()) {
+    const fallbackSqlNoAvailability = `SELECT
+        s.StaffId,
+        s.UserId,
+        ${specialtySelectSql},
+        s.Status AS StaffStatus,
+        u.Name,
+        u.Phone,
+        u.Email,
+        u.AvatarUrl
+     FROM Staff s
+     LEFT JOIN Users u ON u.UserId = s.UserId
+      ${specialtyJoinSql}
+     WHERE (s.Status IS NULL OR LOWER(LTRIM(RTRIM(s.Status))) NOT IN (N'nghỉ', 'inactive', 'off'))
+     ORDER BY u.Name, s.StaffId`
+
+    try {
+      res = await query(fallbackSqlNoAvailability, params)
+    } catch (err) {
+      console.error('[listAvailableStaff] no-availability fallback query error:', err?.message || err)
+    }
+  }
+
   const staffList = (res.recordset || [])
 
-  // Fetch booked slots for each staff member if date is provided
+  // Get default booking hours for fallback
+  let defaultWorkingHours = null
+  try {
+    const settingsMap = await getSettingsMap()
+    const context = buildBookingSettings(settingsMap, dateInput)
+    const openMin = parseTimeToMinutes(context.openTime)
+    const closeMin = parseTimeToMinutes(context.closeTime)
+
+    if (openMin !== null && closeMin !== null) {
+      const openHour = Math.floor(openMin / 60)
+      const openMins = openMin % 60
+      const closeHour = Math.floor(closeMin / 60)
+      const closeMins = closeMin % 60
+      defaultWorkingHours = {
+        startHour: `${String(openHour).padStart(2, '0')}:${String(openMins).padStart(2, '0')}`,
+        endHour: `${String(closeHour).padStart(2, '0')}:${String(closeMins).padStart(2, '0')}`,
+      }
+    }
+  } catch (_e) {
+    // Keep defaultWorkingHours as null and continue.
+  }
+
+  const hasStaffAvailabilityTable = await query(
+    `SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'StaffAvailability'`
+  ).then((x) => Boolean(x.recordset?.length)).catch(() => false)
+  const hasAvailabilityDayIndex = await columnExists('StaffAvailability', 'DayIndex').catch(() => false)
+  const hasStaffShiftsTable = await query(
+    `SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'StaffShifts'`
+  ).then((x) => Boolean(x.recordset?.length)).catch(() => false)
+  const hasShiftDayIndex = await columnExists('StaffShifts', 'DayIndex').catch(() => false)
+
+  // Fetch booked slots and working hours for each staff member if date is provided
   const result = []
   for (const row of staffList) {
     const staff = {
@@ -1143,10 +1340,86 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
       AvatarUrl: row.AvatarUrl || null,
       Status: row.StaffStatus || '',
       BookedSlots: [],
+      WorkingHours: defaultWorkingHours,
     }
 
-    // Get booked slots if date is provided
+    // Get working hours and booked slots if date is provided
     if (dateInput) {
+      try {
+        const { toIsoDate } = require('../utils/date')
+        const dateObj = new Date(dateInput)
+        if (!Number.isNaN(dateObj.getTime())) {
+          const dateIso = toIsoDate(dateObj)
+
+          let shiftRow = null
+
+          // Prefer StaffAvailability (used by owner schedule page)
+          if (hasStaffAvailabilityTable) {
+            const availabilityPredicate = hasAvailabilityDayIndex
+              ? 'DATEADD(DAY, ISNULL(TRY_CONVERT(INT, DayIndex), 0), CAST(WeekStartDate AS DATE)) = @dateIso'
+              : '@dateIso BETWEEN CAST(WeekStartDate AS DATE) AND DATEADD(DAY, 6, CAST(WeekStartDate AS DATE))'
+
+            const availRes = await query(
+              `SELECT TOP 1 StartHour, EndHour
+               FROM StaffAvailability
+               WHERE CONVERT(NVARCHAR(100), StaffId) = CONVERT(NVARCHAR(100), @staffId)
+                 AND ${availabilityPredicate}
+               ORDER BY StartHour`,
+              { staffId: row.StaffId, dateIso }
+            ).catch(() => ({ recordset: [] }))
+
+            if (availRes.recordset?.length) {
+              shiftRow = availRes.recordset[0]
+            }
+          }
+
+          // Fallback to StaffShifts (legacy schema)
+          if (!shiftRow && hasStaffShiftsTable) {
+            const shiftDateExpr = hasShiftDayIndex
+              ? 'DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE))'
+              : 'CAST(sa.WeekStartDate AS DATE)'
+
+            const shiftsRes = await query(
+              `SELECT TOP 1 sa.StartHour, sa.EndHour, sa.DurationHours
+               FROM StaffShifts sa
+               WHERE CONVERT(NVARCHAR(100), sa.StaffId) = CONVERT(NVARCHAR(100), @staffId)
+                 AND ${shiftDateExpr} = @dateIso
+               ORDER BY sa.StartHour`,
+              { staffId: row.StaffId, dateIso }
+            ).catch(() => ({ recordset: [] }))
+
+            if (shiftsRes.recordset?.length) {
+              shiftRow = shiftsRes.recordset[0]
+            }
+          }
+
+          if (shiftRow) {
+            const startText = formatHourValue(shiftRow.StartHour)
+            let endText = formatHourValue(shiftRow.EndHour)
+
+            if (!endText && shiftRow.DurationHours !== null && shiftRow.DurationHours !== undefined) {
+              const startMin = parseTimeToMinutes(startText)
+              const durationHour = Number(shiftRow.DurationHours)
+              if (startMin !== null && Number.isFinite(durationHour) && durationHour > 0) {
+                const endMin = startMin + Math.round(durationHour * 60)
+                const clampedEnd = Math.max(0, Math.min(23 * 60 + 59, endMin))
+                endText = `${String(Math.floor(clampedEnd / 60)).padStart(2, '0')}:${String(clampedEnd % 60).padStart(2, '0')}`
+              }
+            }
+
+            if (startText && endText) {
+              staff.WorkingHours = {
+                startHour: startText,
+                endHour: endText,
+              }
+            }
+          }
+        }
+      } catch (_e) {
+        // Keep fallback working hours.
+      }
+
+      // Get booked slots
       try {
         staff.BookedSlots = await getStaffBookedSlots(row.StaffId, dateInput)
       } catch (e) {
@@ -1367,18 +1640,22 @@ async function ensureCart(userId) {
 }
 
 function mapCartItem(row) {
+  const price = Number(row.Price || 0)
+  const quantity = Number(row.Quantity || 0)
   return {
     CartItemId: row.CartItemId,
     CartId: row.CartId,
     ProductId: row.ProductId,
-    Quantity: Number(row.Quantity || 0),
+    VariantId: row.VariantId || null,
+    VariantName: row.VariantName || null,
+    Quantity: quantity,
     Name: row.Name || '',
     Description: row.Description || '',
-    Price: Number(row.Price || 0),
+    Price: price,
     ImageUrl: row.ImageUrl || null,
     Stock: Number(row.Stock || 0),
     CategoryId: row.CategoryId || null,
-    LineTotal: Number(row.Price || 0) * Number(row.Quantity || 0),
+    LineTotal: price * quantity,
   }
 }
 
@@ -1388,6 +1665,52 @@ async function getCart(userIdInput) {
   try {
     const cartId = await ensureCart(userId)
     const ctx = await getCustomerContext(userId)
+    const cartVariantColumn = await getCartVariantColumn()
+    const hasProductImages = await tableExists('ProductImages')
+
+    const itemImageExpr = hasProductImages
+      ? 'COALESCE(pimg.ImageUrl, p.ImageUrl) AS ImageUrl'
+      : 'p.ImageUrl AS ImageUrl'
+
+    const itemSelectSql = cartVariantColumn
+      ? `
+            ci.VariantId,
+            pv.VariantName,
+            COALESCE(CONCAT(p.Name, N' - ', pv.VariantName), p.Name) AS Name,
+            p.Description,
+        COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Price), TRY_CONVERT(DECIMAL(19,2), p.Price), 0) AS Price,
+            ${itemImageExpr},
+            COALESCE(vlots.TotalQty, COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Stock), 0), COALESCE(TRY_CONVERT(DECIMAL(19,2), p.Stock), 0)) AS Stock,
+            p.CategoryId`
+      : `
+            CAST(NULL AS NVARCHAR(100)) AS VariantId,
+            CAST(NULL AS NVARCHAR(255)) AS VariantName,
+            p.Name,
+            p.Description,
+            COALESCE(TRY_CONVERT(DECIMAL(19,2), p.Price), 0) AS Price,
+            ${itemImageExpr},
+            COALESCE(TRY_CONVERT(DECIMAL(19,2), p.Stock), 0) AS Stock,
+            p.CategoryId`
+
+    const variantJoinSql = cartVariantColumn
+      ? `
+         LEFT JOIN ProductVariants pv ON pv.VariantId = ci.VariantId
+         OUTER APPLY (
+           SELECT COALESCE(SUM(COALESCE(l.RemainingQty, 0)), 0) AS TotalQty
+           FROM InventoryLots l
+           WHERE l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+         ) vlots`
+      : ''
+
+    const productImageJoinSql = hasProductImages
+      ? `
+         OUTER APPLY (
+           SELECT TOP 1 pi.ImageUrl
+           FROM ProductImages pi
+           WHERE pi.ProductId = ci.ProductId
+           ORDER BY ISNULL(pi.SortOrder, 2147483647), pi.ImageId
+         ) pimg`
+      : ''
 
     const [itemsRes, defaultAddress] = await Promise.all([
       query(
@@ -1396,14 +1719,11 @@ async function getCart(userIdInput) {
             ci.CartId,
             ci.ProductId,
             ci.Quantity,
-            p.Name,
-            p.Description,
-            p.Price,
-            p.ImageUrl,
-            p.Stock,
-            p.CategoryId
+            ${itemSelectSql}
          FROM CartItems ci
          LEFT JOIN Products p ON p.ProductId = ci.ProductId
+          ${variantJoinSql}
+          ${productImageJoinSql}
          WHERE ci.CartId = @cartId
          ORDER BY ci.CartItemId DESC`,
         { cartId }
@@ -1412,15 +1732,20 @@ async function getCart(userIdInput) {
     ])
 
     const items = (itemsRes.recordset || []).map(mapCartItem)
-    const subtotal = items.reduce((sum, item) => sum + item.LineTotal, 0)
+    const variantOptionsByProductId = await getCartVariantOptionsByProductIds(items.map((item) => item.ProductId))
+    const itemsWithVariantOptions = items.map((item) => ({
+      ...item,
+      VariantOptions: variantOptionsByProductId.get(String(item.ProductId || '').trim()) || [],
+    }))
+    const subtotal = itemsWithVariantOptions.reduce((sum, item) => sum + item.LineTotal, 0)
 
     return {
       CartId: cartId,
       Customer: ctx.user,
-      Items: items,
+      Items: itemsWithVariantOptions,
       Summary: {
-        ItemCount: items.length,
-        QuantityCount: items.reduce((sum, item) => sum + item.Quantity, 0),
+        ItemCount: itemsWithVariantOptions.length,
+        QuantityCount: itemsWithVariantOptions.reduce((sum, item) => sum + item.Quantity, 0),
         Subtotal: subtotal,
       },
       DefaultAddress: defaultAddress,
@@ -1434,6 +1759,7 @@ async function getCart(userIdInput) {
 async function addCartItem(userIdInput, payload = {}) {
   const userId = requireUserId(userIdInput)
   const productId = String(payload.productId || '').trim()
+  const variantId = String(payload.variantId || payload.VariantId || '').trim()
   const quantity = Math.max(1, Math.trunc(toNumber(payload.quantity, 1)))
 
   if (!productId) {
@@ -1456,25 +1782,86 @@ async function addCartItem(userIdInput, payload = {}) {
     throw err
   }
 
-  if (Number(product.Stock || 0) <= 0) {
+  const cartVariantColumn = await getCartVariantColumn()
+  const isVariantSelection = Boolean(variantId)
+
+  let stock = Number(product.Stock || 0)
+  let cartItemName = product.Name || ''
+  let price = Number(product.Price || 0)
+
+  if (isVariantSelection) {
+    if (!cartVariantColumn) {
+      const err = new Error('Variant cart support is unavailable')
+      err.status = 400
+      throw err
+    }
+
+    const variantRes = await query(
+      `SELECT TOP 1
+         pv.VariantId,
+         pv.ProductId,
+         pv.VariantName,
+         COALESCE(vlots.TotalQty, COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Stock), 0), 0) AS Stock,
+         COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Price), TRY_CONVERT(DECIMAL(19,2), p.Price), 0) AS Price
+       FROM ProductVariants pv
+       INNER JOIN Products p ON p.ProductId = pv.ProductId
+       OUTER APPLY (
+         SELECT COALESCE(SUM(COALESCE(l.RemainingQty, 0)), 0) AS TotalQty
+         FROM InventoryLots l
+         WHERE l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+       ) vlots
+       WHERE pv.ProductId = @productId
+         AND pv.VariantId = @variantId`,
+      { productId, variantId }
+    )
+
+    const variant = variantRes.recordset?.[0]
+    if (!variant) {
+      const err = new Error('Variant not found')
+      err.status = 404
+      throw err
+    }
+
+    stock = Number(variant.Stock || 0)
+    cartItemName = `${product.Name || ''} - ${variant.VariantName || ''}`.trim()
+    price = Number(variant.Price || product.Price || 0)
+  }
+
+  if (stock <= 0) {
     const err = new Error('Product is out of stock')
     err.status = 409
     throw err
   }
 
   const cartId = await ensureCart(userId)
+  const existingParams = cartVariantColumn && isVariantSelection
+    ? { cartId, productId, variantId }
+    : { cartId, productId }
+
   const existingRes = await query(
-    `SELECT TOP 1 CartItemId, Quantity
-     FROM CartItems
-     WHERE CartId = @cartId AND ProductId = @productId
-     ORDER BY CartItemId`,
-    { cartId, productId }
+    cartVariantColumn && isVariantSelection
+      ? `SELECT TOP 1 CartItemId, Quantity
+         FROM CartItems
+         WHERE CartId = @cartId AND ProductId = @productId AND VariantId = @variantId
+         ORDER BY CartItemId`
+      : cartVariantColumn
+        ? `SELECT TOP 1 CartItemId, Quantity
+           FROM CartItems
+           WHERE CartId = @cartId
+             AND ProductId = @productId
+             AND (VariantId IS NULL OR LTRIM(RTRIM(CONVERT(NVARCHAR(100), VariantId))) = '')
+           ORDER BY CartItemId`
+      : `SELECT TOP 1 CartItemId, Quantity
+         FROM CartItems
+         WHERE CartId = @cartId AND ProductId = @productId
+         ORDER BY CartItemId`,
+    existingParams
   )
 
   const existing = existingRes.recordset?.[0]
   if (existing) {
     const nextQuantity = Number(existing.Quantity || 0) + quantity
-    if (nextQuantity > Number(product.Stock || 0)) {
+    if (nextQuantity > stock) {
       const err = new Error('Quantity exceeds stock')
       err.status = 409
       throw err
@@ -1487,19 +1874,23 @@ async function addCartItem(userIdInput, payload = {}) {
       { quantity: nextQuantity, cartItemId: existing.CartItemId }
     )
   } else {
-    if (quantity > Number(product.Stock || 0)) {
+    if (quantity > stock) {
       const err = new Error('Quantity exceeds stock')
       err.status = 409
       throw err
     }
 
     await query(
-      `INSERT INTO CartItems (CartItemId, CartId, ProductId, Quantity)
-       VALUES (@cartItemId, @cartId, @productId, @quantity)`,
+      cartVariantColumn && isVariantSelection
+        ? `INSERT INTO CartItems (CartItemId, CartId, ProductId, VariantId, Quantity)
+           VALUES (@cartItemId, @cartId, @productId, @variantId, @quantity)`
+        : `INSERT INTO CartItems (CartItemId, CartId, ProductId, Quantity)
+           VALUES (@cartItemId, @cartId, @productId, @quantity)`,
       {
         cartItemId: `CI-${newId()}`,
         cartId,
         productId,
+        variantId: isVariantSelection ? variantId : null,
         quantity,
       }
     )
@@ -1520,7 +1911,7 @@ async function updateCartItem(userIdInput, cartItemIdInput, payload = {}) {
   }
 
   const itemRes = await query(
-    `SELECT TOP 1 ci.CartItemId, ci.CartId, ci.ProductId, ci.Quantity
+    `SELECT TOP 1 ci.CartItemId, ci.CartId, ci.ProductId, ci.VariantId, ci.Quantity
      FROM CartItems ci
      INNER JOIN Cart c ON c.CartId = ci.CartId
      WHERE ci.CartItemId = @cartItemId AND c.UserId = @userId`,
@@ -1534,17 +1925,122 @@ async function updateCartItem(userIdInput, cartItemIdInput, payload = {}) {
     throw err
   }
 
-  if (quantity <= 0) {
+  const desiredVariantId = String(payload.variantId || payload.VariantId || '').trim()
+  const requestedQuantityRaw = payload.quantity
+  const requestedQuantity = requestedQuantityRaw === undefined || requestedQuantityRaw === null || String(requestedQuantityRaw).trim() === ''
+    ? Number(item.Quantity || 0)
+    : Math.trunc(toNumber(requestedQuantityRaw, Number(item.Quantity || 0)))
+
+  if (requestedQuantity <= 0) {
     await query('DELETE FROM CartItems WHERE CartItemId = @cartItemId', { cartItemId })
     return getCart(userId)
   }
 
-  const stockRes = await query(
-    'SELECT TOP 1 Stock FROM Products WHERE ProductId = @productId',
-    { productId: item.ProductId }
-  )
-  const stock = Number(stockRes.recordset?.[0]?.Stock || 0)
-  if (quantity > stock) {
+  const cartVariantColumn = await getCartVariantColumn()
+  const hasVariantChange = Boolean(cartVariantColumn && desiredVariantId && desiredVariantId !== String(item.VariantId || '').trim())
+
+  if (hasVariantChange) {
+    const variantRes = await query(
+      `SELECT TOP 1
+         pv.VariantId,
+         pv.VariantName,
+         COALESCE(vlots.TotalQty, COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Stock), 0), 0) AS Stock
+       FROM ProductVariants pv
+       OUTER APPLY (
+         SELECT COALESCE(SUM(COALESCE(l.RemainingQty, 0)), 0) AS TotalQty
+         FROM InventoryLots l
+         WHERE l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+       ) vlots
+       WHERE pv.ProductId = @productId
+         AND pv.VariantId = @variantId`,
+      { productId: item.ProductId, variantId: desiredVariantId }
+    )
+
+    const targetVariant = variantRes.recordset?.[0]
+    if (!targetVariant) {
+      const err = new Error('Variant not found')
+      err.status = 404
+      throw err
+    }
+
+    const targetStock = Number(targetVariant.Stock || 0)
+    const targetExistingRes = await query(
+      `SELECT TOP 1 CartItemId, Quantity
+       FROM CartItems
+       WHERE CartId = @cartId
+         AND ProductId = @productId
+         AND VariantId = @variantId
+         AND CartItemId <> @cartItemId`,
+      { cartId: item.CartId, productId: item.ProductId, variantId: desiredVariantId, cartItemId }
+    )
+
+    const targetExisting = targetExistingRes.recordset?.[0]
+    if (targetExisting) {
+      const mergedQuantity = Number(targetExisting.Quantity || 0) + Number(requestedQuantity || 0)
+      if (mergedQuantity > targetStock) {
+        const err = new Error('Quantity exceeds stock')
+        err.status = 409
+        throw err
+      }
+
+      await query(
+        `UPDATE CartItems
+         SET Quantity = @quantity
+         WHERE CartItemId = @targetCartItemId;
+
+         DELETE FROM CartItems
+         WHERE CartItemId = @cartItemId;`,
+        {
+          quantity: mergedQuantity,
+          targetCartItemId: targetExisting.CartItemId,
+          cartItemId,
+        }
+      )
+
+      return getCart(userId)
+    }
+
+    if (requestedQuantity > targetStock) {
+      const err = new Error('Quantity exceeds stock')
+      err.status = 409
+      throw err
+    }
+
+    await query(
+      `UPDATE CartItems
+       SET VariantId = @variantId,
+           Quantity = @quantity
+       WHERE CartItemId = @cartItemId`,
+      { variantId: desiredVariantId, quantity: requestedQuantity, cartItemId }
+    )
+
+    return getCart(userId)
+  }
+
+  let stock = 0
+  if (cartVariantColumn && item.VariantId) {
+    const variantRes = await query(
+      `SELECT TOP 1
+         COALESCE(vlots.TotalQty, COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Stock), 0), 0) AS Stock
+       FROM ProductVariants pv
+       OUTER APPLY (
+         SELECT COALESCE(SUM(COALESCE(l.RemainingQty, 0)), 0) AS TotalQty
+         FROM InventoryLots l
+         WHERE l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+       ) vlots
+       WHERE pv.ProductId = @productId
+         AND pv.VariantId = @variantId`,
+      { productId: item.ProductId, variantId: item.VariantId }
+    )
+    stock = Number(variantRes.recordset?.[0]?.Stock || 0)
+  } else {
+    const stockRes = await query(
+      'SELECT TOP 1 Stock FROM Products WHERE ProductId = @productId',
+      { productId: item.ProductId }
+    )
+    stock = Number(stockRes.recordset?.[0]?.Stock || 0)
+  }
+  if (requestedQuantity > stock) {
     const err = new Error('Quantity exceeds stock')
     err.status = 409
     throw err
@@ -1554,7 +2050,7 @@ async function updateCartItem(userIdInput, cartItemIdInput, payload = {}) {
     `UPDATE CartItems
      SET Quantity = @quantity
      WHERE CartItemId = @cartItemId`,
-    { quantity, cartItemId }
+    { quantity: requestedQuantity, cartItemId }
   )
 
   return getCart(userId)
@@ -1604,12 +2100,30 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
   }
 
   for (const item of selectedItems) {
-    const stockRes = await query(
-      'SELECT TOP 1 Stock FROM Products WHERE ProductId = @productId',
-      { productId: item.ProductId }
-    )
+    let stock = 0
+    if (item.VariantId) {
+      const stockRes = await query(
+        `SELECT TOP 1
+           COALESCE(vlots.TotalQty, COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Stock), 0), 0) AS Stock
+         FROM ProductVariants pv
+         OUTER APPLY (
+           SELECT COALESCE(SUM(COALESCE(l.RemainingQty, 0)), 0) AS TotalQty
+           FROM InventoryLots l
+           WHERE l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+         ) vlots
+         WHERE pv.ProductId = @productId
+           AND pv.VariantId = @variantId`,
+        { productId: item.ProductId, variantId: item.VariantId }
+      )
+      stock = Number(stockRes.recordset?.[0]?.Stock || 0)
+    } else {
+      const stockRes = await query(
+        'SELECT TOP 1 Stock FROM Products WHERE ProductId = @productId',
+        { productId: item.ProductId }
+      )
+      stock = Number(stockRes.recordset?.[0]?.Stock || 0)
+    }
 
-    const stock = Number(stockRes.recordset?.[0]?.Stock || 0)
     if (stock < item.Quantity) {
       const err = new Error(`Product ${item.Name} does not have enough stock`)
       err.status = 409
@@ -1676,9 +2190,8 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
   const promotionDiscount = calcPromotionDiscountAmount(subtotal, appliedPromotion)
   const discountAmount = Math.max(0, promotionDiscount)
   const netAmount = Math.max(0, subtotal - discountAmount)
-  const taxAmount = netAmount * 0.1
   const shippingAmount = selectedItems.length > 0 ? 3 : 0
-  const total = Math.max(0, netAmount + taxAmount + shippingAmount)
+  const total = Math.max(0, netAmount + shippingAmount)
 
   const paymentMethod = normalizePaymentMethod(payload.paymentMethod)
   const isOnlinePayment = String(paymentMethod || '').toLowerCase() === 'online'
@@ -1745,7 +2258,7 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
      );`,
     {
       userId,
-      status: isOnlinePayment ? 'Awaiting' : 'Pending',
+      status: ORDER_STATUSES.PENDING,
       customerName,
       customerPhone,
       customerAddress: addressText,
@@ -1775,24 +2288,26 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
     promotionCode: appliedPromotion ? normalizePromoCode(giftCode) : '',
   })
 
+  const orderItemVariantColumn = await getOrderItemVariantColumn()
+  const orderItemVariantNameColumn = await getOrderItemVariantNameColumn()
+
   for (const item of selectedItems) {
+    const insertColumns = ['OrderItemId', 'OrderId', 'ProductId', 'Quantity', 'Price', 'ProductName']
+    const insertValues = ['@orderItemId', '@orderId', '@productId', '@quantity', '@price', '@productName']
+
+    if (orderItemVariantColumn) {
+      insertColumns.push(orderItemVariantColumn)
+      insertValues.push('@variantId')
+    }
+
+    if (orderItemVariantNameColumn) {
+      insertColumns.push(orderItemVariantNameColumn)
+      insertValues.push('@variantName')
+    }
+
     await query(
-      `INSERT INTO OrderItems (
-        OrderItemId,
-        OrderId,
-        ProductId,
-        Quantity,
-        Price,
-        ProductName
-      )
-      VALUES (
-        @orderItemId,
-        @orderId,
-        @productId,
-        @quantity,
-        @price,
-        @productName
-      )`,
+      `INSERT INTO OrderItems (${insertColumns.join(', ')})
+       VALUES (${insertValues.join(', ')})`,
       {
         orderItemId: `OI-${newId()}`,
         orderId,
@@ -1800,6 +2315,8 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
         quantity: item.Quantity,
         price: item.Price,
         productName: item.Name,
+        variantId: orderItemVariantColumn ? (String(item?.VariantId || '').trim() || null) : undefined,
+        variantName: orderItemVariantNameColumn ? (String(item?.VariantName || '').trim() || null) : undefined,
       }
     )
   }
@@ -1873,7 +2390,7 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
     console.warn('[customerCommerce] Order notify/email failed:', err?.message || err)
   }
 
-  const initialOrderStatus = isOnlinePayment ? 'Awaiting' : 'Pending'
+  const initialOrderStatus = ORDER_STATUSES.PENDING
 
   return {
     OrderId: orderId,
@@ -1884,7 +2401,6 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
     PaymentGateway: paymentUrl ? 'VNPAY' : null,
     Summary: {
       Subtotal: subtotal,
-      Tax: taxAmount,
       Shipping: shippingAmount,
       DiscountAmount: discountAmount,
       Total: total,
@@ -1944,6 +2460,7 @@ async function listBookings(userIdInput, limit = 20) {
           bs.BookingServiceId,
           bs.ServiceId,
           bs.StaffId,
+          u.Name AS StaffName,
           COALESCE(bs.Price, s.Price) AS Price,
           s.Name AS ServiceName,
           s.DurationMinutes,
@@ -1954,6 +2471,8 @@ async function listBookings(userIdInput, limit = 20) {
           rv.ReviewImagesRaw AS UserReviewImagesRaw
        FROM BookingServices bs
        LEFT JOIN Services s ON s.ServiceId = bs.ServiceId
+       LEFT JOIN Staff st ON st.StaffId = bs.StaffId
+       LEFT JOIN Users u ON u.UserId = st.UserId
        OUTER APPLY (
          SELECT TOP 1 sr.Rating, sr.Comment, sr.CreatedAt${serviceReviewImageSelectSql}
          FROM SalonReviews sr
@@ -1973,6 +2492,7 @@ async function listBookings(userIdInput, limit = 20) {
       ServiceId: s.ServiceId,
       ServiceName: s.ServiceName || '',
       StaffId: s.StaffId || null,
+      StaffName: s.StaffName || null,
       DurationMinutes: Number(s.DurationMinutes || 0),
       Price: Number(s.Price || 0),
       ImageUrl: s.ImageUrl || null,
@@ -2160,6 +2680,12 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
   const isReturningCustomer = await hasPreviousBookings(userId)
   const autoStaffId = !isReturningCustomer ? await getAutoAssignedStaffId() : null
   const assignedStaffIds = new Set()
+  const hasStaffAvailabilityTable = await query(
+    `SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'StaffAvailability'`
+  ).then((x) => Boolean(x.recordset?.length)).catch(() => false)
+  const hasStaffAvailabilityDayIndex = hasStaffAvailabilityTable
+    ? await columnExists('StaffAvailability', 'DayIndex').catch(() => false)
+    : false
 
   // Calculate total duration from services
   const staffServices = new Map()
@@ -2235,64 +2761,112 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
     }
 
     // Verify staff member is actually scheduled for this date
-    // Build a safe SQL using actual column names (Start/End/Duration variants)
-    const colsRes = await query(`SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'StaffShifts'`)
-    const cols = (colsRes.recordset || []).map((r) => ({ name: String(r.COLUMN_NAME), type: String(r.DATA_TYPE).toLowerCase() }))
-    const colNames = cols.map((c) => c.name)
-    const pickColumn = (candidates) => {
-      for (const cand of candidates) if (colNames.includes(cand)) return cand
-      return null
+    // Prefer StaffAvailability (owner schedule UI writes here), then fallback to StaffShifts.
+    let scheduledOnDate = false
+
+    const bookingMinute = bookingStart.getHours() * 60 + bookingStart.getMinutes()
+
+    if (hasStaffAvailabilityTable) {
+      const availColsRes = await query(
+        `SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'StaffAvailability'`
+      )
+      const availCols = (availColsRes.recordset || []).map((r) => ({
+        name: String(r.COLUMN_NAME),
+        type: String(r.DATA_TYPE).toLowerCase(),
+      }))
+      const availColNames = availCols.map((c) => c.name)
+      const hasRequiredAvailCols = ['StaffId', 'WeekStartDate', 'StartHour', 'EndHour'].every((c) => availColNames.includes(c))
+
+      if (hasRequiredAvailCols) {
+        const startType = availCols.find((c) => c.name === 'StartHour')?.type || ''
+        const endType = availCols.find((c) => c.name === 'EndHour')?.type || ''
+
+        const startExpr = startType.startsWith('time') || startType.includes('date')
+          ? `(DATEPART(hour, sa.StartHour) * 60 + DATEPART(minute, sa.StartHour))`
+          : `(TRY_CONVERT(INT, sa.StartHour) * 60)`
+        const endExpr = endType.startsWith('time') || endType.includes('date')
+          ? `(DATEPART(hour, sa.EndHour) * 60 + DATEPART(minute, sa.EndHour))`
+          : `(TRY_CONVERT(INT, sa.EndHour) * 60)`
+
+        const availabilityDatePredicate = hasStaffAvailabilityDayIndex
+          ? `DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) = @bookingDate`
+          : `@bookingDate BETWEEN CAST(sa.WeekStartDate AS DATE) AND DATEADD(DAY, 6, CAST(sa.WeekStartDate AS DATE))`
+
+        const availRes = await query(
+          `SELECT TOP 1 sa.StaffId
+           FROM StaffAvailability sa
+           WHERE CONVERT(NVARCHAR(100), sa.StaffId) = CONVERT(NVARCHAR(100), @staffId)
+             AND ${availabilityDatePredicate}
+             AND ${startExpr} <= @bookingMinute
+             AND ${endExpr} > @bookingMinute`,
+          {
+            staffId,
+            bookingDate: bookingDateStr,
+            bookingMinute,
+          }
+        )
+
+        scheduledOnDate = Boolean(availRes.recordset?.length)
+      }
     }
 
-    const startCol = pickColumn(['StartHour', 'StartAt', 'StartTime', 'Start'])
-    const endCol = pickColumn(['EndHour', 'EndAt', 'EndTime', 'End'])
-    const durationCol = pickColumn(['DurationHours', 'Duration', 'DurationMinutes', 'DurationMins'])
+    if (!scheduledOnDate) {
+      const colsRes = await query(`SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'StaffShifts'`)
+      const cols = (colsRes.recordset || []).map((r) => ({ name: String(r.COLUMN_NAME), type: String(r.DATA_TYPE).toLowerCase() }))
+      const colNames = cols.map((c) => c.name)
+      const pickColumn = (candidates) => {
+        for (const cand of candidates) if (colNames.includes(cand)) return cand
+        return null
+      }
 
-    if (!startCol) {
-      const err = new Error('The selected specialist is not scheduled to work on this date.')
-      err.status = 409
-      throw err
+      const startCol = pickColumn(['StartHour', 'StartAt', 'StartTime', 'Start'])
+      const endCol = pickColumn(['EndHour', 'EndAt', 'EndTime', 'End'])
+      const durationCol = pickColumn(['DurationHours', 'Duration', 'DurationMinutes', 'DurationMins'])
+
+      if (startCol) {
+        const startType = cols.find((c) => c.name === startCol)?.type || ''
+        const endType = endCol ? (cols.find((c) => c.name === endCol)?.type || '') : ''
+        const durationType = durationCol ? (cols.find((c) => c.name === durationCol)?.type || '') : ''
+
+        const startExpr = startType.startsWith('time') || startType.includes('date')
+          ? `DATEPART(hour, sa.[${startCol}])`
+          : `TRY_CONVERT(INT, sa.[${startCol}])`
+        const endExpr = endCol
+          ? (endType.startsWith('time') || endType.includes('date')
+              ? `DATEPART(hour, sa.[${endCol}])`
+              : `TRY_CONVERT(INT, sa.[${endCol}])`)
+          : null
+        const durationExpr = durationCol
+          ? (durationType.startsWith('time') || durationType.includes('date')
+              ? `DATEPART(hour, sa.[${durationCol}])`
+              : `TRY_CONVERT(INT, sa.[${durationCol}])`)
+          : null
+
+        const staffAvailSql = `SELECT TOP 1 sa.StaffId
+           FROM StaffShifts sa
+           WHERE CONVERT(NVARCHAR(100), sa.StaffId) = CONVERT(NVARCHAR(100), @staffId)
+             AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) = @bookingDate
+             AND ${startExpr} <= @bookingHour
+             AND (${startExpr}
+                  + ISNULL(${durationExpr || '0'},
+                      CASE
+                        WHEN ${endExpr || startExpr} > ${startExpr}
+                          THEN ${endExpr || startExpr} - ${startExpr}
+                        ELSE 0
+                      END
+                    )) > @bookingHour`
+
+        const staffAvailRes = await query(staffAvailSql, {
+          staffId,
+          bookingDate: bookingDateStr,
+          bookingHour: bookingStart.getHours(),
+        })
+
+        scheduledOnDate = Boolean(staffAvailRes.recordset?.length)
+      }
     }
 
-    const startType = cols.find((c) => c.name === startCol)?.type || ''
-    const endType = endCol ? (cols.find((c) => c.name === endCol)?.type || '') : ''
-    const durationType = durationCol ? (cols.find((c) => c.name === durationCol)?.type || '') : ''
-
-    const startExpr = startType.startsWith('time') || startType.includes('date')
-      ? `DATEPART(hour, sa.[${startCol}])`
-      : `TRY_CONVERT(INT, sa.[${startCol}])`
-    const endExpr = endCol
-      ? (endType.startsWith('time') || endType.includes('date')
-          ? `DATEPART(hour, sa.[${endCol}])`
-          : `TRY_CONVERT(INT, sa.[${endCol}])`)
-      : null
-    const durationExpr = durationCol
-      ? (durationType.startsWith('time') || durationType.includes('date')
-          ? `DATEPART(hour, sa.[${durationCol}])`
-          : `TRY_CONVERT(INT, sa.[${durationCol}])`)
-      : null
-
-    const staffAvailSql = `SELECT TOP 1 sa.StaffId
-       FROM StaffShifts sa
-       WHERE CONVERT(NVARCHAR(100), sa.StaffId) = CONVERT(NVARCHAR(100), @staffId)
-         AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) = @bookingDate
-         AND ${startExpr} <= @bookingHour
-         AND (${startExpr}
-              + ISNULL(${durationExpr || '0'},
-                  CASE
-                    WHEN ${endExpr || startExpr} > ${startExpr}
-                      THEN ${endExpr || startExpr} - ${startExpr}
-                    ELSE 0
-                  END
-                )) > @bookingHour`
-
-    const staffAvailRes = await query(staffAvailSql, {
-      staffId,
-      bookingDate: bookingDateStr,
-      bookingHour: bookingStart.getHours(),
-    })
-
-    if (!staffAvailRes.recordset || staffAvailRes.recordset.length === 0) {
+    if (!scheduledOnDate) {
       const err = new Error('The selected specialist is not scheduled to work on this date.')
       err.status = 409
       throw err
@@ -2524,11 +3098,25 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
 async function listOrders(userIdInput, limit = 20) {
   const userId = requireUserId(userIdInput)
   const orderChannelColumn = await getOrdersChannelColumn()
+  const orderItemVariantColumn = await getOrderItemVariantColumn()
+  const orderItemVariantNameColumn = await getOrderItemVariantNameColumn()
   const orderChannelSelectSql = orderChannelColumn === 'Channel'
     ? 'o.Channel AS Cannel'
     : orderChannelColumn === 'Cannel'
       ? 'o.Cannel'
       : 'NULL AS Cannel'
+
+  const orderItemVariantIdSelectSql = orderItemVariantColumn
+    ? `, oi.${orderItemVariantColumn} AS VariantId`
+    : ', CAST(NULL AS NVARCHAR(100)) AS VariantId'
+  const orderItemVariantNameSelectSql = orderItemVariantColumn
+    ? (orderItemVariantNameColumn
+        ? `, COALESCE(oi.${orderItemVariantNameColumn}, pv.VariantName) AS VariantName`
+        : ', pv.VariantName AS VariantName')
+    : ', CAST(NULL AS NVARCHAR(255)) AS VariantName'
+  const orderItemVariantJoinSql = orderItemVariantColumn
+    ? `LEFT JOIN ProductVariants pv ON pv.VariantId = oi.${orderItemVariantColumn}`
+    : ''
 
   const res = await query(
     `SELECT TOP (@limit)
@@ -2547,7 +3135,6 @@ async function listOrders(userIdInput, limit = 20) {
         o.GiftCardApplied
      FROM Orders o
       WHERE o.UserId = @userId
-        AND LOWER(LTRIM(RTRIM(ISNULL(o.Status, 'pending')))) <> 'awaiting'
      ORDER BY o.CreatedAt DESC, o.OrderId DESC`,
     {
       userId,
@@ -2580,12 +3167,15 @@ async function listOrders(userIdInput, limit = 20) {
           oi.Quantity,
           oi.Price,
           oi.ProductName,
-          p.ImageUrl,
+          p.ImageUrl
+          ${orderItemVariantIdSelectSql}
+          ${orderItemVariantNameSelectSql},
           rv.Rating AS UserRating,
           rv.Comment AS UserReviewComment,
           rv.CreatedAt AS UserReviewAt
        FROM OrderItems oi
        LEFT JOIN Products p ON p.ProductId = oi.ProductId
+       ${orderItemVariantJoinSql}
        OUTER APPLY (
          SELECT TOP 1 sr.Rating, sr.Comment, sr.CreatedAt
          FROM SalonReviews sr
@@ -2605,6 +3195,8 @@ async function listOrders(userIdInput, limit = 20) {
       OrderId: item.OrderId,
       ProductId: item.ProductId,
       ProductName: item.ProductName || '',
+      VariantId: item.VariantId || null,
+      VariantName: item.VariantName || null,
       Quantity: Number(item.Quantity || 0),
       Price: Number(item.Price || 0),
       ImageUrl: item.ImageUrl || null,
@@ -2622,19 +3214,18 @@ async function listOrders(userIdInput, limit = 20) {
     orders.push({
       OrderId: row.OrderId,
       UserId: row.UserId,
-      Status: row.Status || 'Pending',
+      Status: normalizeOrderLifecycleStatus(row.Status),
       CreatedAt: row.CreatedAt,
       CustomerName: row.CustomerName || '',
       CustomerPhone: row.CustomerPhone || '',
       CustomerAddress: row.CustomerAddress || '',
       Cannel: row.Cannel || 'Online',
       Subtotal: Number(row.Subtotal || 0),
-      Tax: 0,
       Shipping: 0,
       DiscountAmount: calcOrderDiscountAmount(row),
       Total: Number(row.Total || 0),
       PaymentMethod: row.PaymentMethod || 'COD',
-      PaymentStatus: derivePaymentStatus(row.Status, row.PaymentMethod),
+      PaymentStatus: derivePaymentStatus(normalizeOrderLifecycleStatus(row.Status), row.PaymentMethod),
       GiftCardCode: row.GiftCardCode || null,
       GiftCardApplied: Number(row.GiftCardApplied || 0),
       IsRated: isRated,
@@ -2737,8 +3328,9 @@ async function cancelOrder(userIdInput, orderIdInput) {
     throw err
   }
 
-  if (!isCStatus(order.Status)) {
-    const err = new Error(`Only pending orders can be cancelled. Current status: ${order.Status}`)
+  const currentStatus = normalizeOrderLifecycleStatus(order.Status)
+  if (currentStatus !== ORDER_STATUSES.PENDING) {
+    const err = new Error(`Only pending orders can be cancelled. Current status: ${currentStatus}`)
     err.status = 409
     throw err
   }
@@ -2750,7 +3342,7 @@ async function cancelOrder(userIdInput, orderIdInput) {
     {
       orderId,
       userId,
-      status: 'Cancelled',
+      status: ORDER_STATUSES.CANCELLED,
     }
   )
 
@@ -2770,7 +3362,257 @@ async function cancelOrder(userIdInput, orderIdInput) {
     console.warn('[customerCommerce] Cancel order notify/email failed:', err?.message || err)
   }
 
-  return { OrderId: orderId, Status: 'Cancelled' }
+  return { OrderId: orderId, Status: ORDER_STATUSES.CANCELLED }
+}
+
+async function completeOrder(userIdInput, orderIdInput) {
+  const userId = requireUserId(userIdInput)
+  const orderId = String(orderIdInput || '').trim()
+
+  if (!orderId) {
+    const err = new Error('Missing orderId')
+    err.status = 400
+    throw err
+  }
+
+  const orderRes = await query(
+    `SELECT TOP 1 OrderId, ISNULL(Status, @pendingStatus) AS Status
+     FROM Orders
+     WHERE OrderId = @orderId AND UserId = @userId`,
+    { orderId, userId, pendingStatus: ORDER_STATUSES.PENDING }
+  )
+
+  const order = orderRes.recordset?.[0]
+  if (!order) {
+    const err = new Error('Order not found')
+    err.status = 404
+    throw err
+  }
+
+  const currentStatus = normalizeOrderLifecycleStatus(order.Status)
+  if (!canTransitionOrderStatus(currentStatus, ORDER_STATUSES.COMPLETED)) {
+    const err = new Error(`Order cannot be marked as completed from status: ${currentStatus}`)
+    err.status = 409
+    throw err
+  }
+
+  await query(
+    `UPDATE Orders
+     SET Status = @status
+     WHERE OrderId = @orderId AND UserId = @userId`,
+    {
+      orderId,
+      userId,
+      status: ORDER_STATUSES.COMPLETED,
+    }
+  )
+
+  try {
+    await notifyCustomerEvent({
+      userId,
+      event: 'order_delivered',
+      orderId,
+      payload: { orderId },
+    })
+
+    await notifyOwnerEvent({
+      event: 'order_delivered',
+      orderId,
+    })
+  } catch (err) {
+    console.warn('[customerCommerce] Complete order notify/email failed:', err?.message || err)
+  }
+
+  return { OrderId: orderId, Status: ORDER_STATUSES.COMPLETED }
+}
+
+async function reorderOrder(userIdInput, orderIdInput) {
+  const userId = requireUserId(userIdInput)
+  const orderId = String(orderIdInput || '').trim()
+
+  if (!orderId) {
+    const err = new Error('Missing orderId')
+    err.status = 400
+    throw err
+  }
+
+  const orderRes = await query(
+    `SELECT TOP 1 OrderId
+     FROM Orders
+     WHERE OrderId = @orderId AND UserId = @userId`,
+    { orderId, userId },
+  )
+
+  if (!orderRes.recordset?.length) {
+    const err = new Error('Order not found')
+    err.status = 404
+    throw err
+  }
+
+  const orderItemVariantColumn = await getOrderItemVariantColumn()
+  const orderItemVariantNameColumn = await getOrderItemVariantNameColumn()
+  const variantIdSelectSql = orderItemVariantColumn
+    ? `, ${orderItemVariantColumn} AS VariantId`
+    : ', CAST(NULL AS NVARCHAR(100)) AS VariantId'
+  const variantNameSelectSql = orderItemVariantNameColumn
+    ? `, ${orderItemVariantNameColumn} AS VariantName`
+    : ', CAST(NULL AS NVARCHAR(255)) AS VariantName'
+
+  const itemsRes = await query(
+    `SELECT OrderItemId, ProductId, Quantity, Price, ProductName${variantIdSelectSql}${variantNameSelectSql}
+     FROM OrderItems
+     WHERE OrderId = @orderId
+     ORDER BY OrderItemId`,
+    { orderId },
+  )
+
+  const sourceItems = (itemsRes.recordset || [])
+    .map((item) => ({
+      orderItemId: String(item.OrderItemId || '').trim(),
+      productId: String(item.ProductId || '').trim(),
+      variantId: String(item.VariantId || '').trim() || null,
+      variantName: String(item.VariantName || '').trim() || null,
+      productName: String(item.ProductName || '').trim() || null,
+      price: Number(item.Price || 0),
+      quantity: Math.max(1, Math.trunc(Number(item.Quantity || 0) || 1)),
+    }))
+    .filter((item) => Boolean(item.productId))
+
+  if (!sourceItems.length) {
+    const err = new Error('Order has no valid items to reorder')
+    err.status = 409
+    throw err
+  }
+
+  const failedItems = []
+  let addedCount = 0
+  const variantCache = new Map()
+
+  const normalizeText = (value) =>
+    String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+
+  const getProductVariants = async (productId) => {
+    const key = String(productId || '').trim()
+    if (!key) return []
+    if (variantCache.has(key)) return variantCache.get(key)
+
+    if (!(await tableExists('ProductVariants'))) {
+      variantCache.set(key, [])
+      return []
+    }
+
+    const res = await query(
+      `SELECT VariantId, VariantName, Price
+       FROM ProductVariants
+       WHERE ProductId = @productId
+       ORDER BY VariantName, VariantId`,
+      { productId: key },
+    )
+
+    const variants = (res.recordset || []).map((row) => ({
+      variantId: String(row.VariantId || '').trim(),
+      variantName: String(row.VariantName || '').trim(),
+      price: Number(row.Price || 0),
+    })).filter((row) => Boolean(row.variantId))
+
+    variantCache.set(key, variants)
+    return variants
+  }
+
+  const pickVariantId = async (item, options = {}) => {
+    const explicit = String(item?.variantId || '').trim()
+    if (explicit && !options.ignoreExplicit) return explicit
+
+    const variants = await getProductVariants(item?.productId)
+    if (!variants.length) return null
+
+    const byVariantName = normalizeText(item?.variantName)
+    if (byVariantName) {
+      const exact = variants.find((v) => normalizeText(v.variantName) === byVariantName)
+      if (exact?.variantId) return exact.variantId
+    }
+
+    const rawProductName = String(item?.productName || '').trim()
+    const suffixFromName = rawProductName.includes('-')
+      ? normalizeText(rawProductName.split('-').slice(1).join('-'))
+      : ''
+    if (suffixFromName) {
+      const exactSuffix = variants.find((v) => normalizeText(v.variantName) === suffixFromName)
+      if (exactSuffix?.variantId) return exactSuffix.variantId
+
+      const partialSuffix = variants.find((v) => suffixFromName.includes(normalizeText(v.variantName)))
+      if (partialSuffix?.variantId) return partialSuffix.variantId
+    }
+
+    const itemPrice = Number(item?.price || 0)
+    if (Number.isFinite(itemPrice) && itemPrice > 0) {
+      const byPrice = variants.find((v) => Math.abs(Number(v.price || 0) - itemPrice) < 0.0001)
+      if (byPrice?.variantId) return byPrice.variantId
+    }
+
+    return null
+  }
+
+  for (const item of sourceItems) {
+    try {
+      let resolvedVariantId = await pickVariantId(item)
+
+      await addCartItem(userId, {
+        productId: item.productId,
+        variantId: resolvedVariantId || undefined,
+        quantity: item.quantity,
+      })
+      addedCount += 1
+    } catch (err) {
+      try {
+        // Retry once with a fallback variant strategy when explicit variant mapping is stale.
+        const fallbackVariantId = await pickVariantId(item, { ignoreExplicit: true })
+        if (fallbackVariantId && fallbackVariantId !== String(item.variantId || '').trim()) {
+          await addCartItem(userId, {
+            productId: item.productId,
+            variantId: fallbackVariantId,
+            quantity: item.quantity,
+          })
+          addedCount += 1
+          continue
+        }
+      } catch (_) {
+        // Keep original error for failedItems list.
+      }
+
+      failedItems.push({
+        OrderItemId: item.orderItemId,
+        ProductId: item.productId,
+        VariantId: item.variantId,
+        VariantName: item.variantName,
+        Quantity: item.quantity,
+        Error: err?.message || 'Unable to add this item',
+      })
+    }
+  }
+
+  if (!addedCount) {
+    const err = new Error('Unable to reorder items from this order')
+    err.status = 409
+    err.details = failedItems
+    throw err
+  }
+
+  const cart = await getCart(userId)
+  return {
+    OrderId: orderId,
+    AddedItemCount: addedCount,
+    FailedItemCount: failedItems.length,
+    FailedItems: failedItems,
+    CartSummary: {
+      ItemCount: Number(cart?.Summary?.ItemCount || 0),
+      QuantityCount: Number(cart?.Summary?.QuantityCount || 0),
+      Subtotal: Number(cart?.Summary?.Subtotal || 0),
+    },
+  }
 }
 
 async function rateBooking(userIdInput, bookingIdInput, ratingInput, commentInput, imageDataUrlsInput) {
@@ -3208,4 +4050,6 @@ module.exports = {
   listOrders,
   cancelBooking,
   cancelOrder,
+  completeOrder,
+  reorderOrder,
 }

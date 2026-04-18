@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import PortalCard from '../../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../../components/Layout portal/PortalModal.jsx'
 import { api } from '../../../lib/api.js'
@@ -60,7 +60,6 @@ export default function StaffOrdersPage() {
   })
   const [orderSaving, setOrderSaving] = useState(false)
   const [editItems, setEditItems] = useState([])
-  const [products, setProducts] = useState([])
 
   const loadOrders = useCallback(async (nextFilters) => {
     try {
@@ -81,20 +80,6 @@ export default function StaffOrdersPage() {
     }
   }, [])
 
-  const loadProducts = useCallback(async () => {
-    try {
-      const data = await api.get('/api/staff/products')
-      setProducts(Array.isArray(data) ? data : [])
-    } catch (err) {
-      console.error(err)
-      setProducts([])
-    }
-  }, [])
-
-  useEffect(() => {
-    loadProducts()
-  }, [loadProducts])
-
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedKeyword(orderFilters.keyword || '')
@@ -105,14 +90,6 @@ export default function StaffOrdersPage() {
   useEffect(() => {
     loadOrders({ ...orderFilters, keyword: debouncedKeyword })
   }, [loadOrders, orderFilters, debouncedKeyword])
-
-  const productsById = useMemo(() => {
-    const map = new Map()
-    for (const p of products) {
-      if (p?.id) map.set(String(p.id), p)
-    }
-    return map
-  }, [products])
 
   function openEditOrder(order) {
     const realId = order?.Id || order?.id || order?.OrderId || order?.OrderCode

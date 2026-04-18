@@ -1,5 +1,6 @@
 const { asyncHandler } = require('../../utils/asyncHandler')
 const notificationsService = require('../../services/notifications.service')
+const { sanitizeCustomerResponse } = require('./responseSanitizer')
 
 function getUserIdFromReq(req) {
   const sub = req.user?.sub
@@ -19,7 +20,7 @@ const getNotifications = asyncHandler(async (req, res) => {
     userId,
     type: type || 'all',
   })
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 const postMarkRead = asyncHandler(async (req, res) => {
@@ -30,7 +31,7 @@ const postMarkRead = asyncHandler(async (req, res) => {
   }
 
   const data = await notificationsService.markAllCustomerNotificationsRead({ userId })
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 const postMarkOneRead = asyncHandler(async (req, res) => {
@@ -48,7 +49,7 @@ const postMarkOneRead = asyncHandler(async (req, res) => {
 
   const read = req.body?.read !== false
   const data = await notificationsService.setCustomerNotificationRead({ userId, notificationId, read })
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 module.exports = {

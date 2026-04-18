@@ -16,7 +16,7 @@ function defaultFilters() {
     status: '',
     keyword: '',
     page: 1,
-    pageSize: 10,
+    pageSize: 12,
     sortBy: 'createdAt',
     sortDir: 'desc',
   }
@@ -65,7 +65,7 @@ export default function OwnerOrdersPage() {
   const [orderReport, setOrderReport] = useState({
     summary: { totalOrders: 0, totalRevenue: 0, totalDiscount: 0, totalQuantity: 0, fromDate: null, toDate: null },
     items: [],
-    pagination: { page: 1, pageSize: 10, totalRows: 0 },
+    pagination: { page: 1, pageSize: 12, totalRows: 0 },
   })
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState('')

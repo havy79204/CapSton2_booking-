@@ -199,6 +199,16 @@ async function tableExists(tableName) {
   return Boolean(res.recordset?.length)
 }
 
+async function columnExists(tableName, columnName) {
+  const res = await query(
+    `SELECT 1 AS ok
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_NAME = @tableName AND COLUMN_NAME = @columnName`,
+    { tableName, columnName }
+  )
+  return Boolean(res.recordset?.length)
+}
+
 async function getSalonContactInfo() {
   const settingsRes = await query(
     `SELECT SettingKey, SettingValue
@@ -232,8 +242,29 @@ async function getSalonContactInfo() {
 /**
  * Get services list with categories
  */
-async function getServices() {
+async function getServices(opts = {}) {
+  const rawCategoryId = opts?.categoryId ?? opts?.CategoryId ?? opts?.category ?? null
+  const categoryId = rawCategoryId === undefined || rawCategoryId === null || String(rawCategoryId).trim() === '' || String(rawCategoryId).toLowerCase() === 'all'
+    ? null
+    : String(rawCategoryId).trim()
+
+  const sortBy = String(opts?.sortBy || '').trim().toLowerCase()
+  const sortOrder = String(opts?.sortOrder || '').trim().toLowerCase() === 'desc' ? 'DESC' : 'ASC'
+  const orderClause = sortBy === 'price'
+    ? `TRY_CONVERT(DECIMAL(19,2), s.[Price]) ${sortOrder}, s.[Name] ASC`
+    : 's.[CategoryId], s.[Name]'
+
   const hasServiceImages = await tableExists('ServiceImages')
+  const params = {}
+  const whereClauses = [
+    "(s.[Status] IS NULL OR LOWER(LTRIM(RTRIM(s.[Status]))) = 'active')"
+  ]
+
+  if (categoryId !== null) {
+    whereClauses.push('CAST(s.[CategoryId] AS NVARCHAR(100)) = @categoryId')
+    params.categoryId = categoryId
+  }
+
   const res = await query(`SELECT 
       s.[ServiceId],
       s.[Name],
@@ -246,8 +277,11 @@ async function getServices() {
       s.[ImageUrl] AS PrimaryImageUrl
     FROM [Services] s
     LEFT JOIN [ServiceCategories] sc ON s.[CategoryId] = sc.[CategoryId]
-    WHERE s.[Status] IS NULL OR LOWER(LTRIM(RTRIM(s.[Status]))) = 'active'
-    ORDER BY s.[CategoryId], s.[Name]`, {}, { timeoutMs: 30000 })
+    WHERE ${whereClauses.join(' AND ')}
+    ORDER BY ${orderClause}`,
+    params,
+    { timeoutMs: 30000 }
+  )
 
   const rows = res.recordset || []
   const byServiceId = new Map()
@@ -321,8 +355,66 @@ async function getServiceCategories() {
 /**
  * Get products list with categories
  */
-async function getProducts() {
+async function getProducts(opts = {}) {
+  const rawCategoryId = opts?.categoryId ?? opts?.CategoryId ?? opts?.category ?? null
+  const categoryId = rawCategoryId === undefined || rawCategoryId === null || String(rawCategoryId).trim() === '' || String(rawCategoryId).toLowerCase() === 'all'
+    ? null
+    : String(rawCategoryId).trim()
+
+  const sortBy = String(opts?.sortBy || '').trim().toLowerCase()
+  const sortOrder = String(opts?.sortOrder || '').trim().toLowerCase() === 'asc' ? 'ASC' : 'DESC'
+
   const hasProductImages = await tableExists('ProductImages')
+  const hasProductsCreatedAt = await columnExists('Products', 'CreatedAt')
+  const hasProductVariants = await tableExists('ProductVariants')
+
+  const newestExpr = hasProductsCreatedAt
+    ? 'COALESCE(p.[CreatedAt], GETDATE())'
+    : 'p.[ProductId]'
+
+  const productStockExpr = hasProductVariants
+    ? `CASE
+         WHEN EXISTS (SELECT 1 FROM [ProductVariants] pvCheck WHERE pvCheck.[ProductId] = p.[ProductId])
+           THEN COALESCE((
+             SELECT SUM(COALESCE(vlots.[TotalQty], TRY_CONVERT(DECIMAL(19,2), pv.[Stock]), 0))
+             FROM [ProductVariants] pv
+             OUTER APPLY (
+               SELECT SUM(TRY_CONVERT(DECIMAL(19,2), l.[RemainingQty])) AS TotalQty
+               FROM [InventoryLots] l
+               WHERE l.[InventoryItemId] = CONCAT('retail_variant_', pv.[VariantId])
+             ) vlots
+             WHERE pv.[ProductId] = p.[ProductId]
+           ), COALESCE(TRY_CONVERT(DECIMAL(19,2), p.[Stock]), 0))
+         ELSE COALESCE((
+             SELECT SUM(COALESCE(l.[RemainingQty], 0))
+             FROM [InventoryLots] l
+             WHERE l.[InventoryItemId] = CONCAT('retail_', p.[ProductId])
+           ), COALESCE(TRY_CONVERT(DECIMAL(19,2), p.[Stock]), 0))
+       END`
+    : `COALESCE((
+         SELECT SUM(COALESCE(l.[RemainingQty], 0))
+         FROM [InventoryLots] l
+         WHERE l.[InventoryItemId] = CONCAT('retail_', p.[ProductId])
+       ), COALESCE(TRY_CONVERT(DECIMAL(19,2), p.[Stock]), 0))`
+
+  let orderByClause = `p.[CategoryId] ASC, p.[Name] ASC`
+  if (sortBy === 'price') {
+    orderByClause = `TRY_CONVERT(DECIMAL(19,2), p.[Price]) ${sortOrder}, p.[Name] ASC`
+  } else if (sortBy === 'best_selling') {
+    orderByClause = `ISNULL(sales.SoldCount, 0) DESC, p.[Name] ASC`
+  } else if (sortBy === 'newest') {
+    orderByClause = `${newestExpr} DESC, p.[Name] ASC`
+  }
+
+  const params = {}
+  const whereClauses = [
+    "(p.[Status] IS NULL OR LOWER(LTRIM(RTRIM(p.[Status]))) = 'active')"
+  ]
+  if (categoryId !== null) {
+    whereClauses.push('CAST(p.[CategoryId] AS NVARCHAR(100)) = @categoryId')
+    params.categoryId = categoryId
+  }
+
   const res = await query(hasProductImages
     ? `SELECT
         p.[ProductId],
@@ -330,34 +422,79 @@ async function getProducts() {
         p.[Price],
         p.[Description],
         p.[ImageUrl],
-        p.[Stock],
+        ${productStockExpr} AS Stock,
         p.[Status],
         p.[CategoryId],
         pc.[Name] AS CategoryName,
+        ISNULL(rating.[AverageRating], 0) AS AverageRating,
+        ISNULL(rating.[ReviewCount], 0) AS ReviewCount,
+        ISNULL(sales.[SoldCount], 0) AS SoldCount,
         pi.[ImageId] AS ExtraImageId,
         pi.[ImageUrl] AS ExtraImageUrl,
         pi.[SortOrder] AS ExtraSortOrder
       FROM [Products] p
       LEFT JOIN [ProductCategories] pc ON p.[CategoryId] = pc.[CategoryId]
+      LEFT JOIN (
+        SELECT
+          sr.[ProductId],
+          COUNT(1) AS ReviewCount,
+          AVG(CAST(sr.[Rating] AS FLOAT)) AS AverageRating
+        FROM [SalonReviews] sr
+        WHERE sr.[ProductId] IS NOT NULL AND sr.[Rating] IS NOT NULL
+        GROUP BY sr.[ProductId]
+      ) rating ON rating.[ProductId] = p.[ProductId]
+      LEFT JOIN (
+        SELECT
+          oi.[ProductId],
+          SUM(COALESCE(oi.[Quantity], 0)) AS SoldCount
+        FROM [OrderItems] oi
+        LEFT JOIN [Orders] o ON o.[OrderId] = oi.[OrderId]
+        WHERE o.[OrderId] IS NULL
+          OR LOWER(LTRIM(RTRIM(ISNULL(o.[Status], '')))) IN ('completed', 'delivered', 'confirmed', 'done')
+        GROUP BY oi.[ProductId]
+      ) sales ON sales.[ProductId] = p.[ProductId]
       LEFT JOIN [ProductImages] pi ON p.[ProductId] = pi.[ProductId]
-      WHERE p.[Status] IS NULL OR LOWER(LTRIM(RTRIM(p.[Status]))) = 'active'
-      ORDER BY p.[CategoryId], p.[Name], ISNULL(pi.[SortOrder], 2147483647), pi.[ImageId]`
+      WHERE ${whereClauses.join(' AND ')}
+      ORDER BY ${orderByClause}, ISNULL(pi.[SortOrder], 2147483647), pi.[ImageId]`
     : `SELECT
         p.[ProductId],
         p.[Name],
         p.[Price],
         p.[Description],
         p.[ImageUrl],
-        p.[Stock],
+        ${productStockExpr} AS Stock,
         p.[Status],
         p.[CategoryId],
         pc.[Name] AS CategoryName,
+        ISNULL(rating.[AverageRating], 0) AS AverageRating,
+        ISNULL(rating.[ReviewCount], 0) AS ReviewCount,
+        ISNULL(sales.[SoldCount], 0) AS SoldCount,
         NULL AS ExtraImageId,
         NULL AS ExtraImageUrl
         FROM [Products] p
         LEFT JOIN [ProductCategories] pc ON p.[CategoryId] = pc.[CategoryId]
-        WHERE p.[Status] IS NULL OR LOWER(LTRIM(RTRIM(p.[Status]))) = 'active'
-        ORDER BY p.[CategoryId], p.[Name]`
+        LEFT JOIN (
+          SELECT
+            sr.[ProductId],
+            COUNT(1) AS ReviewCount,
+            AVG(CAST(sr.[Rating] AS FLOAT)) AS AverageRating
+          FROM [SalonReviews] sr
+          WHERE sr.[ProductId] IS NOT NULL AND sr.[Rating] IS NOT NULL
+          GROUP BY sr.[ProductId]
+        ) rating ON rating.[ProductId] = p.[ProductId]
+        LEFT JOIN (
+          SELECT
+            oi.[ProductId],
+            SUM(COALESCE(oi.[Quantity], 0)) AS SoldCount
+          FROM [OrderItems] oi
+          LEFT JOIN [Orders] o ON o.[OrderId] = oi.[OrderId]
+          WHERE o.[OrderId] IS NULL
+            OR LOWER(LTRIM(RTRIM(ISNULL(o.[Status], '')))) IN ('completed', 'delivered', 'confirmed', 'done')
+          GROUP BY oi.[ProductId]
+        ) sales ON sales.[ProductId] = p.[ProductId]
+        WHERE ${whereClauses.join(' AND ')}
+        ORDER BY ${orderByClause}`,
+    params
   )
 
   const rows = res.recordset || []
@@ -380,6 +517,9 @@ async function getProducts() {
         Status: row.Status,
         CategoryId: row.CategoryId,
         CategoryName: row.CategoryName,
+        AverageRating: Math.round(Number(row.AverageRating || 0) * 10) / 10,
+        ReviewCount: Number(row.ReviewCount || 0),
+        SoldCount: Number(row.SoldCount || 0),
         Images: images
       })
     }
@@ -398,6 +538,65 @@ async function getProducts() {
     ...product,
     ImageUrl: product.ImageUrl || product.Images[0] || null
   }))
+}
+
+async function getProductVariants(productId) {
+  const normalizedProductId = String(productId || '').trim()
+  if (!normalizedProductId) return []
+
+  const hasProductVariants = await tableExists('ProductVariants')
+  if (!hasProductVariants) return []
+
+  const res = await query(
+    `SELECT
+       pv.[VariantId],
+       pv.[ProductId],
+       pv.[VariantName],
+       COALESCE(vlots.[TotalQty], COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.[Stock]), 0), 0) AS Stock,
+       COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.[Price]), 0) AS PriceVnd,
+       COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.[Price]), 0) AS SellPriceVnd
+     FROM [ProductVariants] pv
+     INNER JOIN [Products] p ON p.[ProductId] = pv.[ProductId]
+     OUTER APPLY (
+       SELECT COALESCE(SUM(COALESCE(l.[RemainingQty], 0)), 0) AS TotalQty
+       FROM [InventoryLots] l
+       WHERE l.[InventoryItemId] = CONCAT('retail_variant_', pv.[VariantId])
+     ) vlots
+     WHERE pv.[ProductId] = @productId
+     ORDER BY COALESCE(vlots.[TotalQty], COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.[Stock]), 0), 0) DESC, pv.[VariantName] ASC`,
+    { productId: normalizedProductId },
+    { timeoutMs: 30000 }
+  )
+
+  return (res.recordset || []).map((row) => ({
+    VariantId: row.VariantId,
+    ProductId: row.ProductId,
+    VariantName: row.VariantName || '',
+    Stock: Number(row.Stock || 0),
+    PriceVnd: row.PriceVnd === null || row.PriceVnd === undefined ? null : Number(row.PriceVnd),
+    SellPriceVnd: row.SellPriceVnd === null || row.SellPriceVnd === undefined ? null : Number(row.SellPriceVnd),
+  }))
+}
+
+async function getProductDetail(productId) {
+  const normalizedProductId = String(productId || '').trim()
+  if (!normalizedProductId) {
+    const err = new Error('Invalid productId')
+    err.status = 400
+    throw err
+  }
+
+  const products = await getProducts()
+  const product = products.find((item) => String(item?.ProductId || '').trim() === normalizedProductId)
+  if (!product) return null
+
+  const variants = await getProductVariants(normalizedProductId)
+
+  return {
+    ...product,
+    Variants: variants,
+    ProductVariants: variants,
+  }
 }
 
 /**
@@ -1468,6 +1667,7 @@ module.exports = {
   getServices,
   getServiceCategories,
   getProducts,
+  getProductDetail,
   getProductCategories,
   getServiceReviews,
   getServiceRating,

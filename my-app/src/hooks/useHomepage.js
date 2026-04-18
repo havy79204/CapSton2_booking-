@@ -57,17 +57,25 @@ export function useHomepage() {
   return { data, loading, error }
 }
 
-export function useServices() {
+export function useServices(options = {}) {
   const [services, setServices] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  const query = new URLSearchParams()
+  if (options?.categoryId && String(options.categoryId).trim() && String(options.categoryId) !== 'all') {
+    query.set('categoryId', String(options.categoryId).trim())
+  }
+  if (options?.sortBy) query.set('sortBy', String(options.sortBy))
+  if (options?.sortOrder) query.set('sortOrder', String(options.sortOrder))
+  const queryString = query.toString()
 
   useEffect(() => {
     async function fetchServices() {
       try {
         setLoading(true)
         setError(null)
-        const result = await api.get('/api/homepage/services')
+        const result = await api.get(`/api/homepage/services${queryString ? `?${queryString}` : ''}`)
         const normalizedServices = (Array.isArray(result) ? result : []).map((service) => {
           const rawImages = Array.isArray(service?.Images) ? service.Images : []
           const images = rawImages
@@ -96,23 +104,59 @@ export function useServices() {
     }
 
     fetchServices()
-  }, [])
+  }, [queryString])
 
   return { services, loading, error }
 }
 
+export function useServiceCategories(searchTerm = '') {
+  const [categories, setCategories] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
-export function useProducts() {
+  useEffect(() => {
+    async function fetchServiceCategories() {
+      try {
+        setLoading(true)
+        setError(null)
+
+        const q = String(searchTerm || '').trim()
+        const result = await api.get(`/api/homepage/service-categories${q ? `?q=${encodeURIComponent(q)}` : ''}`)
+        setCategories(Array.isArray(result) ? result : [])
+      } catch (err) {
+        console.error('Error fetching service categories:', err)
+        setError(err.message || 'Failed to fetch service categories')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchServiceCategories()
+  }, [searchTerm])
+
+  return { categories, loading, error }
+}
+
+
+export function useProducts(options = {}) {
   const [products, setProducts] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  const query = new URLSearchParams()
+  if (options?.categoryId && String(options.categoryId).trim() && String(options.categoryId) !== 'all') {
+    query.set('categoryId', String(options.categoryId).trim())
+  }
+  if (options?.sortBy) query.set('sortBy', String(options.sortBy))
+  if (options?.sortOrder) query.set('sortOrder', String(options.sortOrder))
+  const queryString = query.toString()
 
   useEffect(() => {
     async function fetchProducts() {
       try {
         setLoading(true)
         setError(null)
-        const result = await api.get('/api/homepage/products')
+        const result = await api.get(`/api/homepage/products${queryString ? `?${queryString}` : ''}`)
         const normalizedProducts = (Array.isArray(result) ? result : []).map((product) => {
           const rawImages = Array.isArray(product?.Images) ? product.Images : []
           const images = rawImages
@@ -141,7 +185,7 @@ export function useProducts() {
     }
 
     fetchProducts()
-  }, [])
+  }, [queryString])
 
   return { products, loading, error }
 }

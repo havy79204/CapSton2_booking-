@@ -327,7 +327,7 @@ const ReviewSection = ({ serviceId, reviews, onSubmitReview, onDeleteReview, cur
     const results = await Promise.all(readers);
     const urls = results.filter(Boolean);
     if (urls.length) setReviewImageDataUrls((prev) => [...prev, ...urls].slice(0, 3));
-    try { event.target.value = null; } catch (e) {}
+    try { event.target.value = null; } catch { /* ignore reset errors */ }
   };
 
   const removeSelectedReviewImage = (index) => {
@@ -709,7 +709,20 @@ const RecommendedServicesSection = ({ currentServiceId }) => {
                           onClick={() => handleServiceClick(service.ServiceId)}
                         >
                           <div className="recommended-service-image">
-                            {cardImage ? <img src={cardImage} alt={service.Name} /> : <div className="service-image-placeholder" />}
+                            {cardImage ? (
+                              <>
+                                <div className="recommended-image-fallback" aria-hidden="true" />
+                                <img
+                                  src={cardImage}
+                                  alt={service.Name}
+                                  onError={(event) => {
+                                    event.currentTarget.style.display = 'none'
+                                  }}
+                                />
+                              </>
+                            ) : (
+                              <div className="recommended-image-fallback" aria-hidden="true" />
+                            )}
                           </div>
                           <div className="recommended-service-content">
                             <h3>{service.Name}</h3>

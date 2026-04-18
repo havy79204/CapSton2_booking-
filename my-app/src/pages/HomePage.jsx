@@ -20,7 +20,79 @@ import { formatVnd } from '../lib/currency';
 
 import '../styles/HomePage.css';
 
-const PREVIEW_ITEMS_COUNT = 8;
+const INITIAL_PREVIEW_ITEMS = 4;
+const PREVIEW_STEP = 4;
+const PREVIEW_BEFORE_ALL = 12;
+
+const FEATURED_MARKERS = ['featured', 'hot', 'popular', 'best'];
+
+function toFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function hasFeaturedFlag(item) {
+  if (!item || typeof item !== 'object') return false;
+
+  const rawFlag =
+    item.IsFeatured ??
+    item.isFeatured ??
+    item.Featured ??
+    item.featured ??
+    item.IsHot ??
+    item.isHot;
+
+  if (rawFlag === true || rawFlag === 1 || rawFlag === '1') return true;
+  if (typeof rawFlag === 'string') {
+    const normalized = rawFlag.trim().toLowerCase();
+    if (normalized === 'true' || normalized === 'yes' || normalized === 'featured') {
+      return true;
+    }
+  }
+
+  const tagCandidates = [item.Tag, item.Tags, item.Badge, item.Label, item.CategoryName]
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .filter((value) => value !== null && value !== undefined)
+    .map((value) => String(value).toLowerCase());
+
+  return tagCandidates.some((value) => FEATURED_MARKERS.some((keyword) => value.includes(keyword)));
+}
+
+function rankFeaturedItems(list = [], type = 'product') {
+  const source = Array.isArray(list) ? list : [];
+
+  return [...source].sort((a, b) => {
+    const aFeatured = hasFeaturedFlag(a) ? 1 : 0;
+    const bFeatured = hasFeaturedFlag(b) ? 1 : 0;
+    if (aFeatured !== bFeatured) return bFeatured - aFeatured;
+
+    const aPopularity = Math.max(
+      toFiniteNumber(a.Popularity),
+      toFiniteNumber(a.SoldCount),
+      toFiniteNumber(a.BookingCount)
+    );
+    const bPopularity = Math.max(
+      toFiniteNumber(b.Popularity),
+      toFiniteNumber(b.SoldCount),
+      toFiniteNumber(b.BookingCount)
+    );
+    if (aPopularity !== bPopularity) return bPopularity - aPopularity;
+
+    const aRating = toFiniteNumber(a.AverageRating ?? a.AvgRating);
+    const bRating = toFiniteNumber(b.AverageRating ?? b.AvgRating);
+    if (aRating !== bRating) return bRating - aRating;
+
+    const aReviewCount = toFiniteNumber(a.ReviewCount);
+    const bReviewCount = toFiniteNumber(b.ReviewCount);
+    if (aReviewCount !== bReviewCount) return bReviewCount - aReviewCount;
+
+    const aStock = toFiniteNumber(a.Stock);
+    const bStock = toFiniteNumber(b.Stock);
+    if (type === 'product' && aStock !== bStock) return bStock - aStock;
+
+    return String(a?.Name || '').localeCompare(String(b?.Name || ''));
+  });
+}
 
 const HeroSection = () => {
   const handleNavigation = () => {
@@ -46,8 +118,8 @@ const HeroSection = () => {
 
 const ServicesSection = () => {
   const { services: apiServices, loading, error } = useServices();
-  const [showAllServices, setShowAllServices] = useState(false);
-  const services = useMemo(() => (Array.isArray(apiServices) ? apiServices : []), [apiServices]);
+  const [visibleServicesCount, setVisibleServicesCount] = useState(INITIAL_PREVIEW_ITEMS);
+  const services = useMemo(() => rankFeaturedItems(apiServices, 'service'), [apiServices]);
 
   if (loading) {
     return <div className="loading">Loading services...</div>;
@@ -61,8 +133,18 @@ const ServicesSection = () => {
     return <div className="loading">No services available</div>;
   }
 
-  const displayedServices = showAllServices ? services : services.slice(0, PREVIEW_ITEMS_COUNT);
-  const hasMoreServices = services.length > PREVIEW_ITEMS_COUNT;
+  const displayedServices = services.slice(0, visibleServicesCount);
+  const hasMoreServices = visibleServicesCount < services.length;
+
+  const showMoreServices = () => {
+    setVisibleServicesCount((current) => {
+      if (current >= services.length) return current;
+      if (current < PREVIEW_BEFORE_ALL) {
+        return Math.min(current + PREVIEW_STEP, services.length);
+      }
+      return services.length;
+    });
+  };
 
   return (
     <section className="services" id="salons">
@@ -102,12 +184,15 @@ const ServicesSection = () => {
 
         {hasMoreServices && (
           <div className="view-more-container">
-            <button 
-              className="view-more-btn"
-              onClick={() => setShowAllServices(!showAllServices)}
-            >
-              {showAllServices ? 'Show Less Services' : 'View More Services'}
-            </button>
+            {visibleServicesCount >= PREVIEW_BEFORE_ALL ? (
+              <Link to="/services" className="view-more-btn">
+                Show All Services
+              </Link>
+            ) : (
+              <button className="view-more-btn" onClick={showMoreServices}>
+                Show More Services
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -118,10 +203,10 @@ const ServicesSection = () => {
 const ProductsSection = () => {
   const { products: apiProducts, loading, error } = useProducts();
   const { addItem, updateItem, cart, busy: cartBusy } = useCustomerCart();
-  const [showAllProducts, setShowAllProducts] = useState(false);
+  const [visibleProductsCount, setVisibleProductsCount] = useState(INITIAL_PREVIEW_ITEMS);
   const [cartModalOpen, setCartModalOpen] = useState(false);
   const [cartMessage, setCartMessage] = useState('');
-  const products = useMemo(() => (Array.isArray(apiProducts) ? apiProducts : []), [apiProducts]);
+  const products = useMemo(() => rankFeaturedItems(apiProducts, 'product'), [apiProducts]);
 
   const handleAddToCart = async (productId) => {
     try {
@@ -179,8 +264,18 @@ const ProductsSection = () => {
   }
 
   const filteredProducts = products;
-  const displayedProducts = showAllProducts ? filteredProducts : filteredProducts.slice(0, PREVIEW_ITEMS_COUNT);
-  const hasMoreProducts = filteredProducts.length > PREVIEW_ITEMS_COUNT;
+  const displayedProducts = filteredProducts.slice(0, visibleProductsCount);
+  const hasMoreProducts = visibleProductsCount < filteredProducts.length;
+
+  const showMoreProducts = () => {
+    setVisibleProductsCount((current) => {
+      if (current >= filteredProducts.length) return current;
+      if (current < PREVIEW_BEFORE_ALL) {
+        return Math.min(current + PREVIEW_STEP, filteredProducts.length);
+      }
+      return filteredProducts.length;
+    });
+  };
 
   return (
     <section className="products" id="shop">
@@ -228,12 +323,15 @@ const ProductsSection = () => {
 
         {hasMoreProducts && (
           <div className="view-more-container">
-            <button 
-              className="view-more-btn"
-              onClick={() => setShowAllProducts(!showAllProducts)}
-            >
-              {showAllProducts ? 'Show Less Products' : 'View More Products'}
-            </button>
+            {visibleProductsCount >= PREVIEW_BEFORE_ALL ? (
+              <Link to="/shop" className="view-more-btn">
+                Show All Products
+              </Link>
+            ) : (
+              <button className="view-more-btn" onClick={showMoreProducts}>
+                Show More Products
+              </button>
+            )}
           </div>
         )}
       </div>

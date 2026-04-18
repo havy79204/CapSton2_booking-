@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { io } from 'socket.io-client'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import { api } from '../../lib/api.js'
@@ -46,7 +46,7 @@ export default function OwnerNotificationsPage() {
     }
   }
 
-  async function load() {
+  const load = useCallback(async () => {
     setMsg('')
     try {
       const data = await api.get('/api/owner/notifications')
@@ -57,11 +57,11 @@ export default function OwnerNotificationsPage() {
       console.error(err)
       setMsg(err?.message || 'Unable to load notifications.')
     }
-  }
+  }, [])
 
   useEffect(() => {
     Promise.resolve().then(load)
-  }, [])
+  }, [load])
 
   useEffect(() => {
     const token = getToken()
@@ -96,7 +96,7 @@ export default function OwnerNotificationsPage() {
       socket.off('owner:notification', onOwnerNotification)
       socket.disconnect()
     }
-  }, [])
+  }, [load])
 
   const filteredItems = items.filter((item) => {
     if (activeCategory === 'all') return true

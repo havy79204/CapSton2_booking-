@@ -37,13 +37,6 @@ export default function StaffServicesPage() {
     status: '',
   })
 
-  useEffect(() => {
-    Promise.resolve()
-      .then(() => refresh())
-      .then(() => refreshCategories())
-      .catch((err) => console.error(err))
-  }, [])
-
   function close() {
     setOpen(false)
     setEditing(null)
@@ -74,6 +67,13 @@ export default function StaffServicesPage() {
     const fresh = await api.get('/api/staff/services/categories')
     setCategories(Array.isArray(fresh) ? fresh : [])
   }
+
+  useEffect(() => {
+    Promise.resolve()
+      .then(() => refresh())
+      .then(() => refreshCategories())
+      .catch((err) => console.error(err))
+  }, [])
 
   async function onSubmit(e) {
     e.preventDefault()

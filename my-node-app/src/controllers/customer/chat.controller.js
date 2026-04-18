@@ -1,5 +1,6 @@
 const { asyncHandler } = require('../../utils/asyncHandler')
 const chatService = require('../../services/chat.service')
+const { sanitizeCustomerResponse } = require('./responseSanitizer')
 
 function getUserIdFromReq(req) {
   const sub = req.user?.sub
@@ -15,7 +16,7 @@ const getMessages = asyncHandler(async (req, res) => {
   }
 
   const data = await chatService.listCustomerMessages(customerUserId)
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 const postMessage = asyncHandler(async (req, res) => {
@@ -27,7 +28,7 @@ const postMessage = asyncHandler(async (req, res) => {
 
   const { text } = req.body || {}
   const data = await chatService.sendCustomerMessage(customerUserId, { text })
-  res.status(201).json({ ok: true, data })
+  res.status(201).json({ data: sanitizeCustomerResponse(data) })
 })
 
 module.exports = {

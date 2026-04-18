@@ -223,7 +223,7 @@
 }
 
 .services-container {
-  max-width: 1800px;
+  max-width: 1600px;
   margin: auto;
 }
 
@@ -266,7 +266,7 @@
 
 @media (min-width: 1800px) {
   .services-grid {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
@@ -572,7 +572,7 @@
 }
 
 .products-container {
-  max-width: 1800px;
+  max-width: 1600px;
   margin: auto;
 }
 
@@ -674,7 +674,7 @@
 
 @media (min-width: 1800px) {
   .products-grid {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
@@ -857,7 +857,7 @@
 }
 
 .why-choose-container {
-  max-width: 1800px;
+  max-width: 1600px;
   margin: 0 auto;
 }
 
@@ -1127,7 +1127,7 @@
 }
 
 .reviews-content {
-  max-width: 1800px;
+  max-width: 1600px;
   margin: 0 auto;
 }
 
