@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import { api, resolveApiImageUrl } from '../../lib/api.js'
@@ -95,16 +95,16 @@ export default function PendingRequestsPage() {
     }
   }
 
-  function inSelectedMonth(row) {
+  const inSelectedMonth = useCallback((row) => {
     const { start, end } = monthRange(currentMonth)
     const rowStart = row?.StartDate ? new Date(row.StartDate) : null
     const rowEnd = row?.EndDate ? new Date(row.EndDate) : rowStart
     if (!rowStart || Number.isNaN(rowStart.getTime())) return false
     const endDate = rowEnd && !Number.isNaN(rowEnd.getTime()) ? rowEnd : rowStart
     return rowStart <= end && endDate >= start
-  }
+  }, [currentMonth])
 
-  function applyFilters(source = requests) {
+  const applyFilters = useCallback((source = requests) => {
     const s = String(search || '').trim().toLowerCase()
     const list = (source || []).filter((r) => {
       const name = String(r?.StaffName || '').toLowerCase()
@@ -113,10 +113,10 @@ export default function PendingRequestsPage() {
       return true
     })
     setFilteredRequests(list)
-  }
+  }, [requests, search, inSelectedMonth])
 
   useEffect(() => { load() }, [])
-  useEffect(() => { applyFilters(requests) }, [requests, search, currentMonth])
+  useEffect(() => { applyFilters(requests) }, [requests, applyFilters])
 
   async function approve(r) {
     try {
@@ -139,12 +139,6 @@ export default function PendingRequestsPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [editStatus, setEditStatus] = useState('Pending')
-
-  function openEdit(r) {
-    setEditing(r)
-    setEditStatus(r.Status || 'Pending')
-    setEditOpen(true)
-  }
 
   function closeEdit() {
     setEditOpen(false)

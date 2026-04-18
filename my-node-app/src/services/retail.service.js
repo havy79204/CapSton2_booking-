@@ -9,6 +9,7 @@ const fs = require('fs/promises')
 const path = require('path')
 
 let _schemaInfoPromise = null
+let _legacyVariantShadowCleanupPromise = null
 
 async function ensureProductImagesTable() {
   try {
@@ -57,8 +58,28 @@ async function tableExists(tableName) {
   return Boolean(result.recordset?.length)
 }
 
+async function cleanupLegacyVariantShadowRows() {
+  if (_legacyVariantShadowCleanupPromise) return _legacyVariantShadowCleanupPromise
+  _legacyVariantShadowCleanupPromise = (async () => {
+    try {
+      await query(
+        `UPDATE InventoryItems
+         SET ProductId = NULL
+         WHERE InventoryItemId LIKE 'retail_variant_%'
+           AND ProductId IS NOT NULL`
+      )
+    } catch (err) {
+      console.warn('[retail] cleanupLegacyVariantShadowRows failed:', err?.message || err)
+    }
+  })()
+  return _legacyVariantShadowCleanupPromise
+}
+
 async function getSchemaInfo() {
-  if (_schemaInfoPromise) return _schemaInfoPromise
+  if (_schemaInfoPromise) {
+    await cleanupLegacyVariantShadowRows()
+    return _schemaInfoPromise
+  }
   _schemaInfoPromise = (async () => {
     await ensureProductImagesTable()
     const [
@@ -75,6 +96,7 @@ async function getSchemaInfo() {
       salonReviewsHasProductId,
       salonReviewsHasRating,
       productsHasSupplier,
+      productsHasProductType,
       hasInventoryLots,
       inventoryLotsHasSupplier,
     ] = await Promise.all([
@@ -91,11 +113,13 @@ async function getSchemaInfo() {
       columnExists('SalonReviews', 'ProductId'),
       columnExists('SalonReviews', 'Rating'),
       columnExists('Products', 'Supplier'),
+      columnExists('Products', 'ProductType'),
       tableExists('InventoryLots'),
       columnExists('InventoryLots', 'Supplier'),
     ])
 
     const hasProductImages = await tableExists('ProductImages')
+    await cleanupLegacyVariantShadowRows()
 
     return {
       productsHasCategoryId,
@@ -112,10 +136,12 @@ async function getSchemaInfo() {
       salonReviewsHasProductId,
       salonReviewsHasRating,
       productsHasSupplier,
+      productsHasProductType,
       hasInventoryLots,
       inventoryLotsHasSupplier,
     }
   })()
+  await cleanupLegacyVariantShadowRows()
   return _schemaInfoPromise
 }
 
@@ -228,6 +254,27 @@ function retailVariantShadowId(variantId) {
 
 const DEFAULT_RETAIL_VARIANT_NAME = 'Default'
 
+function normalizeVariantName(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function extractVariantNameFromNote(note) {
+  const raw = String(note || '').trim()
+  if (!raw) return ''
+  const m = raw.match(/^\[\s*variant\s*:\s*([^\]]+)\]/i)
+  return String(m?.[1] || '').trim()
+}
+
+function rewriteVariantPrefix(note, nextVariantName) {
+  const cleanName = String(nextVariantName || '').trim() || DEFAULT_RETAIL_VARIANT_NAME
+  const raw = String(note || '').trim()
+  if (!raw) return `[Variant: ${cleanName}]`
+  if (/^\[\s*variant\s*:/i.test(raw)) {
+    return raw.replace(/^\[\s*variant\s*:\s*[^\]]+\]/i, `[Variant: ${cleanName}]`)
+  }
+  return `[Variant: ${cleanName}] ${raw}`
+}
+
 async function syncVariantShadowFromVariant(variantId, { priceVndHint = null } = {}) {
   const id = String(variantId || '').trim()
   if (!id) return
@@ -275,7 +322,7 @@ async function syncVariantShadowFromVariant(variantId, { priceVndHint = null } =
      BEGIN
        UPDATE InventoryItems
        SET
-        ProductId = NULL,
+         ProductId = NULL,
          CategoryId = COALESCE(@categoryId, CategoryId),
          Name = COALESCE(@variantDisplayName, Name),
          Quantity = @variantQty,
@@ -285,13 +332,275 @@ async function syncVariantShadowFromVariant(variantId, { priceVndHint = null } =
      END`,
     {
       variantShadowId,
-      productId: row.ProductId,
       categoryId: row.CategoryId ?? null,
       variantDisplayName: `${String(row.ProductName || '').trim()} - ${String(row.VariantName || '').trim()}`.trim(),
       variantQty: Number(row.VariantStock || 0),
       priceVndHint: Number.isFinite(Number(priceVndHint)) ? Number(priceVndHint) : null,
     }
   )
+}
+
+async function syncVariantLotsFromVariant(variantId) {
+  const id = String(variantId || '').trim()
+  if (!id) return
+
+  const variant = await query(
+    `SELECT TOP 1
+       pv.VariantId,
+       pv.VariantName,
+       COALESCE(pv.Stock, 0) AS VariantStock
+     FROM ProductVariants pv
+     WHERE pv.VariantId = @id`,
+    { id }
+  )
+  const row = variant.recordset?.[0]
+  if (!row) return
+
+  const shadowId = retailVariantShadowId(row.VariantId)
+  const variantName = String(row.VariantName || '').trim() || DEFAULT_RETAIL_VARIANT_NAME
+
+  // Repair legacy/mislabeled lot notes so UI can map lots to the correct variant.
+  await query(
+    `UPDATE InventoryLots
+     SET Note =
+       CASE
+         WHEN Note IS NULL OR LTRIM(RTRIM(Note)) = ''
+           THEN CONCAT('[Variant: ', @variantName, ']')
+         ELSE @prefix
+              + CASE
+                  WHEN LOWER(LTRIM(Note)) LIKE '[[]variant:%' AND CHARINDEX(']', LTRIM(Note)) > 0
+                    THEN LTRIM(SUBSTRING(LTRIM(Note), CHARINDEX(']', LTRIM(Note)) + 1, 4000))
+                  ELSE LTRIM(Note)
+                END
+       END
+     WHERE InventoryItemId = @shadowId`,
+    {
+      shadowId,
+      variantName,
+      prefix: `[Variant: ${variantName}] `,
+    }
+  )
+
+  const targetQty = Math.max(0, Number(row.VariantStock || 0))
+  const currentQtyRes = await query(
+    `SELECT COALESCE(SUM(COALESCE(RemainingQty, 0)), 0) AS Qty
+     FROM InventoryLots
+     WHERE InventoryItemId = @shadowId`,
+    { shadowId }
+  )
+  const currentQty = Math.max(0, Number(currentQtyRes.recordset?.[0]?.Qty || 0))
+  const delta = Math.trunc(targetQty - currentQty)
+  if (!delta) return
+
+  if (delta > 0) {
+    await query(
+      `INSERT INTO InventoryLots (InventoryItemId, ReceivedQty, RemainingQty, PriceVnd, ReceivedAt, ExpiryDate, Supplier, Note)
+       VALUES (@shadowId, @qty, @qty, 0, GETDATE(), NULL, NULL, @note);`,
+      {
+        shadowId,
+        qty: delta,
+        note: `[Variant: ${variantName}] Synced from variant stock`,
+      }
+    )
+
+    await query(
+      `INSERT INTO InventoryTransactions (InventoryItemId, Type, Quantity, PriceVnd, [Date], Note)
+       VALUES (@shadowId, 'ADJUST', @qty, 0, GETDATE(), @note);`,
+      {
+        shadowId,
+        qty: delta,
+        note: `Variant stock sync: +${delta}`,
+      }
+    )
+    return
+  }
+
+  let remainingToRemove = Math.abs(delta)
+  const lotsRes = await query(
+    `SELECT LotId, COALESCE(RemainingQty, 0) AS RemainingQty
+     FROM InventoryLots
+     WHERE InventoryItemId = @shadowId
+       AND COALESCE(RemainingQty, 0) > 0
+     ORDER BY ReceivedAt, LotId`,
+    { shadowId }
+  )
+
+  for (const lot of lotsRes.recordset || []) {
+    if (remainingToRemove <= 0) break
+    const lotQty = Math.max(0, Number(lot?.RemainingQty || 0))
+    if (!lotQty) continue
+    const consume = Math.min(lotQty, remainingToRemove)
+    await query(
+      `UPDATE InventoryLots
+       SET RemainingQty = CASE WHEN COALESCE(RemainingQty, 0) - @consume < 0 THEN 0 ELSE COALESCE(RemainingQty, 0) - @consume END
+       WHERE LotId = @lotId`,
+      {
+        lotId: lot.LotId,
+        consume,
+      }
+    )
+    remainingToRemove -= consume
+  }
+
+  const removedQty = Math.abs(delta) - Math.max(0, remainingToRemove)
+  if (removedQty > 0) {
+    await query(
+      `INSERT INTO InventoryTransactions (InventoryItemId, Type, Quantity, PriceVnd, [Date], Note)
+       VALUES (@shadowId, 'ADJUST', @qty, 0, GETDATE(), @note);`,
+      {
+        shadowId,
+        qty: -removedQty,
+        note: `Variant stock sync: -${removedQty}`,
+      }
+    )
+  }
+}
+
+async function syncProductShadowLotsForVariant(productId, {
+  oldVariantName = '',
+  newVariantName = '',
+  targetStock = undefined,
+} = {}) {
+  const id = String(productId || '').trim()
+  if (!id) return
+
+  const shadowId = retailShadowId(id)
+  const sourceName = String(oldVariantName || newVariantName || '').trim() || DEFAULT_RETAIL_VARIANT_NAME
+  const nextName = String(newVariantName || oldVariantName || '').trim() || DEFAULT_RETAIL_VARIANT_NAME
+  const sourceNorm = normalizeVariantName(sourceName)
+
+  const lotsRes = await query(
+    `SELECT LotId, COALESCE(RemainingQty, 0) AS RemainingQty, PriceVnd, ReceivedAt, ExpiryDate, Supplier, Note
+     FROM InventoryLots
+     WHERE InventoryItemId = @shadowId`,
+    { shadowId }
+  )
+  const lots = Array.isArray(lotsRes.recordset) ? lotsRes.recordset : []
+
+  const matchingLots = lots.filter((lot) => normalizeVariantName(extractVariantNameFromNote(lot?.Note)) === sourceNorm)
+
+  if (normalizeVariantName(sourceName) !== normalizeVariantName(nextName)) {
+    for (const lot of matchingLots) {
+      await query(
+        `UPDATE InventoryLots
+         SET Note = @note
+         WHERE LotId = @lotId`,
+        {
+          lotId: lot.LotId,
+          note: rewriteVariantPrefix(lot?.Note, nextName),
+        }
+      )
+    }
+  }
+
+  if (targetStock === undefined || targetStock === null || !Number.isFinite(Number(targetStock))) return
+
+  const targetQty = Math.max(0, Math.trunc(Number(targetStock)))
+  const currentQty = matchingLots.reduce((sum, lot) => sum + Math.max(0, Number(lot?.RemainingQty || 0)), 0)
+  const delta = targetQty - currentQty
+  if (!delta) return
+
+  if (delta > 0) {
+    let remainingToTransfer = delta
+    const donorLots = lots
+      .filter((lot) => normalizeVariantName(extractVariantNameFromNote(lot?.Note)) !== sourceNorm)
+      .filter((lot) => Number(lot?.RemainingQty || 0) > 0)
+      .sort((a, b) => String(a?.LotId || '').localeCompare(String(b?.LotId || '')))
+
+    // First re-label stock by transferring from other variant lots to this variant.
+    for (const donor of donorLots) {
+      if (remainingToTransfer <= 0) break
+      const donorQty = Math.max(0, Number(donor?.RemainingQty || 0))
+      if (!donorQty) continue
+      const moveQty = Math.min(donorQty, remainingToTransfer)
+
+      await query(
+        `UPDATE InventoryLots
+         SET RemainingQty = CASE WHEN COALESCE(RemainingQty, 0) - @qty < 0 THEN 0 ELSE COALESCE(RemainingQty, 0) - @qty END
+         WHERE LotId = @lotId`,
+        {
+          lotId: donor.LotId,
+          qty: moveQty,
+        }
+      )
+
+      await query(
+        `INSERT INTO InventoryLots (InventoryItemId, ReceivedQty, RemainingQty, PriceVnd, ReceivedAt, ExpiryDate, Supplier, Note)
+         VALUES (@shadowId, @qty, @qty, @priceVnd, @receivedAt, @expiryDate, @supplier, @note);`,
+        {
+          shadowId,
+          qty: moveQty,
+          priceVnd: donor?.PriceVnd ?? 0,
+          receivedAt: donor?.ReceivedAt ?? null,
+          expiryDate: donor?.ExpiryDate ?? null,
+          supplier: donor?.Supplier ?? null,
+          note: `[Variant: ${nextName}] Synced from variant stock`,
+        }
+      )
+
+      remainingToTransfer -= moveQty
+    }
+
+    if (remainingToTransfer <= 0) {
+      return
+    }
+
+    await query(
+      `INSERT INTO InventoryLots (InventoryItemId, ReceivedQty, RemainingQty, PriceVnd, ReceivedAt, ExpiryDate, Supplier, Note)
+       VALUES (@shadowId, @qty, @qty, 0, GETDATE(), NULL, NULL, @note);`,
+      {
+        shadowId,
+        qty: remainingToTransfer,
+        note: `[Variant: ${nextName}] Synced from variant stock`,
+      }
+    )
+
+    await query(
+      `INSERT INTO InventoryTransactions (InventoryItemId, Type, Quantity, PriceVnd, [Date], Note)
+       VALUES (@shadowId, 'ADJUST', @qty, 0, GETDATE(), @note);`,
+      {
+        shadowId,
+        qty: remainingToTransfer,
+        note: `Variant stock sync (${nextName}): +${remainingToTransfer}`,
+      }
+    )
+    return
+  }
+
+  let remainingToRemove = Math.abs(delta)
+  const removableLots = matchingLots
+    .filter((lot) => Number(lot?.RemainingQty || 0) > 0)
+    .sort((a, b) => String(a?.LotId || '').localeCompare(String(b?.LotId || '')))
+
+  for (const lot of removableLots) {
+    if (remainingToRemove <= 0) break
+    const lotQty = Math.max(0, Number(lot?.RemainingQty || 0))
+    if (!lotQty) continue
+    const consume = Math.min(lotQty, remainingToRemove)
+    await query(
+      `UPDATE InventoryLots
+       SET RemainingQty = CASE WHEN COALESCE(RemainingQty, 0) - @consume < 0 THEN 0 ELSE COALESCE(RemainingQty, 0) - @consume END
+       WHERE LotId = @lotId`,
+      {
+        lotId: lot.LotId,
+        consume,
+      }
+    )
+    remainingToRemove -= consume
+  }
+
+  const removedQty = Math.abs(delta) - Math.max(0, remainingToRemove)
+  if (removedQty > 0) {
+    await query(
+      `INSERT INTO InventoryTransactions (InventoryItemId, Type, Quantity, PriceVnd, [Date], Note)
+       VALUES (@shadowId, 'ADJUST', @qty, 0, GETDATE(), @note);`,
+      {
+        shadowId,
+        qty: -removedQty,
+        note: `Variant stock sync (${nextName}): -${removedQty}`,
+      }
+    )
+  }
 }
 
 function parseMoneyVnd(value) {
@@ -500,10 +809,19 @@ async function listVariants(productId) {
   if (!schema.hasProductVariants) return []
 
   const res = await query(
-    `SELECT VariantId, ProductId, VariantName, Stock
-     FROM ProductVariants
-     WHERE ProductId = @productId
-     ORDER BY VariantName ASC`,
+    `SELECT
+       pv.VariantId,
+       pv.ProductId,
+       pv.VariantName,
+       COALESCE(lots.TotalQty, COALESCE(pv.Stock, 0), 0) AS Stock
+     FROM ProductVariants pv
+     OUTER APPLY (
+       SELECT COALESCE(SUM(COALESCE(l.RemainingQty, 0)), 0) AS TotalQty
+       FROM InventoryLots l
+       WHERE l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+     ) lots
+     WHERE pv.ProductId = @productId
+     ORDER BY COALESCE(lots.TotalQty, COALESCE(pv.Stock, 0), 0) DESC, pv.VariantName ASC`,
     { productId }
   )
 
@@ -522,6 +840,18 @@ async function getProduct(productId) {
     err.status = 400
     throw err
   }
+  const productStockExpr = schema.hasProductVariants
+    ? `COALESCE((
+         SELECT SUM(COALESCE(vLots.TotalQty, TRY_CONVERT(DECIMAL(19,2), pv.Stock), 0))
+         FROM ProductVariants pv
+         OUTER APPLY (
+           SELECT SUM(TRY_CONVERT(DECIMAL(19,2), l.RemainingQty)) AS TotalQty
+           FROM InventoryLots l
+           WHERE l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+         ) vLots
+         WHERE pv.ProductId = p.ProductId
+       ), COALESCE(TRY_CONVERT(DECIMAL(19,2), p.Stock), 0))`
+    : 'COALESCE(TRY_CONVERT(DECIMAL(19,2), p.Stock), 0)'
   const prodRes = await query(
     `SELECT TOP 1
         p.ProductId,
@@ -529,7 +859,7 @@ async function getProduct(productId) {
         p.Price,
         p.Description,
         p.ImageUrl,
-        p.Stock,
+        ${productStockExpr} AS Stock,
         p.Status,
         ${schema.hasOrderItems
           ? `(
@@ -544,18 +874,54 @@ async function getProduct(productId) {
           : 'CAST(0 AS INT)'} AS SoldCount,
         ${schema.hasSalonReviews && schema.salonReviewsHasProductId && schema.salonReviewsHasRating
           ? `(
-              SELECT AVG(CAST(sr.Rating AS FLOAT))
-              FROM SalonReviews sr
-              WHERE sr.ProductId = p.ProductId
-                AND sr.Rating IS NOT NULL
+              SELECT AVG(CAST(rr.Rating AS FLOAT))
+              FROM (
+                SELECT sr.Rating
+                FROM SalonReviews sr
+                WHERE sr.ProductId = p.ProductId
+                  AND sr.Rating IS NOT NULL
+                  AND (sr.OrderItemId IS NOT NULL OR sr.OrderId IS NULL)
+
+                UNION ALL
+
+                SELECT sr.Rating
+                FROM SalonReviews sr
+                WHERE sr.OrderId IS NOT NULL
+                  AND sr.OrderItemId IS NULL
+                  AND sr.Rating IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM OrderItems oi
+                    WHERE oi.OrderId = sr.OrderId
+                      AND oi.ProductId = p.ProductId
+                  )
+              ) rr
             )`
           : 'CAST(NULL AS FLOAT)'} AS AverageRating,
         ${schema.hasSalonReviews && schema.salonReviewsHasProductId && schema.salonReviewsHasRating
           ? `(
               SELECT COUNT(1)
-              FROM SalonReviews sr
-              WHERE sr.ProductId = p.ProductId
-                AND sr.Rating IS NOT NULL
+              FROM (
+                SELECT sr.Rating
+                FROM SalonReviews sr
+                WHERE sr.ProductId = p.ProductId
+                  AND sr.Rating IS NOT NULL
+                  AND (sr.OrderItemId IS NOT NULL OR sr.OrderId IS NULL)
+
+                UNION ALL
+
+                SELECT sr.Rating
+                FROM SalonReviews sr
+                WHERE sr.OrderId IS NOT NULL
+                  AND sr.OrderItemId IS NULL
+                  AND sr.Rating IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM OrderItems oi
+                    WHERE oi.OrderId = sr.OrderId
+                      AND oi.ProductId = p.ProductId
+                  )
+              ) rr
             )`
           : 'CAST(0 AS INT)'} AS ReviewCount,
         p.CategoryId,
@@ -662,10 +1028,103 @@ async function getVariantsTotalStock(productId, excludeVariantId) {
   return Number(res.recordset?.[0]?.Total || 0)
 }
 
-function throwInsufficientStock() {
-  const err = new Error('Insufficient stock')
-  err.status = 400
-  throw err
+async function getVariantLotStock(variantId) {
+  const shadowId = retailVariantShadowId(variantId)
+  const res = await query(
+    `SELECT COALESCE(SUM(COALESCE(RemainingQty, 0)), 0) AS Total
+     FROM InventoryLots
+     WHERE InventoryItemId = @shadowId`,
+    { shadowId }
+  )
+  return Math.max(0, Math.trunc(Number(res.recordset?.[0]?.Total || 0)))
+}
+
+async function assertVariantStockConsistentWithLots(variantId) {
+  const lotStock = await getVariantLotStock(variantId)
+  const variantRes = await query(
+    `SELECT TOP 1 COALESCE(Stock, 0) AS Stock
+     FROM ProductVariants
+     WHERE VariantId = @id`,
+    { id: variantId }
+  )
+  const variantStock = Math.max(0, Math.trunc(Number(variantRes.recordset?.[0]?.Stock || 0)))
+  if (variantStock !== lotStock) {
+    const err = new Error('Variant stock must equal total lot stock')
+    err.status = 409
+    throw err
+  }
+}
+
+async function syncVariantAndProductStockFromLots(variantId) {
+  const id = String(variantId || '').trim()
+  if (!id) return null
+
+  const variantRes = await query(
+    `SELECT TOP 1 VariantId, ProductId
+     FROM ProductVariants
+     WHERE VariantId = @id`,
+    { id }
+  )
+  const row = variantRes.recordset?.[0]
+  if (!row) return null
+
+  const lotStock = await getVariantLotStock(row.VariantId)
+  await query(
+    `UPDATE ProductVariants
+     SET Stock = @stock
+     WHERE VariantId = @id`,
+    {
+      id: row.VariantId,
+      stock: lotStock,
+    }
+  )
+
+  await query(
+    `UPDATE p
+     SET Stock = COALESCE(v.TotalStock, 0)
+     FROM Products p
+     OUTER APPLY (
+       SELECT COALESCE(SUM(COALESCE(pv.Stock, 0)), 0) AS TotalStock
+       FROM ProductVariants pv
+       WHERE pv.ProductId = p.ProductId
+     ) v
+     WHERE p.ProductId = @productId`,
+    { productId: row.ProductId }
+  )
+
+  return {
+    productId: row.ProductId,
+    stock: lotStock,
+  }
+}
+
+async function resolveVariantAdjustmentImportPriceVnd(variantId, productId) {
+  const shadowId = retailVariantShadowId(variantId)
+  const lotRes = await query(
+    `SELECT TOP 1 COALESCE(TRY_CONVERT(DECIMAL(19,2), UnitCost), 0) AS UnitCost
+     FROM InventoryLots
+     WHERE InventoryItemId = @shadowId
+       AND COALESCE(RemainingQty, 0) > 0
+     ORDER BY ReceivedAt DESC, LotId DESC`,
+    { shadowId }
+  )
+  const latestUnitCost = Number(lotRes.recordset?.[0]?.UnitCost || 0)
+  if (Number.isFinite(latestUnitCost) && latestUnitCost > 0) {
+    return latestUnitCost
+  }
+
+  const productRes = await query(
+    `SELECT TOP 1 COALESCE(TRY_CONVERT(DECIMAL(19,2), Price), 0) AS Price
+     FROM Products
+     WHERE ProductId = @id`,
+    { id: productId }
+  )
+  const sellPrice = Number(productRes.recordset?.[0]?.Price || 0)
+  if (Number.isFinite(sellPrice) && sellPrice > 0) {
+    return sellPrice
+  }
+
+  return 1
 }
 
 async function createVariant(productId, payload) {
@@ -682,8 +1141,30 @@ async function createVariant(productId, payload) {
     throw err
   }
 
-  const { name, stock } = payload || {}
-  const variantName = normalizeRequiredSafeText(name, 'variant name')
+  const canCreateFromProductTypeExpr = schema.productsHasProductType
+    ? "LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), p.ProductType)))) = 'supplies'"
+    : '1 = 0'
+  const canCreateRes = await query(
+    `SELECT TOP 1
+       CASE
+         WHEN ${canCreateFromProductTypeExpr} THEN 1
+         WHEN LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(50), ii.ItemGroup)))) = 'service' THEN 1
+         ELSE 0
+       END AS CanCreate
+     FROM Products p
+     LEFT JOIN InventoryItems ii ON ii.InventoryItemId = CONCAT('retail_', p.ProductId)
+     WHERE p.ProductId = @productId`,
+    { productId }
+  )
+  const canCreate = Number(canCreateRes.recordset?.[0]?.CanCreate || 0) === 1
+  if (!canCreate) {
+    const err = new Error('Only SUPPLIES products can create new variants')
+    err.status = 400
+    throw err
+  }
+
+    const { name, stock } = payload || {}
+    const variantName = normalizeRequiredSafeText(name, 'variant name') || 'Default Variant'
 
   const existing = await query(
     `SELECT TOP 1 VariantId
@@ -711,17 +1192,22 @@ async function createVariant(productId, payload) {
   const productStock = await getProductStock(productId)
   const currentTotal = await getVariantsTotalStock(productId)
   const nextTotal = Math.trunc(currentTotal) + Math.trunc(stValue)
-  if (nextTotal > Math.trunc(productStock)) {
-    throwInsufficientStock()
-  }
+  
+  // If product stock is less than the total variant stock needed, auto-adjust it
+  const newProductStock = Math.max(Math.trunc(productStock), nextTotal)
 
   const id = newId()
   await query(
-    `INSERT INTO ProductVariants (VariantId, ProductId, VariantName, Stock)
+    `UPDATE Products
+     SET Stock = @newStock
+     WHERE ProductId = @productId;
+
+     INSERT INTO ProductVariants (VariantId, ProductId, VariantName, Stock)
      VALUES (@id, @productId, @name, @stock);`,
     {
-      id,
       productId,
+      newStock: newProductStock,
+      id,
       name: variantName,
       stock: stValue,
     }
@@ -729,6 +1215,11 @@ async function createVariant(productId, payload) {
 
   try {
     await syncVariantShadowFromVariant(id)
+    await syncVariantLotsFromVariant(id)
+    await syncProductShadowLotsForVariant(productId, {
+      newVariantName: variantName,
+      targetStock: stValue,
+    })
   } catch (err) {
     console.warn('[retail.createVariant] variant created but shadow sync failed', {
       variantId: id,
@@ -747,66 +1238,61 @@ async function updateVariant(variantId, payload) {
     err.status = 400
     throw err
   }
-
   if (!variantId) {
     const err = new Error('Missing variantId')
     err.status = 400
     throw err
   }
 
-  const current = await query(
-    `SELECT TOP 1 VariantId, ProductId
+  const name = normalizeRequiredSafeText(payload?.name, 'variant name')
+
+  const currentRes = await query(
+    `SELECT TOP 1 VariantId, ProductId, VariantName
      FROM ProductVariants
-     WHERE VariantId = @id`,
-    { id: variantId }
+     WHERE VariantId = @variantId`,
+    { variantId }
   )
-  const row = current.recordset?.[0]
-  if (!row) {
+  const current = currentRes.recordset?.[0]
+  if (!current) {
     const err = new Error('Variant not found')
     err.status = 404
     throw err
   }
 
-  const name = payload?.name !== undefined ? normalizeRequiredSafeText(payload?.name, 'variant name') : undefined
-  const stock = payload?.stock !== undefined ? parseOptionalInt(payload.stock) : undefined
-
-  if (stock !== undefined) {
-    if (stock === null || !Number.isFinite(stock) || stock < 0) {
-      const err = new Error('Invalid stock')
-      err.status = 400
-      throw err
+  const dupRes = await query(
+    `SELECT TOP 1 VariantId
+     FROM ProductVariants
+     WHERE ProductId = @productId
+       AND VariantId <> @variantId
+       AND LOWER(LTRIM(RTRIM(CONVERT(NVARCHAR(255), VariantName)))) = @name`,
+    {
+      productId: current.ProductId,
+      variantId,
+      name: name.toLowerCase(),
     }
-  }
-
-  if (stock !== undefined) {
-    const productStock = await getProductStock(row.ProductId)
-    const otherTotal = await getVariantsTotalStock(row.ProductId, row.VariantId)
-    const nextTotal = Math.trunc(otherTotal) + Math.trunc(stock)
-    if (nextTotal > Math.trunc(productStock)) {
-      throwInsufficientStock()
-    }
+  )
+  if (dupRes.recordset?.length) {
+    const err = new Error('Variant name already exists')
+    err.status = 409
+    throw err
   }
 
   await query(
     `UPDATE ProductVariants
-     SET
-       VariantName = COALESCE(@name, VariantName),
-       Stock = COALESCE(@stock, Stock)
-     WHERE VariantId = @id;`,
-    {
-      id: variantId,
-      name: name !== undefined ? name : null,
-      stock: stock !== undefined ? stock : null,
-    }
+     SET VariantName = @name
+     WHERE VariantId = @variantId`,
+    { variantId, name }
   )
 
   try {
     await syncVariantShadowFromVariant(variantId)
-  } catch (err) {
-    console.warn('[retail.updateVariant] variant updated but shadow sync failed', {
-      variantId,
-      error: err?.message || err,
+    await syncVariantLotsFromVariant(variantId)
+    await syncProductShadowLotsForVariant(current.ProductId, {
+      oldVariantName: current.VariantName,
+      newVariantName: name,
     })
+  } catch (err) {
+    console.warn('[retail.updateVariant] shadow sync failed:', err?.message || err)
   }
 
   return { id: variantId }
@@ -819,50 +1305,44 @@ async function deleteVariant(variantId) {
     err.status = 400
     throw err
   }
-
   if (!variantId) {
     const err = new Error('Missing variantId')
     err.status = 400
     throw err
   }
 
-  const current = await query(
-    `SELECT TOP 1 VariantId, ProductId, COALESCE(Stock, 0) AS Stock
+  const currentRes = await query(
+    `SELECT TOP 1 VariantId, ProductId
      FROM ProductVariants
-     WHERE VariantId = @id`,
-    { id: variantId }
+     WHERE VariantId = @variantId`,
+    { variantId }
   )
-  const row = current.recordset?.[0]
-  if (!row) {
+  const current = currentRes.recordset?.[0]
+  if (!current) {
     const err = new Error('Variant not found')
     err.status = 404
     throw err
   }
 
-  if (Number(row.Stock || 0) > 0) {
-    const err = new Error('Cannot delete variant with remaining stock')
-    err.status = 409
-    throw err
-  }
-
-  const shadowId = retailVariantShadowId(variantId)
-  const lotUsage = await query(
-    `SELECT TOP 1 LotId
+  const lotQtyRes = await query(
+    `SELECT COALESCE(SUM(COALESCE(RemainingQty, 0)), 0) AS TotalQty
      FROM InventoryLots
-     WHERE InventoryItemId = @shadowId
-       AND COALESCE(RemainingQty, 0) > 0`,
-    { shadowId }
+     WHERE InventoryItemId = @shadowId`,
+    { shadowId: `retail_variant_${variantId}` }
   )
-  if (lotUsage.recordset?.length) {
-    const err = new Error('Cannot delete variant with active lots')
+  const totalQty = Number(lotQtyRes.recordset?.[0]?.TotalQty || 0)
+  if (totalQty > 0) {
+    const err = new Error('Only variants with zero stock can be deleted')
     err.status = 409
     throw err
   }
 
-  await query('DELETE FROM InventoryTransactions WHERE InventoryItemId = @shadowId', { shadowId })
-  await query('DELETE FROM InventoryLots WHERE InventoryItemId = @shadowId', { shadowId })
-  await query('DELETE FROM InventoryItems WHERE InventoryItemId = @shadowId', { shadowId })
-  await query('DELETE FROM ProductVariants WHERE VariantId = @id;', { id: variantId })
+  await query(
+    `DELETE FROM InventoryLots WHERE InventoryItemId = @shadowId;
+     DELETE FROM InventoryItems WHERE InventoryItemId = @shadowId;
+     DELETE FROM ProductVariants WHERE VariantId = @variantId;`,
+    { shadowId: `retail_variant_${variantId}`, variantId }
+  )
 
   return { id: variantId }
 }
@@ -1073,6 +1553,30 @@ async function listRetailProducts() {
     err.status = 400
     throw err
   }
+  const productStockExpr = schema.hasProductVariants
+    ? `CASE
+         WHEN EXISTS (SELECT 1 FROM ProductVariants pvCheck WHERE pvCheck.ProductId = p.ProductId)
+           THEN COALESCE((
+             SELECT SUM(COALESCE(vLots.TotalQty, TRY_CONVERT(DECIMAL(19,2), pv.Stock), 0))
+             FROM ProductVariants pv
+             OUTER APPLY (
+               SELECT SUM(TRY_CONVERT(DECIMAL(19,2), l.RemainingQty)) AS TotalQty
+               FROM InventoryLots l
+               WHERE l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+             ) vLots
+             WHERE pv.ProductId = p.ProductId
+           ), COALESCE(TRY_CONVERT(DECIMAL(19,2), p.Stock), 0))
+         ELSE COALESCE((
+             SELECT SUM(COALESCE(l.RemainingQty, 0))
+             FROM InventoryLots l
+             WHERE l.InventoryItemId = CONCAT('retail_', p.ProductId)
+           ), COALESCE(TRY_CONVERT(DECIMAL(19,2), p.Stock), 0))
+       END`
+    : `COALESCE((
+         SELECT SUM(COALESCE(l.RemainingQty, 0))
+         FROM InventoryLots l
+         WHERE l.InventoryItemId = CONCAT('retail_', p.ProductId)
+       ), COALESCE(TRY_CONVERT(DECIMAL(19,2), p.Stock), 0))`
   const res = await query(
     `SELECT
         p.ProductId,
@@ -1080,7 +1584,7 @@ async function listRetailProducts() {
         p.Price,
         p.Description,
         p.ImageUrl,
-        p.Stock,
+        ${productStockExpr} AS Stock,
         p.Status,
         ${schema.hasOrderItems
           ? `(
@@ -1095,18 +1599,54 @@ async function listRetailProducts() {
           : 'CAST(0 AS INT)'} AS SoldCount,
         ${schema.hasSalonReviews && schema.salonReviewsHasProductId && schema.salonReviewsHasRating
           ? `(
-              SELECT AVG(CAST(sr.Rating AS FLOAT))
-              FROM SalonReviews sr
-              WHERE sr.ProductId = p.ProductId
-                AND sr.Rating IS NOT NULL
+              SELECT AVG(CAST(rr.Rating AS FLOAT))
+              FROM (
+                SELECT sr.Rating
+                FROM SalonReviews sr
+                WHERE sr.ProductId = p.ProductId
+                  AND sr.Rating IS NOT NULL
+                  AND (sr.OrderItemId IS NOT NULL OR sr.OrderId IS NULL)
+
+                UNION ALL
+
+                SELECT sr.Rating
+                FROM SalonReviews sr
+                WHERE sr.OrderId IS NOT NULL
+                  AND sr.OrderItemId IS NULL
+                  AND sr.Rating IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM OrderItems oi
+                    WHERE oi.OrderId = sr.OrderId
+                      AND oi.ProductId = p.ProductId
+                  )
+              ) rr
             )`
           : 'CAST(NULL AS FLOAT)'} AS AverageRating,
         ${schema.hasSalonReviews && schema.salonReviewsHasProductId && schema.salonReviewsHasRating
           ? `(
               SELECT COUNT(1)
-              FROM SalonReviews sr
-              WHERE sr.ProductId = p.ProductId
-                AND sr.Rating IS NOT NULL
+              FROM (
+                SELECT sr.Rating
+                FROM SalonReviews sr
+                WHERE sr.ProductId = p.ProductId
+                  AND sr.Rating IS NOT NULL
+                  AND (sr.OrderItemId IS NOT NULL OR sr.OrderId IS NULL)
+
+                UNION ALL
+
+                SELECT sr.Rating
+                FROM SalonReviews sr
+                WHERE sr.OrderId IS NOT NULL
+                  AND sr.OrderItemId IS NULL
+                  AND sr.Rating IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM OrderItems oi
+                    WHERE oi.OrderId = sr.OrderId
+                      AND oi.ProductId = p.ProductId
+                  )
+              ) rr
             )`
           : 'CAST(0 AS INT)'} AS ReviewCount,
         p.CategoryId,
@@ -1219,10 +1759,11 @@ async function createRetailProduct(payload) {
   const status = normalizeRetailStatus(payload?.status, { required: true })
   const supplier = parseOptionalString(payload?.supplier)
 
+  const hasSellPricePayload = payload?.price !== undefined || payload?.sellPriceVnd !== undefined
   const sellPrice = payload?.price !== undefined ? parseMoneyVnd(payload.price) : parseMoneyVnd(payload?.sellPriceVnd)
   const importPrice = parseMoneyVnd(payload?.importPriceVnd)
 
-  if (sellPrice === null || sellPrice === undefined || !Number.isFinite(sellPrice) || sellPrice <= 0) {
+  if (hasSellPricePayload && (sellPrice === null || sellPrice === undefined || !Number.isFinite(sellPrice) || sellPrice <= 0)) {
     const err = new Error('Invalid price')
     err.status = 400
     throw err
@@ -1321,10 +1862,6 @@ async function createRetailProduct(payload) {
     }
   )
 
-  if (schema.hasProductVariants) {
-    await createVariant(id, { name: DEFAULT_RETAIL_VARIANT_NAME, stock: 0 })
-  }
-
   return { id }
 }
 
@@ -1351,19 +1888,31 @@ async function listRetailMeta() {
 function normalizeOrderStatusInput(value) {
   const raw = String(value || '').trim().toLowerCase()
   if (!raw) return null
-  if (raw === 'c' || raw === 'pending') return 'Pending'
-  if (raw === 'confirmed' || raw === 'confirm') return 'Confirmed'
-  if (raw === 'processing') return 'Processing'
-  if (raw === 'shipping' || raw === 'shipped' || raw === 'delivering' || raw === 'in transit' || raw === 'dang giao hang') return 'Shipping'
-  if (raw === 'completed' || raw === 'complete' || raw === 'delivered') return 'Completed'
-  if (raw === 'cancelled' || raw === 'cancelled') return 'Cancelled'
-  if (raw === 'failed') return 'Failed'
+  if (raw === 'c' || raw === 'pending' || raw === 'awaiting') return 'PENDING'
+  if (raw === 'processing' || raw === 'confirm' || raw === 'confirmed') return 'PROCESSING'
+  if (raw === 'shipping' || raw === 'shipped' || raw === 'delivering' || raw === 'in transit' || raw === 'dang giao hang') return 'SHIPPING'
+  if (raw === 'completed' || raw === 'complete' || raw === 'delivered' || raw === 'done' || raw === 'success' || raw === 'paid') return 'COMPLETED'
+  if (raw === 'cancelled' || raw === 'cancel') return 'CANCELLED'
   return null
+}
+
+function canTransitionOrderStatus(from, to) {
+  const fromStatus = normalizeOrderStatusInput(from)
+  const toStatus = normalizeOrderStatusInput(to)
+  if (!fromStatus || !toStatus) return false
+  const rules = {
+    PENDING: ['PROCESSING', 'SHIPPING', 'CANCELLED'],
+    PROCESSING: ['SHIPPING', 'CANCELLED'],
+    SHIPPING: ['COMPLETED'],
+    COMPLETED: [],
+    CANCELLED: [],
+  }
+  return (rules[fromStatus] || []).includes(toStatus)
 }
 
 function hasStockDeductedForStatus(statusInput) {
   const normalized = normalizeOrderStatusInput(statusInput)
-  return normalized === 'Processing' || normalized === 'Shipping' || normalized === 'Completed'
+  return normalized === 'PROCESSING' || normalized === 'SHIPPING' || normalized === 'COMPLETED'
 }
 
 function parseDateOnly(value) {
@@ -1446,13 +1995,15 @@ function buildOrderFilters(filters = {}, alias = 'o') {
 
   const status = normalizeOrderStatusInput(filters.status)
   if (status) {
-    if (status === 'Pending') {
+    if (status === 'PENDING') {
       where.push(`(${alias}.Status IN ('Pending', 'C'))`)
-    } else if (status === 'Shipping') {
+    } else if (status === 'PROCESSING') {
+      where.push(`(${alias}.Status IN ('PROCESSING', 'Processing', 'Confirmed'))`)
+    } else if (status === 'SHIPPING') {
       where.push(`(${alias}.Status IN ('Shipping', 'Shipped', 'Delivering'))`)
-    } else if (status === 'Completed') {
+    } else if (status === 'COMPLETED') {
       where.push(`(${alias}.Status IN ('Completed', 'Delivered'))`)
-    } else if (status === 'Cancelled') {
+    } else if (status === 'CANCELLED') {
       where.push(`(${alias}.Status IN ('Cancelled', 'Cancelled'))`)
     } else {
       where.push(`${alias}.Status = @status`)
@@ -1542,7 +2093,7 @@ function mapOrderRow(row, items) {
     OrderId: row.OrderId,
     OrderCode: orderCode,
     UserId: row.UserId,
-    Status: normalizeOrderStatusInput(row.Status) || 'Pending',
+    Status: normalizeOrderStatusInput(row.Status) || 'PENDING',
     CreatedAt: row.CreatedAt,
     CustomerName: row.CustomerName || '',
     CustomerPhone: row.CustomerPhone || '',
@@ -1883,7 +2434,7 @@ async function createRetailOrder(payload = {}, { actor } = {}) {
   const customerAddress = normalizeOptionalCustomerText(payload.customerAddress, 300)
   const paymentMethod = normalizeRetailPaymentMethod(payload.paymentMethod)
   const inputStatus = normalizeOrderStatusInput(payload.status)
-  const status = inputStatus || 'Pending'
+  const status = inputStatus || 'PENDING'
 
   const orderId = await createSequentialOrderId()
   const orderChannelColumn = schema.ordersHasChannel ? 'Channel' : schema.ordersHasCannel ? 'Cannel' : null
@@ -2053,6 +2604,7 @@ async function updateRetailOrder(orderIdInput, payload = {}, { actor } = {}) {
     throw err
   }
 
+  const currentStatus = normalizeOrderStatusInput(current.Status) || 'PENDING'
   const nextStatus = payload.status !== undefined ? normalizeOrderStatusInput(payload.status) : null
   if (payload.status !== undefined && !nextStatus) {
     const err = new Error('Invalid status')
@@ -2060,8 +2612,14 @@ async function updateRetailOrder(orderIdInput, payload = {}, { actor } = {}) {
     throw err
   }
 
-  if (nextStatus && nextStatus !== current.Status) {
-    const hadStockDeducted = hasStockDeductedForStatus(current.Status)
+  if (nextStatus && nextStatus !== currentStatus) {
+    if (!canTransitionOrderStatus(currentStatus, nextStatus)) {
+      const err = new Error(`Invalid status transition: ${currentStatus} -> ${nextStatus}`)
+      err.status = 409
+      throw err
+    }
+
+    const hadStockDeducted = hasStockDeductedForStatus(currentStatus)
     const shouldDeductStock = hasStockDeductedForStatus(nextStatus)
 
     if (!hadStockDeducted && shouldDeductStock) {
@@ -2072,7 +2630,7 @@ async function updateRetailOrder(orderIdInput, payload = {}, { actor } = {}) {
       await restoreStockForOrder(orderId)
     }
 
-    if (nextStatus === 'Completed') {
+    if (nextStatus === 'COMPLETED') {
       const items = await getOrderItems(orderId)
       await syncRetailInventoryByProducts(items.map((x) => x.ProductId))
     }
@@ -2103,14 +2661,13 @@ async function updateRetailOrder(orderIdInput, payload = {}, { actor } = {}) {
   )
 
   const userId = String(current.UserId || '').trim()
-  if (userId && nextStatus && nextStatus !== current.Status) {
+  if (userId && nextStatus && nextStatus !== currentStatus) {
     const statusMap = {
-      Pending: 'order_processing',
-      Processing: 'order_processing',
-      Shipping: 'order_shipping',
-      Completed: 'order_delivered',
-      Cancelled: 'order_cancelled',
-      Failed: 'order_failed',
+      PENDING: 'order_processing',
+      PROCESSING: 'order_processing',
+      SHIPPING: 'order_shipping',
+      COMPLETED: 'order_delivered',
+      CANCELLED: 'order_cancelled',
     }
 
     const event = statusMap[nextStatus] || 'order_processing'
@@ -2154,6 +2711,25 @@ async function updateRetailOrder(orderIdInput, payload = {}, { actor } = {}) {
   }
 
   return getRetailOrder(orderId)
+}
+
+async function transitionRetailOrderStatus(orderIdInput, targetStatusInput, { actor } = {}) {
+  const orderId = String(orderIdInput || '').trim()
+  const targetStatus = normalizeOrderStatusInput(targetStatusInput)
+
+  if (!orderId) {
+    const err = new Error('Missing orderId')
+    err.status = 400
+    throw err
+  }
+
+  if (!targetStatus) {
+    const err = new Error('Invalid target status')
+    err.status = 400
+    throw err
+  }
+
+  return updateRetailOrder(orderId, { status: targetStatus }, { actor })
 }
 
 async function deleteRetailOrder(orderIdInput) {
@@ -2214,5 +2790,6 @@ module.exports = {
   createRetailOrder,
   getRetailOrder,
   updateRetailOrder,
+  transitionRetailOrderStatus,
   deleteRetailOrder,
 }

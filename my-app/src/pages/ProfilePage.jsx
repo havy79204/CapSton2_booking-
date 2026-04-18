@@ -64,10 +64,140 @@ function isCStatus(status) {
   return String(status || '').trim().toLowerCase() === 'pending'
 }
 
+function parseDateCandidate(value) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+  const text = String(value || '').trim()
+  if (!text) return null
+
+  const direct = new Date(text)
+  if (!Number.isNaN(direct.getTime())) return direct
+
+  const ymd = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (ymd) {
+    const date = new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]))
+    return Number.isNaN(date.getTime()) ? null : date
+  }
+
+  return null
+}
+
+function parseTimeCandidate(value) {
+  const text = String(value || '').trim()
+  if (!text) return null
+
+  const m = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i)
+  if (!m) return null
+
+  let hour = Number(m[1])
+  const minute = Number(m[2])
+  const second = Number(m[3] || 0)
+  const meridiem = String(m[4] || '').toUpperCase()
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || !Number.isFinite(second)) return null
+  if (minute < 0 || minute > 59 || second < 0 || second > 59) return null
+
+  if (meridiem === 'PM' && hour < 12) hour += 12
+  if (meridiem === 'AM' && hour === 12) hour = 0
+  if (hour < 0 || hour > 23) return null
+
+  return { hour, minute, second }
+}
+
+function formatTime24(dateValue) {
+  const d = dateValue instanceof Date ? dateValue : new Date(dateValue)
+  if (Number.isNaN(d.getTime())) return 'Invalid Time'
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
+function resolveBookingDateTime(booking) {
+  const dateTimeFields = [
+    booking?.BookingTime,
+    booking?.bookingTime,
+    booking?.startTime,
+    booking?.StartTime,
+  ]
+
+  for (const field of dateTimeFields) {
+    const parsed = parseDateCandidate(field)
+    if (parsed) return parsed
+  }
+
+  const dateOnlyFields = [
+    booking?.BookingDate,
+    booking?.bookingDate,
+    booking?.Date,
+    booking?.date,
+  ]
+
+  let baseDate = null
+  for (const field of dateOnlyFields) {
+    const parsed = parseDateCandidate(field)
+    if (parsed) {
+      baseDate = parsed
+      break
+    }
+  }
+
+  const timeOnlyFields = [
+    booking?.BookingTime,
+    booking?.bookingTime,
+    booking?.Time,
+    booking?.time,
+    booking?.startTime,
+    booking?.StartTime,
+  ]
+
+  for (const field of timeOnlyFields) {
+    const parsedTime = parseTimeCandidate(field)
+    if (parsedTime && baseDate) {
+      return new Date(
+        baseDate.getFullYear(),
+        baseDate.getMonth(),
+        baseDate.getDate(),
+        parsedTime.hour,
+        parsedTime.minute,
+        parsedTime.second,
+      )
+    }
+  }
+
+  return baseDate
+}
+
+function formatBookingTimeLabel(booking, resolvedDate) {
+  if (resolvedDate && !Number.isNaN(resolvedDate.getTime())) {
+    return formatTime24(resolvedDate)
+  }
+
+  const timeOnlyFields = [
+    booking?.BookingTime,
+    booking?.bookingTime,
+    booking?.Time,
+    booking?.time,
+    booking?.startTime,
+    booking?.StartTime,
+  ]
+
+  for (const field of timeOnlyFields) {
+    const parsedTime = parseTimeCandidate(field)
+    if (parsedTime) {
+      const displayDate = new Date(2000, 0, 1, parsedTime.hour, parsedTime.minute, parsedTime.second)
+      return formatTime24(displayDate)
+    }
+  }
+
+  return 'Invalid Time'
+}
+
 const ProfileHeader = ({ user, bookings, orders, onEditProfile, onManageAddresses, reviewsCount }) => {
   const now = new Date()
   const upcomingCount = bookings.filter((b) => {
-    const t = new Date(b.BookingTime)
+    const t = resolveBookingDateTime(b)
+    if (!t || Number.isNaN(t.getTime())) return false
     return (String(b.Status || '').toLowerCase().includes('confirm') || String(b.Status || '').toLowerCase().includes('pending')) && t > now
   }).length
 
@@ -147,7 +277,7 @@ const MyBookingSection = ({ bookings, onCancelBooking, onRateBooking, cancelling
       if (activeTab === 'All') return true
       if (activeTab === 'Completed') return status.includes('complete') || status.includes('done')
       if (activeTab === 'Pending') return status.includes('pending') || status.includes('wait')
-      if (activeTab === 'Booked') return status.includes('book') || status.includes('confirm')
+      if (activeTab === 'Confirmed') return status.includes('book') || status.includes('confirm')
       if (activeTab === 'Cancelled') return status.includes('cancel')
       return true
     })
@@ -172,7 +302,7 @@ const MyBookingSection = ({ bookings, onCancelBooking, onRateBooking, cancelling
           <button className={`tab-btn ${activeTab === 'All' ? 'active' : ''}`} onClick={() => setActiveTab('All')}>All Service Booking</button>
           <button className={`tab-btn ${activeTab === 'Completed' ? 'active' : ''}`} onClick={() => setActiveTab('Completed')}>Completed</button>
           <button className={`tab-btn ${activeTab === 'Pending' ? 'active' : ''}`} onClick={() => setActiveTab('Pending')}>Pending</button>
-          <button className={`tab-btn ${activeTab === 'Booked' ? 'active' : ''}`} onClick={() => setActiveTab('Booked')}>Booked</button>
+          <button className={`tab-btn ${activeTab === 'Confirmed' ? 'active' : ''}`} onClick={() => setActiveTab('Confirmed')}>Confirmed</button>
           <button className={`tab-btn ${activeTab === 'Cancelled' ? 'active' : ''}`} onClick={() => setActiveTab('Cancelled')}>Cancelled</button>
         </div>
 
@@ -182,12 +312,15 @@ const MyBookingSection = ({ bookings, onCancelBooking, onRateBooking, cancelling
           ) : (
             filteredBookings.map((booking) => {
               const firstService = booking.Services?.[0]
-              const date = new Date(booking.BookingTime)
+              const date = resolveBookingDateTime(booking)
+              const hasValidDate = Boolean(date && !Number.isNaN(date.getTime()))
+              const bookingTimeLabel = formatBookingTimeLabel(booking, date)
               return (
                 <div key={booking.BookingId} className="booking-card">
                   <div className="booking-date">
-                    <span className="date-day">{date.getDate()}</span>
-                    <span className="date-month">{date.toLocaleDateString('en-US', { month: 'short' })}</span>
+                    <span className="date-day">{hasValidDate ? date.getDate() : '--'}</span>
+                    <span className="date-month">{hasValidDate ? date.toLocaleDateString('en-US', { month: 'short' }) : 'N/A'}</span>
+                    <span className="date-time">{bookingTimeLabel}</span>
                   </div>
                   <div className="booking-image">
                     {firstService?.ImageUrl ? <img src={resolveApiImageUrl(firstService.ImageUrl)} alt={firstService.ServiceName || 'Service'} /> : <img src="/OurServices/Manicure.jpg" alt="Service" />}
@@ -199,7 +332,6 @@ const MyBookingSection = ({ bookings, onCancelBooking, onRateBooking, cancelling
                   </div>
                   <div className="booking-info">
                     <span className={`booking-status ${mapBookingStatusClass(booking.Status)}`}><IoCheckmarkCircle /> {booking.Status}</span>
-                    <p className="booking-time">{date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</p>
                     <div className="booking-action-buttons">
                       {isCompleted(booking.Status) ? (
                         <button
@@ -263,6 +395,7 @@ const OrderTrackingSection = ({ orders, onCancelOrder, cancellingOrderId }) => {
           ) : (
             filteredOrders.map((order) => {
               const firstItem = order.Items?.[0]
+              const createdDate = parseDateCandidate(order.CreatedAt)
               return (
                 <div key={order.OrderId} className="order-card">
                   <div className="order-image">
@@ -277,7 +410,7 @@ const OrderTrackingSection = ({ orders, onCancelOrder, cancellingOrderId }) => {
 
                   <div className="order-status">
                     <span className={`status-badge ${mapOrderStatusClass(order.Status)}`}><IoCheckmarkCircle /> {normalizeOrderStatus(order.Status)}</span>
-                    <p className="order-date">{new Date(order.CreatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                    <p className="order-date">{createdDate ? createdDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Invalid Date'}</p>
                     {isCStatus(order.Status) ? (
                       <button
                         className="action-btn cancel"
@@ -380,7 +513,7 @@ const EditProfileModal = ({ user, isOpen, onClose, onSave, saving }) => {
             <label htmlFor="avatarUrl"><IoPerson /> Avatar URL</label>
             <input type="text" id="avatarUrl" name="avatarUrl" value={formData.avatarUrl} onChange={handleChange} placeholder="https://... or /uploads/avatars/..." />
             <div className="avatar-upload-row">
-              <label className="btn-upload-avatar" htmlFor="avatarFileInput">Coose image from device</label>
+              <label className="btn-upload-avatar" htmlFor="avatarFileInput">Choose image from device</label>
               <input id="avatarFileInput" type="file" accept="image/png,image/jpeg" onChange={handleAvatarFileChange} className="avatar-file-input" />
               {formData.avatarFileName ? <span className="avatar-upload-name">{formData.avatarFileName}</span> : null}
             </div>

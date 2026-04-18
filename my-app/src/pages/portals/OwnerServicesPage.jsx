@@ -191,13 +191,11 @@ export default function OwnerServicesPage() {
     const catName = nameInput.toLowerCase();
     
     if (!catName) return;
-
-    // KIỂM TRA TÊN DANH MỤC HỢP LỆ (NAIL & CARE)
     const nailKeywords = ['nail', 'móng', 'sơn', 'gel', 'đắp', 'nối mi', 'mi', 'eyelash', 'care', 'elite', 'massage', 'vẽ'];
     const isValidName = nailKeywords.some(keyword => catName.includes(keyword));
 
     if (!isValidName) {
-      const errorMsg = "The category name is not related to Nails & Care services. Please re-enter.!";
+      const errorMsg = 'The category name must be related to Nails & Care services. Please try again.';
       setCategoryError(errorMsg);
 
       window.dispatchEvent(new CustomEvent('portal:error-modal', { 
@@ -273,18 +271,18 @@ export default function OwnerServicesPage() {
       await api.del(`/api/owner/services/${serviceId}`)
       
       window.dispatchEvent(new CustomEvent('portal:success-modal', { 
-        detail: { message: 'Xóa dịch vụ thành công', title: 'Hoàn tất' } 
+        detail: { message: 'Service deleted successfully.', title: 'Complete' } 
       }));
 
       await refresh()
       close()
     } catch (err) {
       console.error(err)
-      const msg = err?.message || 'Không thể xóa dịch vụ';
+      const msg = err?.message || 'Unable to delete service';
       setError(msg)
       
       window.dispatchEvent(new CustomEvent('portal:error-modal', { 
-        detail: { message: msg, title: 'Lỗi' } 
+        detail: { message: msg, title: 'Error' } 
       }));
     }
   }
@@ -312,12 +310,12 @@ export default function OwnerServicesPage() {
       if (editing?.id) {
         await api.put(`/api/owner/services/${editing.id}`, payload)
         window.dispatchEvent(new CustomEvent('portal:success-modal', { 
-          detail: { message: 'Cập nhật dịch vụ thành công!', title: 'Hoàn tất' } 
+          detail: { message: 'Service updated successfully.', title: 'Complete' } 
         }));
       } else {
         await api.post('/api/owner/services', payload)
         window.dispatchEvent(new CustomEvent('portal:success-modal', { 
-          detail: { message: 'Thêm dịch vụ thành công!', title: 'Hoàn tất' } 
+          detail: { message: 'Service added successfully.', title: 'Complete' } 
         }));
       }
 
@@ -327,11 +325,11 @@ export default function OwnerServicesPage() {
       close()
     } catch (err) {
       console.error(err)
-      const msg = err?.message || 'Có lỗi xảy ra khi lưu dịch vụ';
+      const msg = err?.message || 'An error occurred while saving the service';
       setError(msg)
 
       window.dispatchEvent(new CustomEvent('portal:error-modal', { 
-        detail: { message: msg, title: 'Lỗi' } 
+        detail: { message: msg, title: 'Error' } 
       }));
     }
   }
@@ -398,10 +396,18 @@ export default function OwnerServicesPage() {
 
   return (
     <div className="service-page">
-      <div className="portal-pageHeader">
-        <div className="portal-pageHeaderLeft" />
+      <div className="service-toolbar">
+        <div className="portal-search portal-searchFull service-searchBox" role="search">
+          <span className="portal-searchIcon" aria-hidden="true"><IconSearch /></span>
+          <input
+            className="portal-searchInput"
+            placeholder="Search by service name, category, or status..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
 
-        <div className="portal-headerActions">
+        <div className="service-toolbarActions">
           <button type="button" className="portal-primaryBtn" onClick={openCreate}>
             <span className="portal-primaryBtnIcon" aria-hidden="true">+</span>
             Add service
@@ -453,7 +459,7 @@ export default function OwnerServicesPage() {
               <span className="portal-label">Service category</span>
               <input
                 className="portal-input"
-                placeholder="enter or search for keywords..."
+                placeholder="Enter or search by keyword..."
                 list="category-suggestions"
                 value={categoriesById.get(form.categoryId)?.name || form.categoryId}
                 onChange={(e) => {
@@ -608,17 +614,6 @@ export default function OwnerServicesPage() {
           </label>
         </form>
       </PortalModal>
-
-      {/* SEARCH AND FILTERS */}
-      <div className="portal-search portal-searchFull" role="search">
-          <span className="portal-searchIcon" aria-hidden="true"><IconSearch /></span>
-          <input
-            className="portal-searchInput"
-            placeholder="Search by service name, category, or status..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-      </div>
 
       <div className="service-filterRow">
           <label className="portal-field service-filterField">

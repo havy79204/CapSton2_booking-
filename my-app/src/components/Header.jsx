@@ -19,9 +19,9 @@ const Header = () => {
     ? `${avatarBaseSrc}${avatarBaseSrc.includes('?') ? '&' : '?'}v=${me?._avatarVersion || 1}`
     : '';
 
-  // Calculate total items in cart
+  // Count distinct product entries in cart (not total quantity)
   const cartItems = Array.isArray(cart?.Items) ? cart.Items : [];
-  const cartCount = cartItems.reduce((sum, item) => sum + Number(item.Quantity || 0), 0);
+  const cartCount = cartItems.filter((item) => Number(item?.Quantity || 0) > 0).length;
 
   const handleNavigation = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });

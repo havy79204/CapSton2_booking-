@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import '../../styles/schedule.css'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
@@ -275,10 +275,10 @@ export default function OwnerSchedulePage() {
   const [viewMode, setViewMode] = useState(initialQuery.view || 'week')
   const [selectedDate, setSelectedDate] = useState(initialQuery.date || '')
 
-  function getHoursForDate(isoDate) {
+  const getHoursForDate = useCallback((isoDate) => {
     const weekdayKey = getWeekdayKey(isoDate || initialTodayIso)
     return scheduleHoursByDay[weekdayKey] || { openingHour: 8, closingHour: 20 }
-  }
+  }, [initialTodayIso, scheduleHoursByDay])
 
   function getDefaultShiftWindow(isoDate) {
     const hours = getHoursForDate(isoDate)
@@ -310,7 +310,6 @@ export default function OwnerSchedulePage() {
   const [staffRows, setStaffRows] = useState([])
   const [formError, setFormError] = useState('')
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
-  const [pendingRequests, setPendingRequests] = useState([])
 
   // --- API Logic ---
   async function refreshSchedule(nextWeekStart) {
@@ -321,7 +320,6 @@ export default function OwnerSchedulePage() {
         if (data.weekRange) setWeekRange(data.weekRange)
         if (Array.isArray(data.columns)) setColumns(data.columns)
         if (Array.isArray(data.staffRows)) setStaffRows(data.staffRows)
-        if (Array.isArray(data.pendingRequests)) setPendingRequests(data.pendingRequests)
       }
     } catch (err) {
       console.error(err)
@@ -349,7 +347,7 @@ export default function OwnerSchedulePage() {
   const selectedBusinessHours = useMemo(() => {
     const baseDate = selectedDate || initialTodayIso
     return getHoursForDate(baseDate)
-  }, [selectedDate, scheduleHoursByDay, initialTodayIso])
+  }, [selectedDate, initialTodayIso, getHoursForDate])
 
   const quickSelectOptions = useMemo(() => {
     const quickStart = selectedBusinessHours.openingHour * 60

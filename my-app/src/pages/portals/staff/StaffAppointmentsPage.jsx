@@ -159,7 +159,9 @@ export default function StaffAppointmentsPage() {
         if (a.date && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) {
           try {
             appointmentDate = new Date(`${a.date}T00:00:00`);
-          } catch (e) {}
+          } catch {
+            // ignore malformed date strings from API
+          }
         }
         
         if (!appointmentDate) {
@@ -384,7 +386,9 @@ export default function StaffAppointmentsPage() {
           const day = String(d.getDate()).padStart(2, '0');
           return `${year}-${month}-${day}`;
         }
-      } catch (e) {}
+      } catch {
+        // ignore invalid date formats
+      }
     }
     return selectedDate.toISOString().split('T')[0];
   })();

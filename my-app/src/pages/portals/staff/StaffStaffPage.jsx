@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import PortalCard from '../../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../../components/Layout portal/PortalModal.jsx'
 import '../../../styles/staff.css'
@@ -32,7 +32,7 @@ export default function StaffStaffPage() {
   const [selectedStaff, setSelectedStaff] = useState(null)
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', hireDate: todayDateInputValue() })
 
-  async function loadStaffMembers() {
+  const loadStaffMembers = useCallback(async () => {
     setStaffLoading(true)
     try {
       const params = new URLSearchParams({ keyword: query.trim(), page: '1', pageSize: '100' })
@@ -44,11 +44,11 @@ export default function StaffStaffPage() {
     } finally {
       setStaffLoading(false)
     }
-  }
+  }, [query])
 
   useEffect(() => {
     loadStaffMembers()
-  }, [query])
+  }, [loadStaffMembers])
 
   function close() {
     setOpen(false)

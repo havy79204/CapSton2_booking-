@@ -1,53 +1,29 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { IoArrowBack, IoSearchOutline } from 'react-icons/io5';
+import {
+  IoArrowBack,
+  IoSearchOutline,
+} from 'react-icons/io5';
 import { formatVnd } from '../lib/currency'
-import { useServices } from '../hooks/useHomepage';
-import axios from 'axios';
+import { useServiceCategories, useServices } from '../hooks/useHomepage';
 import '../styles/CatalogPage.css';
 
 const ServiceCatalogPage = () => {
+  const CARDS_PER_PAGE = 12;
   const navigate = useNavigate();
-  const { services, loading, error } = useServices();
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [priceSort, setPriceSort] = useState('price_asc');
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const { services, loading, error } = useServices({
+    categoryId: selectedCategory,
+    sortBy: 'price',
+    sortOrder: priceSort === 'price_desc' ? 'desc' : 'asc',
+  });
+  const { categories } = useServiceCategories();
 
   // 🔍 search theo tên
   const [searchTerm, setSearchTerm] = useState('');
-
-  // 📌 category đã chọn
-  const [selectedCategory, setSelectedCategory] = useState('all');
-
-  // 🔥 autocomplete
-  const [categorySearch, setCategorySearch] = useState('');
-  const [suggestions, setSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-
-  // 🚀 API SEARCH (đã fix chuẩn)
-  let timeout;
-  const handleCategorySearch = (value) => {
-    setCategorySearch(value);
-
-    clearTimeout(timeout);
-
-    timeout = setTimeout(async () => {
-      if (value.trim().length > 1) {
-        try {
-          const res = await axios.get(
-            `http://localhost:5000/api/services/categories/search?q=${encodeURIComponent(value)}`
-          );
-
-          // ✅ backend trả array trực tiếp
-          setSuggestions(res.data);
-          setShowSuggestions(true);
-
-        } catch (err) {
-          console.error("Lỗi tìm danh mục:", err);
-        }
-      } else {
-        setSuggestions([]);
-        setShowSuggestions(false);
-      }
-    }, 300);
-  };
 
   // 📦 xử lý danh sách
   const serviceList = useMemo(
@@ -61,14 +37,24 @@ const ServiceCatalogPage = () => {
       const matchesSearch =
         String(service.Name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         String(service.Description || '').toLowerCase().includes(searchTerm.toLowerCase());
-
-      const matchesCategory =
-        selectedCategory === 'all' ||
-        String(service.CategoryId) === selectedCategory;
-
-      return matchesSearch && matchesCategory;
+      return matchesSearch;
     });
-  }, [searchTerm, selectedCategory, serviceList]);
+  }, [searchTerm, serviceList]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredServices.length / CARDS_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedServices = useMemo(() => {
+    const start = (safeCurrentPage - 1) * CARDS_PER_PAGE;
+    return filteredServices.slice(start, start + CARDS_PER_PAGE);
+  }, [filteredServices, safeCurrentPage]);
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setSelectedCategory('all');
+    setPriceSort('price_asc');
+    setCurrentPage(1);
+  };
 
   if (loading) return <div>Loading...</div>;
   if (error) return <div>Error: {error}</div>;
@@ -79,7 +65,7 @@ const ServiceCatalogPage = () => {
 
         {/* HEADER */}
         <div className="catalog-head">
-          <button onClick={() => navigate(-1)}>
+          <button className="catalog-back-btn" onClick={() => navigate(-1)}>
             <IoArrowBack /> Back
           </button>
           <h1>All Services</h1>
@@ -95,62 +81,48 @@ const ServiceCatalogPage = () => {
               type="text"
               placeholder="Search services..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value)
+                setCurrentPage(1)
+              }}
             />
           </div>
 
-          {/* 🔥 AUTOCOMPLETE */}
-          <div style={{ position: 'relative', flex: 1 }}>
-            <input
-              type="text"
-              placeholder="Enter service category..."
-              value={categorySearch}
-              onChange={(e) => handleCategorySearch(e.target.value)}
-              onFocus={() => setShowSuggestions(true)}
-              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-            />
+          <select
+            className="catalog-select"
+            value={selectedCategory}
+            onChange={(e) => {
+              setSelectedCategory(e.target.value)
+              setCurrentPage(1)
+            }}
+          >
+            <option value="all">Category: All</option>
+            {(Array.isArray(categories) ? categories : []).map((item) => (
+              <option key={item.CategoryId} value={String(item.CategoryId)}>{item.Name}</option>
+            ))}
+          </select>
 
-            {/* DROPDOWN */}
-            {showSuggestions && suggestions.length > 0 && (
-              <ul style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                right: 0,
-                background: 'white',
-                border: '1px solid #ccc',
-                zIndex: 1000,
-                listStyle: 'none',
-                padding: 0,
-                margin: 0
-              }}>
-                {suggestions.map((item) => (
-                  <li
-                    key={item.CategoryId}
-                    onClick={() => {
-                      setCategorySearch(item.Name);
-                      setSelectedCategory(String(item.CategoryId));
-                      setShowSuggestions(false);
-                    }}
-                    style={{
-                      padding: '10px',
-                      cursor: 'pointer'
-                    }}
-                    onMouseEnter={(e) => e.target.style.background = '#f5f5f5'}
-                    onMouseLeave={(e) => e.target.style.background = 'white'}
-                  >
-                    {item.Name}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <select
+            className="catalog-select"
+            value={priceSort}
+            onChange={(e) => {
+              setPriceSort(e.target.value)
+              setCurrentPage(1)
+            }}
+          >
+            <option value="price_asc">Price: Low to high</option>
+            <option value="price_desc">Price: High to low</option>
+          </select>
+
+          <button className="catalog-clear-btn" onClick={clearFilters} type="button">
+            Clear Filters
+          </button>
 
         </div>
 
         {/* LIST */}
-        <div className="catalog-grid">
-          {filteredServices.map((service) => (
+        <div className="catalog-grid services-grid-page">
+          {paginatedServices.map((service) => (
             <div key={service.ServiceId} className="catalog-card">
               <Link 
                 to={`/service/${service.ServiceId}`}
@@ -184,9 +156,42 @@ const ServiceCatalogPage = () => {
           ))}
         </div>
 
+        {filteredServices.length > 0 && (
+          <div className="catalog-pagination" role="navigation" aria-label="Services pagination">
+            <button
+              type="button"
+              className="catalog-page-btn"
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={safeCurrentPage === 1}
+            >
+              Previous
+            </button>
+
+            {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
+              <button
+                key={pageNumber}
+                type="button"
+                className={`catalog-page-btn ${pageNumber === safeCurrentPage ? 'active' : ''}`}
+                onClick={() => setCurrentPage(pageNumber)}
+              >
+                {pageNumber}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              className="catalog-page-btn"
+              onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+              disabled={safeCurrentPage === totalPages}
+            >
+              Next
+            </button>
+          </div>
+        )}
+
         {/* EMPTY */}
         {filteredServices.length === 0 && (
-          <p>No services found.</p>
+          <p className="catalog-empty">No services found with current filters.</p>
         )}
 
       </div>

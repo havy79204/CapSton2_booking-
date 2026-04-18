@@ -110,7 +110,7 @@ const BookingPage = () => {
     const st = String(s || '').trim().toLowerCase()
     if (!st) return 'Unknown'
     if (st === 'completed' || st === 'done') return 'Completed'
-    if (st === 'booked') return 'Booked'
+    if (st === 'booked') return 'Confirmed'
     if (st === 'pending') return 'Pending'
     if (st === 'cancel' || st === 'cancelled') return 'Cancelled'
     return st.charAt(0).toUpperCase() + st.slice(1)
@@ -968,7 +968,7 @@ const BookingPage = () => {
               </div>
 
               <div className="info-inputs">
-                <input type="text" value={currentUser?.Phone || ''} readOnly placeholder="Your phone" />
+                <input type="text" value={''} readOnly placeholder="Phone hidden for privacy" />
                 <input type="text" value={currentUser?.Name || ''} readOnly placeholder="Your name" />
               </div>
 
@@ -1088,7 +1088,7 @@ const BookingPage = () => {
                 </label>
               </div>
 
-              <button className="book-now-btn-main" onClick={handleBookNow} disabled={submitting}>
+              <button type="button" className="book-now-btn-main" onClick={handleBookNow} disabled={submitting}>
                 <IoCalendarOutline /> {submitting ? 'Booking...' : 'Book Now'}
               </button>
               

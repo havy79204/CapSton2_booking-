@@ -3,6 +3,9 @@ const { toAppointmentListItem } = require('../models/appointment.model')
 const { getSettingsMap } = require('./settings.service')
 const { notifyCustomerEvent, notifyOwnerEvent } = require('./notifications.service')
 
+const _tableExistsCache = new Map()
+const _columnExistsCache = new Map()
+
 function calculateCommission(revenue, tiers = {}) {
   const tierLow = tiers.CommissionTierLow !== undefined && tiers.CommissionTierLow !== null ? Number(tiers.CommissionTierLow) : (tiers.commissionTierLow !== undefined && tiers.commissionTierLow !== null ? Number(tiers.commissionTierLow) : 500000)
   const rateLow = tiers.CommissionRateLow !== undefined && tiers.CommissionRateLow !== null ? Number(tiers.CommissionRateLow) : (tiers.commissionRateLow !== undefined && tiers.commissionRateLow !== null ? Number(tiers.commissionRateLow) : 0.10)
@@ -23,8 +26,37 @@ function normalizeAppointmentStatus(status) {
   if (normalizedStatusInput === 'c' || normalizedStatusInput === 'pending') return 'Pending'
   if (normalizedStatusInput === 'completed' || normalizedStatusInput === 'complete' || normalizedStatusInput === 'done') return 'Completed'
   if (normalizedStatusInput === 'cancelled' || normalizedStatusInput === 'cancelled' || normalizedStatusInput === 'delete' || normalizedStatusInput === 'deleted') return 'Cancelled'
-  if (normalizedStatusInput === 'booked' || normalizedStatusInput === 'confirmed' || normalizedStatusInput === 'confirm') return 'Booked'
+  if (normalizedStatusInput === 'booked' || normalizedStatusInput === 'confirmed' || normalizedStatusInput === 'confirm') return 'Confirmed'
   return status || 'Pending'
+}
+
+async function columnExists(tableName, columnName) {
+  const cacheKey = `${tableName}.${columnName}`
+  if (_columnExistsCache.has(cacheKey)) return _columnExistsCache.get(cacheKey)
+
+  try {
+    const res = await query(
+      `SELECT 1 AS ok
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_NAME = @tableName
+         AND COLUMN_NAME = @columnName`,
+      { tableName, columnName }
+    )
+    const exists = Boolean(res.recordset?.length)
+    _columnExistsCache.set(cacheKey, exists)
+    return exists
+  } catch {
+    _columnExistsCache.set(cacheKey, false)
+    return false
+  }
+}
+
+async function getServiceCategoryId(serviceId) {
+  const res = await query(
+    'SELECT TOP 1 CategoryId FROM Services WHERE ServiceId = @serviceId',
+    { serviceId }
+  ).catch(() => ({ recordset: [] }))
+  return String(res.recordset?.[0]?.CategoryId || '').trim()
 }
 
 async function applyCommissionForCompletedBooking(bookingId, staffId) {
@@ -204,15 +236,30 @@ async function listAppointments() {
 }
 
 async function staffSupportsService(staffId, serviceId) {
-  console.log(`[DEBUG] Checking if staff ${staffId} supports service ${serviceId}`)
+  if (!staffId || !serviceId) return false
+
+  const hasServiceIdColumn = await columnExists('StaffSkills', 'ServiceId')
+  if (hasServiceIdColumn) {
+    const res = await query(
+      `SELECT 1 FROM StaffSkills 
+       WHERE StaffId = @staffId AND ServiceId = @serviceId`,
+      { staffId, serviceId }
+    ).catch(() => ({ recordset: [] }))
+    return Boolean(res.recordset?.length)
+  }
+
+  const hasCategoryIdColumn = await columnExists('StaffSkills', 'CategoryId')
+  if (!hasCategoryIdColumn) return false
+
+  const categoryId = await getServiceCategoryId(serviceId)
+  if (!categoryId) return false
+
   const res = await query(
     `SELECT 1 FROM StaffSkills 
-     WHERE StaffId = @staffId AND ServiceId = @serviceId`,
-    { staffId, serviceId }
-  )
-  const hasSkill = res.recordset?.length > 0
-  console.log(`[DEBUG] Result: ${hasSkill ? 'YES' : 'NO'}`)
-  return hasSkill
+     WHERE StaffId = @staffId AND CategoryId = @categoryId`,
+    { staffId, categoryId }
+  ).catch(() => ({ recordset: [] }))
+  return Boolean(res.recordset?.length)
 }
 
 async function createAppointment(payload) {

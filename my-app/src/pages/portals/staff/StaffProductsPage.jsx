@@ -3,7 +3,6 @@ import PortalCard from '../../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../../components/Layout portal/PortalModal.jsx'
 import { IconSearch } from '../../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../../lib/api.js'
-import { useNavigate } from 'react-router-dom'
 import '../../../styles/products.css'
 import '../../../styles/global-buttons.css'
 
@@ -18,16 +17,7 @@ function digitsOnly(value) {
   return raw.replace(/[^0-9]/g, '')
 }
 
-function resolveAssetUrl(url) {
-  const raw = String(url || '').trim()
-  if (!raw) return ''
-  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw
-  const base = String(import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/+$/, '')
-  return `${base}${raw.startsWith('/') ? '' : '/'}${raw}`
-}
-
 export default function StaffProductsPage() {
-  const navigate = useNavigate()
   const [loadError, setLoadError] = useState('')
   const [items, setItems] = useState([])
   const [meta, setMeta] = useState({ kinds: [], statuses: [], categories: [] })
@@ -86,20 +76,13 @@ export default function StaffProductsPage() {
     })
   }, [items, query, statusFilter, categoryFilter])
 
-  const pagedItems = useMemo(() => {
-    const start = (page - 1) * pageSize
-    return filtered.slice(start, start + pageSize)
-  }, [filtered, page])
-
   const totalPages = useMemo(() => Math.max(1, Math.ceil(filtered.length / pageSize)), [filtered.length])
+  const safePage = Math.min(page, totalPages)
 
-  useEffect(() => {
-    setPage(1)
-  }, [query, statusFilter, categoryFilter])
-
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages)
-  }, [page, totalPages])
+  const pagedItemsSafe = useMemo(() => {
+    const start = (safePage - 1) * pageSize
+    return filtered.slice(start, start + pageSize)
+  }, [filtered, safePage])
 
   function close() {
     setOpen(false)
@@ -169,14 +152,14 @@ export default function StaffProductsPage() {
       <div className="products-topRow">
         <div className="portal-search portal-searchFull" role="search">
           <span className="portal-searchIcon" aria-hidden="true"><IconSearch /></span>
-          <input className="portal-searchInput" placeholder="Search by name / category..." value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input className="portal-searchInput" placeholder="Search by name / category..." value={query} onChange={(e) => { setQuery(e.target.value); setPage(1) }} />
         </div>
       </div>
 
       <div className="products-filterRow">
         <label className="portal-field products-filterField">
           <span className="portal-label">Filter by status</span>
-          <select className="portal-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <select className="portal-select" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}>
             <option value="all">All status</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
@@ -184,7 +167,7 @@ export default function StaffProductsPage() {
         </label>
         <label className="portal-field products-filterField">
           <span className="portal-label">Filter by category</span>
-          <select className="portal-select" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+          <select className="portal-select" value={categoryFilter} onChange={(e) => { setCategoryFilter(e.target.value); setPage(1) }}>
             <option value="all">All categories</option>
             {(meta.categories || []).map((c) => <option key={String(c.id)} value={String(c.id)}>{c.name}</option>)}
           </select>
@@ -205,7 +188,7 @@ export default function StaffProductsPage() {
               </tr>
             </thead>
             <tbody>
-              {pagedItems.map((p) => (
+              {pagedItemsSafe.map((p) => (
                 <tr key={p.id}>
                   <td className="portal-invName">{p.name}</td>
                   <td><span className="portal-invPill">{p.categoryName || p.kind || '-'}</span></td>
@@ -219,15 +202,15 @@ export default function StaffProductsPage() {
                   </td>
                 </tr>
               ))}
-              {pagedItems.length === 0 ? <tr><td colSpan={6} className="products-emptyRow">No products found</td></tr> : null}
+              {pagedItemsSafe.length === 0 ? <tr><td colSpan={6} className="products-emptyRow">No products found</td></tr> : null}
             </tbody>
           </table>
         </div>
 
         <div className="products-pagination">
-          <button type="button" className="products-paginationBtn" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>‹</button>
-          <span className="products-paginationText">Page {page} / {totalPages}</span>
-          <button type="button" className="products-paginationBtn" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>›</button>
+          <button type="button" className="products-paginationBtn" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, Math.min(totalPages, p - 1)))}>‹</button>
+          <span className="products-paginationText">Page {safePage} / {totalPages}</span>
+          <button type="button" className="products-paginationBtn" disabled={safePage >= totalPages} onClick={() => setPage((p) => Math.max(1, Math.min(totalPages, p + 1)))}>›</button>
         </div>
       </PortalCard>
 

@@ -15,5 +15,8 @@ router.put('/inventory/lots/:lotId', requireAuth, controller.putInventoryLot)
 router.delete('/inventory/lots/:lotId', requireAuth, controller.deleteInventoryLot)
 router.get('/inventory/import-template', requireAuth, controller.getInventoryImportTemplate)
 router.post('/inventory/import-excel', requireAuth, controller.postInventoryImportExcel)
+router.get('/inventory/export/snapshot', requireAuth, controller.getInventorySnapshotExport)
+router.get('/inventory/export/movement', requireAuth, controller.getInventoryMovementExport)
+router.get('/inventory/export/low-stock', requireAuth, controller.getInventoryLowStockExport)
 
 module.exports = router

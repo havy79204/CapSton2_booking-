@@ -50,23 +50,41 @@ export default function OwnerAppointmentsPage() {
   }
 
   const normalizeTime = (t) => {
-    if (!t) return `${String(businessHours.openingHour).padStart(2, '0')}:00`;
-    const match = String(t).match(/(\d+):(\d+)\s*(AM|PM|CH|SA)?/i);
-    if (!match) return String(t);
-    let hours = parseInt(match[1], 10);
-    const minutes = match[2];
-    const modifier = match[3];
-    if (modifier) {
-      if ((modifier.toUpperCase() === 'PM' || modifier.toUpperCase() === 'CH') && hours < 12) hours += 12;
-      if ((modifier.toUpperCase() === 'AM' || modifier.toUpperCase() === 'SA') && hours === 12) hours = 0;
+    const fallback = `${String(businessHours.openingHour).padStart(2, '0')}:00`;
+    const raw = String(t || '').trim();
+    if (!raw) return fallback;
+
+    // Accept explicit time formats like HH:mm, HH:mm:ss, 9:00 PM
+    const plainTime = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|CH|SA)?$/i);
+    if (plainTime) {
+      let hours = parseInt(plainTime[1], 10);
+      const minutes = parseInt(plainTime[2], 10);
+      const modifier = String(plainTime[3] || '').toUpperCase();
+
+      if (modifier) {
+        if ((modifier === 'PM' || modifier === 'CH') && hours < 12) hours += 12;
+        if ((modifier === 'AM' || modifier === 'SA') && hours === 12) hours = 0;
+      }
+
+      if (Number.isFinite(hours) && Number.isFinite(minutes) && hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+      }
+      return fallback;
     }
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+
+    // Accept ISO datetime and similar formats by parsing Date safely.
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) {
+      return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+    }
+
+    return fallback;
   };
 
   const getStatusColor = (status) => {
     const s = String(status || '').trim().toLowerCase();
     if (s === 'completed' || s === 'done') return '#10b981';
-    if (s === 'booked') return 'rgb(99, 102, 241)';
+    if (s === 'booked' || s === 'confirmed') return 'rgb(99, 102, 241)';
      if (s === 'pending') return '#e8d064';
     return '#94a3b8';
   };
@@ -88,8 +106,19 @@ export default function OwnerAppointmentsPage() {
 
   const toMinutes = (t) => {
     const [h, m] = normalizeTime(t).split(':').map(Number);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return timelineStartMinutes;
     return h * 60 + m;
   };
+
+  const formatDateForDisplay = (value) => {
+    const d = value ? new Date(value) : null;
+    if (!d || Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString();
+  };
+
+  const getStaffEntityId = (staff) => String(
+    staff?.StaffId || staff?.staffId || staff?.id || staff?.UserId || ''
+  );
 
   const isOverlap = (newAppt, existingAppts) => {
     const newStart = toMinutes(newAppt.time);
@@ -139,7 +168,9 @@ export default function OwnerAppointmentsPage() {
         api.get('/api/owner/services'),
       ]);
 
-      const apptData = Array.isArray(apptRes) ? apptRes : apptRes?.appointments || [];
+      const apptData = Array.isArray(apptRes)
+        ? apptRes
+        : (Array.isArray(apptRes?.appointments) ? apptRes.appointments : (Array.isArray(apptRes?.data) ? apptRes.data : []));
       const staffData = Array.isArray(staffRes) ? staffRes : staffRes?.items || staffRes?.staff || [];
       const customerData = Array.isArray(custRes) ? custRes : custRes?.customers || [];
 
@@ -161,7 +192,7 @@ export default function OwnerAppointmentsPage() {
 
       const mapped = apptData.map(a => {
         const customer = customerData.find(c =>
-          String(c.UserId || c.userId || c.id) === String(a.customerUserId || a.customerId)
+          String(c.UserId || c.userId || c.id) === String(a.customerUserId || a.customerId || a.CustomerUserId)
         );
 
         const sIds = Array.isArray(a.serviceIds)
@@ -175,38 +206,34 @@ export default function OwnerAppointmentsPage() {
         const serviceNames = apptServices.map(s => s.Name).join(', ');
 
         let appointmentDate = null;
-        
-        if (a.date && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) {
-          try {
-            appointmentDate = new Date(`${a.date}T00:00:00`);
-            if (!isNaN(appointmentDate.getTime())) {
-              // Successfully parsed
-            } else {
-              appointmentDate = null;
+        const dateCandidates = [a.date, a.BookingDate, a.bookingDate, a.Date];
+        for (const v of dateCandidates) {
+          const text = String(v || '').trim();
+          if (!text) continue;
+
+          if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+            const [yy, mm, dd] = text.split('-').map(Number);
+            const localDate = new Date(yy, mm - 1, dd);
+            if (!Number.isNaN(localDate.getTime())) {
+              appointmentDate = localDate;
+              break;
             }
-          } catch (e) {
-            // continue to next attempt
+          }
+
+          const parsed = new Date(text);
+          if (!Number.isNaN(parsed.getTime())) {
+            appointmentDate = parsed;
+            break;
           }
         }
-        
+
         if (!appointmentDate) {
-          const bookingTimeValue = a.BookingTime || a.time || a.startTime;
-          if (bookingTimeValue) {
-            try {
-              let dt = new Date(bookingTimeValue);
-              if (isNaN(dt.getTime())) {
-                const timeMatch = String(bookingTimeValue).match(/^(\d{1,2}):(\d{2})/);
-                if (timeMatch) {
-                  dt = new Date();
-                  dt.setHours(parseInt(timeMatch[1], 10), parseInt(timeMatch[2], 10), 0, 0);
-                }
-              }
-              
-              if (!isNaN(dt.getTime())) {
-                appointmentDate = dt;
-              }
-            } catch (e) {
-              console.warn(`Appointment ${a.BookingId}: error parsing BookingTime`, e.message);
+          const dateTimeCandidates = [a.BookingTime, a.startTime, a.time, a.StartTime];
+          for (const v of dateTimeCandidates) {
+            const parsed = new Date(String(v || '').trim());
+            if (!Number.isNaN(parsed.getTime())) {
+              appointmentDate = parsed;
+              break;
             }
           }
         }
@@ -215,14 +242,14 @@ export default function OwnerAppointmentsPage() {
           ...a,
           id: a.BookingId || a.id || a.AppointmentId,
           // Normalize ids so the edit form can reliably pre-select values
-          customerUserId: a.customerUserId || a.customerId,
-          staffId: a.staffId || a.StaffId || a.staffID,
+          customerUserId: a.customerUserId || a.customerId || a.CustomerUserId,
+          staffId: a.staffId || a.StaffId || a.staffID || a.StaffIdResolved,
           customer: customer?.Name || customer?.name || 'Unknown Customer',
           service: serviceNames || 'No Service',
           duration: totalDuration || 30,
           date: appointmentDate,
           time: normalizeTime(a.time || a.BookingTime || a.startTime),
-          status: (a.status || a.Status || 'pending').toLowerCase(),
+          status: (a.status || a.Status || a.BookingStatus || 'pending').toLowerCase(),
           serviceIds: sIds,
           // Add price, discount, totalPrice fields
           price: a.price || 0,
@@ -237,9 +264,6 @@ export default function OwnerAppointmentsPage() {
       setCustomers(customerData);
       setServices(flatServices);
       
-      if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) {
-        console.debug(`OwnerAppointments: counts — appts=${mapped.length}, staff=${staffData.length}, customers=${customerData.length}, services=${flatServices.length}`)
-      }
     } catch (err) {
       console.error('FETCH ERROR:', err);
     }
@@ -266,7 +290,7 @@ export default function OwnerAppointmentsPage() {
     if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === 'function') e.nativeEvent.stopImmediatePropagation();
     if (typeof console !== 'undefined' && console.debug) console.debug('OwnerAppointments: handleEditClick', { id: appt?.id, status: appt?.status, eventType: e.type, button: e.button });
     const rawStatus = String(appt?.status || '').trim().toLowerCase();
-    const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'cancelled' : (appt?.status || 'pending');
+    const normalizedStatus = (rawStatus === 'delete' || rawStatus === 'deleted') ? 'cancelled' : (rawStatus === 'booked' ? 'confirmed' : (appt?.status || 'pending'));
     setEditingAppt({ ...appt, status: normalizedStatus });
     const currentIds = Array.isArray(appt.serviceIds) ? appt.serviceIds.map(String) : [];
     setSelectedServiceIds(currentIds);
@@ -351,8 +375,6 @@ export default function OwnerAppointmentsPage() {
       })()
     };
 
-    console.log('[DEBUG FRONTEND] Submitting payload:', payload);
-
     try {
       if (editingAppt) {
         const targetId = editingAppt.id || editingAppt.AppointmentId || editingAppt.BookingId;
@@ -374,9 +396,7 @@ export default function OwnerAppointmentsPage() {
       setPromotionCode('');
       await fetchData();
     } catch (err) {
-      console.error('[DEBUG FRONTEND] Error:', err);
       const errorMessage = err.response?.data?.error || err.message || "Unable to save";
-      // Hiển thị popup toast thay vì alert
       window.dispatchEvent(new CustomEvent('portal:toast', {
         detail: { type: 'error', title: 'Error', message: errorMessage },
       }));
@@ -390,7 +410,7 @@ export default function OwnerAppointmentsPage() {
         // Only filter out appointments that are explicitly marked for deletion with a special flag
         return true;
       })
-      .filter(appt => isSameDay(appt.date || appt.startTime || appt.BookingTime, selectedDate)),
+      .filter(appt => isSameDay(appt.date || appt.BookingDate || appt.startTime || appt.BookingTime, selectedDate)),
     [appointments, selectedDate]
   );
 
@@ -404,7 +424,7 @@ export default function OwnerAppointmentsPage() {
 
   const visibleStaff = useMemo(() => {
     if (selectedStaff === 'all') return staffMembers;
-    return staffMembers.filter(s => String(s.id || s.UserId) === String(selectedStaff));
+    return staffMembers.filter(s => getStaffEntityId(s) === String(selectedStaff));
   }, [staffMembers, selectedStaff]);
 
   const monthDays = useMemo(() => {
@@ -456,7 +476,7 @@ export default function OwnerAppointmentsPage() {
           <select className="staff-filter-select" value={selectedStaff} onChange={(e) => setSelectedStaff(e.target.value)}>
             <option value="all">All</option>
             {staffMembers.map(s => (
-              <option key={s.id || s.UserId} value={s.id || s.UserId}>
+              <option key={getStaffEntityId(s) || String(s.name || s.Name || '')} value={getStaffEntityId(s)}>
                 {s.name || s.Name}
               </option>
             ))}
@@ -496,7 +516,7 @@ export default function OwnerAppointmentsPage() {
           <div className="staff-columns">
             {visibleStaff.map(staff => {
               const staffAppts = filteredAppointments.filter(a => {
-                if (String(a.staffId) !== String(staff.id || staff.UserId)) return false;
+                if (String(a.staffId) !== getStaffEntityId(staff)) return false;
                 const start = toMinutes(a.time);
                 const duration = Number(a.duration) || 30;
                 const end = start + duration;
@@ -505,7 +525,7 @@ export default function OwnerAppointmentsPage() {
               const columns = layoutAppointments(staffAppts);
 
               return (
-                <div key={staff.id || staff.UserId} className="staff-column">
+                <div key={getStaffEntityId(staff)} className="staff-column">
                   <div className="staff-header">{staff.name || staff.Name}</div>
                   <div className="staff-body" style={{ position: 'relative', height: `${timelineHeight}px`, backgroundColor: '#fff', marginTop: '40px' }}>
                     {Array.from({ length: totalTimeSlots }, (_, i) => (
@@ -578,10 +598,10 @@ export default function OwnerAppointmentsPage() {
                 </tr>
               )}
               {listAppointments.map(appt => {
-                const staff = staffMembers.find(s => String(s.id || s.UserId) === String(appt.staffId));
+                const staff = staffMembers.find(s => getStaffEntityId(s) === String(appt.staffId));
                 return (
                   <tr key={appt.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.date ? new Date(appt.date).toLocaleDateString() : (appt.BookingTime ? new Date(appt.BookingTime).toLocaleDateString() : '')}</td>
+                    <td style={{ padding: '8px', verticalAlign: 'middle' }}>{formatDateForDisplay(appt.date || appt.BookingDate || appt.BookingTime)}</td>
                     <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.time}</td>
                     <td style={{ padding: '8px', verticalAlign: 'middle' }}>{staff?.name || staff?.Name || '—'}</td>
                     <td style={{ padding: '8px', verticalAlign: 'middle' }}>{appt.service}</td>
@@ -685,7 +705,7 @@ export default function OwnerAppointmentsPage() {
             <label>Status</label>
             <select name="status" defaultValue={editingAppt?.status || "pending"}>
               <option value="pending">Pending</option>
-              <option value="booked">Booked</option>
+              <option value="confirmed">Confirmed</option>
                 <option value="completed">Completed</option>
                 <option value="cancelled">Cancelled</option>
             </select>
@@ -727,7 +747,7 @@ export default function OwnerAppointmentsPage() {
         open={deleteConfirmOpen}
         title="Confirm delete"
         message="Are you sure you want to delete this appointment?"
-        detail={`Date: ${String(appointmentToDelete?.date || 'N/A')} | Time: ${String(appointmentToDelete?.time || 'N/A')} | Staff: ${String(appointmentToDelete?.staffName || appointmentToDelete?.staff || 'N/A')}`}
+        detail={`Date: ${formatDateForDisplay(appointmentToDelete?.date || appointmentToDelete?.BookingDate || appointmentToDelete?.BookingTime)} | Time: ${String(appointmentToDelete?.time || 'N/A')} | Staff: ${String(appointmentToDelete?.staffName || appointmentToDelete?.staff || 'N/A')}`}
         onClose={cancelDelete}
         onConfirm={confirmDelete}
         confirming={Boolean(deletingAppointmentId)}

@@ -1,37 +1,112 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { IoCheckmarkCircleOutline, IoReceiptOutline, IoTimeOutline } from 'react-icons/io5'
 import { useCustomerOrders } from '../hooks/useCustomerCommerce'
 import PortalModal from '../components/Layout portal/PortalModal.jsx'
 import { api } from '../lib/api'
-import { formatVnd } from '../lib/currency'
 import '../styles/HistoryPage.css'
 
-function statusClass(status) {
+function normalizeOrderStatus(status) {
   const value = String(status || '').toLowerCase()
-  if (value === 'pending') return 'pending'
-  if (value.includes('cancel') || value.includes('failed')) return 'cancelled'
-  if (value.includes('paid') || value.includes('deliver') || value.includes('complete')) return 'success'
+  if (value.includes('cancel')) return 'CANCELLED'
+  if (value.includes('deliver') || value.includes('complete')) return 'COMPLETED'
+  if (value.includes('ship')) return 'SHIPPING'
+  if (value.includes('process') || value.includes('confirm')) return 'PROCESSING'
+  if (value.includes('pending') || value.includes('await')) return 'PENDING'
+  return String(status || 'PENDING').trim().toUpperCase()
+}
+
+function normalizePaymentStatus(status) {
+  const value = String(status || '').toLowerCase()
+  if (value.includes('paid') || value.includes('success')) return 'PAID'
+  if (value.includes('fail') || value.includes('cancel') || value.includes('refund')) return 'FAILED'
+  if (value.includes('pending') || value.includes('await')) return 'PENDING'
+  return String(status || 'PENDING').trim().toUpperCase()
+}
+
+function normalizePaymentMethod(method) {
+  const value = String(method || '').trim().toLowerCase()
+  if (!value) return 'COD'
+  if (value === 'cod' || value === 'cash') return 'COD'
+  if (value === 'online' || value === 'vnpay') return 'ONLINE'
+  return value.toUpperCase()
+}
+
+function statusClass(status, kind = 'order') {
+  if (kind === 'paymentMethod') return 'confirmed'
+
+  if (kind === 'paymentStatus') {
+    if (status === 'PAID') return 'completed'
+    if (status === 'FAILED') return 'cancelled'
+    if (status === 'PENDING') return 'pending'
+    return 'default'
+  }
+
+  if (status === 'PENDING') return 'pending'
+  if (status === 'PROCESSING' || status === 'SHIPPING') return 'confirmed'
+  if (status === 'COMPLETED') return 'completed'
+  if (status === 'CANCELLED') return 'cancelled'
   return 'default'
 }
 
+function paymentMethodClass(method) {
+  const normalized = normalizePaymentMethod(method)
+  if (normalized === 'COD') return 'payment-method-cod'
+  if (normalized === 'ONLINE') return 'payment-method-online'
+  return 'payment-method-default'
+}
+
 function isPending(status) {
-  return String(status || '').trim().toLowerCase() === 'pending'
+  return normalizeOrderStatus(status) === 'PENDING'
 }
 
 function isCompleted(status) {
-  const value = String(status || '').trim().toLowerCase()
-  return value.includes('complete') || value.includes('deliver') || value === 'paid' || value === 'confirmed'
+  return normalizeOrderStatus(status) === 'COMPLETED'
+}
+
+function isProcessing(status) {
+  return normalizeOrderStatus(status) === 'PROCESSING'
+}
+
+function isShipping(status) {
+  return normalizeOrderStatus(status) === 'SHIPPING'
 }
 
 function fmtMoney(value) {
-  return formatVnd(value || 0)
+  return new Intl.NumberFormat('vi-VN', {
+    style: 'currency',
+    currency: 'VND',
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0))
+}
+
+function cleanProductName(item) {
+  const name = String(item?.ProductName || '').trim()
+  const variantName = String(item?.VariantName || '').trim()
+  const baseName = name || String(item?.ProductId || 'Product')
+  const invalidNames = ['null', 'undefined', 'nan', 'n/a', '-']
+  const normalizedBase = String(baseName || '').trim()
+  const safeBase = invalidNames.includes(normalizedBase.toLowerCase())
+    ? String(item?.ProductId || 'Product')
+    : normalizedBase
+
+  if (!variantName) return safeBase
+  if (safeBase.toLowerCase().includes(variantName.toLowerCase())) {
+    return safeBase
+  }
+  return `${safeBase} - ${variantName}`
 }
 
 const OrderHistoryPage = () => {
   const navigate = useNavigate()
-  const { orders, loading, error, cancelOrder, refresh } = useCustomerOrders(100)
+  const { orders, loading, error, cancelOrder, completeOrder, reorderOrder, refresh } = useCustomerOrders(100)
+  const [activeFilter, setActiveFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('newest')
   const [cancellingId, setCancellingId] = useState('')
+  const [completingId, setCompletingId] = useState('')
+  const [reorderingId, setReorderingId] = useState('')
+  const [detailModalOpen, setDetailModalOpen] = useState(false)
+  const [detailOrder, setDetailOrder] = useState(null)
   const [ratingModalOpen, setRatingModalOpen] = useState(false)
   const [orderToRate, setOrderToRate] = useState(null)
   const [rating, setRating] = useState(5)
@@ -61,6 +136,26 @@ const OrderHistoryPage = () => {
       alert(err?.message || 'Failed to cancel order')
     } finally {
       setCancellingId('')
+    }
+  }
+
+  const handleComplete = async (order) => {
+    const orderId = order?.OrderId
+    if (!orderId) return
+    if (!isShipping(order.Status)) {
+      alert('Only shipping orders can be marked as completed')
+      return
+    }
+    if (!window.confirm('Confirm you have received this order?')) return
+
+    try {
+      setCompletingId(orderId)
+      await completeOrder(orderId)
+      alert('Order marked as completed')
+    } catch (err) {
+      alert(err?.message || 'Failed to confirm receipt')
+    } finally {
+      setCompletingId('')
     }
   }
 
@@ -159,123 +254,295 @@ const OrderHistoryPage = () => {
     }
   }
 
+  const openDetailModal = (order) => {
+    setDetailOrder(order)
+    setDetailModalOpen(true)
+  }
+
+  const closeDetailModal = () => {
+    setDetailModalOpen(false)
+    setDetailOrder(null)
+  }
+
+  const handleReorder = async (order) => {
+    const orderId = String(order?.OrderId || '').trim()
+    if (!orderId) return
+
+    try {
+      setReorderingId(orderId)
+      const result = await reorderOrder(orderId)
+      const added = Number(result?.AddedItemCount || 0)
+      const failed = Number(result?.FailedItemCount || 0)
+      setResultTitle('Successfully!')
+      if (failed > 0) {
+        setResultMessage(`Added ${added} item(s) to cart, ${failed} item(s) failed. Please review your cart.`)
+      } else {
+        setResultMessage(`Added ${added} item(s) to cart. You can review and checkout now.`)
+      }
+      setResultModalOpen(true)
+    } catch (err) {
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to reorder items')
+      setResultModalOpen(true)
+    } finally {
+      setReorderingId('')
+    }
+  }
+
+  const visibleOrders = useMemo(() => {
+    const filtered = (Array.isArray(orders) ? orders : []).filter((order) => {
+      const normalized = normalizeOrderStatus(order?.Status)
+      if (activeFilter === 'pending') return normalized === 'PENDING' || normalized === 'PROCESSING' || normalized === 'SHIPPING'
+      if (activeFilter === 'shipping') return normalized === 'SHIPPING'
+      if (activeFilter === 'completed') return normalized === 'COMPLETED'
+      if (activeFilter === 'cancelled') return normalized === 'CANCELLED'
+      return true
+    })
+
+    const sorted = [...filtered]
+    if (sortBy === 'oldest') {
+      sorted.sort((a, b) => new Date(a?.CreatedAt || 0).getTime() - new Date(b?.CreatedAt || 0).getTime())
+    } else if (sortBy === 'totalHigh') {
+      sorted.sort((a, b) => Number(b?.Total || 0) - Number(a?.Total || 0))
+    } else if (sortBy === 'totalLow') {
+      sorted.sort((a, b) => Number(a?.Total || 0) - Number(b?.Total || 0))
+    } else {
+      sorted.sort((a, b) => new Date(b?.CreatedAt || 0).getTime() - new Date(a?.CreatedAt || 0).getTime())
+    }
+
+    return sorted
+  }, [orders, activeFilter, sortBy])
+
   if (loading) return <div className="loading">Loading orders...</div>
   if (error) return <div className="error">{error}</div>
 
   return (
-    <section className="history-page">
+    <section className="history-page order-history-page">
       <div className="history-container">
         <div className="history-head">
           <div>
             <h2 className="history-title"><IoReceiptOutline /> Order History</h2>
-            <p className="history-subtitle">Compact view of all orders with quick actions.</p>
+            <p className="history-subtitle">Track all retail orders with clear status and quick actions.</p>
           </div>
-          <button className="history-link-btn" onClick={() => navigate('/profile')}>Back To Profile</button>
+          <button className="history-link-btn history-link-btn-primary" onClick={() => navigate('/cart')}>Go To Cart</button>
         </div>
 
-        {orders.length === 0 ? (
+        <div className="history-controls">
+          <div className="history-filter-tabs" role="tablist" aria-label="Order filter">
+            <button
+              type="button"
+              className={`history-filter-tab ${activeFilter === 'all' ? 'is-active' : ''}`}
+              onClick={() => setActiveFilter('all')}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              className={`history-filter-tab ${activeFilter === 'pending' ? 'is-active' : ''}`}
+              onClick={() => setActiveFilter('pending')}
+            >
+              Pending
+            </button>
+            <button
+              type="button"
+              className={`history-filter-tab ${activeFilter === 'shipping' ? 'is-active' : ''}`}
+              onClick={() => setActiveFilter('shipping')}
+            >
+              Shipping
+            </button>
+            <button
+              type="button"
+              className={`history-filter-tab ${activeFilter === 'completed' ? 'is-active' : ''}`}
+              onClick={() => setActiveFilter('completed')}
+            >
+              Completed
+            </button>
+            <button
+              type="button"
+              className={`history-filter-tab ${activeFilter === 'cancelled' ? 'is-active' : ''}`}
+              onClick={() => setActiveFilter('cancelled')}
+            >
+              Cancelled
+            </button>
+          </div>
+
+          <label className="history-sort-box">
+            Sort
+            <select className="history-sort-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="totalHigh">Total: High to Low</option>
+              <option value="totalLow">Total: Low to High</option>
+            </select>
+          </label>
+        </div>
+
+        {visibleOrders.length === 0 ? (
           <div className="history-empty">No orders found.</div>
         ) : (
           <div className="history-list">
-            {orders.map((order) => (
-              <article key={order.OrderId} className="history-card">
-                <header className="history-card-head">
-                  <div>
-                    <h3 className="history-card-id">{order.OrderId}</h3>
-                    <p className="history-card-time"><IoTimeOutline /> {new Date(order.CreatedAt).toLocaleString()}</p>
-                  </div>
-                  <div className="history-badges">
-                    <span className={`history-badge ${statusClass(order.Status)}`}><IoCheckmarkCircleOutline /> {order.Status}</span>
-                    <span className={`history-badge ${statusClass(order.PaymentStatus)}`}>{order.PaymentStatus}</span>
-                  </div>
-                </header>
+            {visibleOrders.map((order) => {
+              const items = Array.isArray(order.Items) ? order.Items : []
+              const orderStatus = normalizeOrderStatus(order.Status)
+              const paymentMethod = normalizePaymentMethod(order.PaymentMethod)
 
-                <div className="history-grid">
-                  <div className="history-kv">
-                    <p className="history-kv-label">Payment Method</p>
-                    <p className="history-kv-value">{order.PaymentMethod}</p>
-                  </div>
-                  <div className="history-kv">
-                    <p className="history-kv-label">Items</p>
-                    <p className="history-kv-value">{Array.isArray(order.Items) ? order.Items.length : 0}</p>
-                  </div>
-                  <div className="history-kv">
-                    <p className="history-kv-label">Discount</p>
-                    <p className="history-kv-value">- {fmtMoney(order.DiscountAmount || 0)}</p>
-                  </div>
-                  <div className="history-kv">
-                    <p className="history-kv-label">Total</p>
-                    <p className="history-kv-value">{fmtMoney(order.Total || 0)}</p>
-                  </div>
-                </div>
+              return (
+                <article key={order.OrderId} className="history-card">
+                  <header className="history-card-head">
+                    <div>
+                      <h3 className="history-card-id">{order.OrderId}</h3>
+                      <p className="history-card-time"><IoTimeOutline /> {new Date(order.CreatedAt).toLocaleString('vi-VN')}</p>
+                    </div>
+                    <div className="history-badges">
+                      <span className={`history-badge ${statusClass(orderStatus)}`}>
+                        <IoCheckmarkCircleOutline /> Order: {orderStatus}
+                      </span>
+                      <span className={`history-badge ${statusClass(paymentMethod, 'paymentMethod')} ${paymentMethodClass(paymentMethod)}`}>
+                        Method: {paymentMethod}
+                      </span>
+                    </div>
+                  </header>
 
-                <div className="history-items">
-                  <table className="history-items-table order-items-table">
-                    <thead>
-                      <tr>
-                        <th>Product</th>
-                        <th>Qty</th>
-                        <th>Price</th>
-                        <th>Discount</th>
-                        <th>Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(Array.isArray(order.Items) ? order.Items : []).length === 0 ? (
+                  <div className="history-summary-row">
+                    <span>{items.length} items</span>
+                    <span>Subtotal: {fmtMoney(order.Subtotal || 0)}</span>
+                    <span>Discount: - {fmtMoney(order.DiscountAmount || 0)}</span>
+                    <strong>Total: {fmtMoney(order.Total || 0)}</strong>
+                  </div>
+
+                  <div className="history-items">
+                    <table className="history-items-table order-items-table">
+                      <thead>
                         <tr>
-                          <td colSpan={5}>No product details found for this order.</td>
+                          <th>Product</th>
+                          <th>Qty</th>
+                          <th>Unit Price</th>
+                          <th>Line Total</th>
                         </tr>
-                      ) : (
-                        (Array.isArray(order.Items) ? order.Items : []).map((item) => (
-                          <tr key={item.OrderItemId}>
-                            <td>{item.ProductName}</td>
-                            <td>{Number(item.Quantity || 0)}</td>
-                            <td>{fmtMoney(item.Price || 0)}</td>
-                            <td>{formatVnd(0)}</td>
-                            <td>{fmtMoney(item.LineTotal || 0)}</td>
+                      </thead>
+                      <tbody>
+                        {items.length === 0 ? (
+                          <tr>
+                            <td colSpan={4}>No product details found for this order.</td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                    <tfoot>
-                      <tr>
-                        <td colSpan={3}><strong>Subtotal</strong></td>
-                        <td><strong>- {fmtMoney(order.DiscountAmount || 0)}</strong></td>
-                        <td><strong>{fmtMoney(order.Subtotal || 0)}</strong></td>
-                      </tr>
-                      <tr>
-                        <td colSpan={4}><strong>Total</strong></td>
-                        <td><strong>{fmtMoney(order.Total || 0)}</strong></td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                        ) : (
+                          items.map((item) => (
+                            <tr key={item.OrderItemId}>
+                              <td>{cleanProductName(item)}</td>
+                              <td>{Number(item.Quantity || 0)}</td>
+                              <td>{fmtMoney(item.Price || 0)}</td>
+                              <td>{fmtMoney(item.LineTotal || 0)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
 
-                {isPending(order.Status) ? (
-                  <div className="history-actions">
+                  <div className="history-actions history-actions-wrap">
                     <button
-                      className="history-cancel-btn"
-                      disabled={cancellingId === order.OrderId}
-                      onClick={() => handleCancel(order)}
+                      className="history-link-btn history-action-secondary"
+                      onClick={() => openDetailModal(order)}
                     >
-                      {cancellingId === order.OrderId ? 'Cancelling...' : 'Cancel Order'}
+                      View Detail
                     </button>
+                    {isCompleted(order.Status) ? (
+                      <button
+                        className="history-link-btn history-action-secondary"
+                        onClick={() => handleReorder(order)}
+                        disabled={reorderingId === order.OrderId || items.length === 0}
+                      >
+                        {reorderingId === order.OrderId ? 'Reordering...' : 'Reorder'}
+                      </button>
+                    ) : null}
+
+                    {isPending(order.Status) ? (
+                      <button
+                        className="history-cancel-btn"
+                        disabled={cancellingId === order.OrderId}
+                        onClick={() => handleCancel(order)}
+                      >
+                        {cancellingId === order.OrderId ? 'Cancelling...' : 'Cancel Order'}
+                      </button>
+                    ) : null}
+
+                    {isProcessing(order.Status) ? (
+                      <button
+                        className="history-link-btn history-action-secondary"
+                        type="button"
+                        disabled
+                      >
+                        Waiting
+                      </button>
+                    ) : null}
+
+                    {isShipping(order.Status) ? (
+                      <button
+                        className="history-link-btn history-link-btn-primary"
+                        onClick={() => handleComplete(order)}
+                        disabled={completingId === order.OrderId}
+                      >
+                        {completingId === order.OrderId ? 'Confirming...' : 'Confirm Received'}
+                      </button>
+                    ) : null}
+
+                    {isCompleted(order.Status) ? (
+                      <button
+                        className="history-rate-btn"
+                        onClick={() => openRatingModal(order)}
+                      >
+                        {order.IsRated ? 'Review / Override Product' : 'Rate Order'}
+                      </button>
+                    ) : null}
                   </div>
-                ) : isCompleted(order.Status) ? (
-                  <div className="history-actions">
-                    <button
-                      className="history-rate-btn"
-                      onClick={() => openRatingModal(order)}
-                    >
-                      {order.IsRated ? 'Review / Override Product' : 'Rate Order'}
-                    </button>
-                  </div>
-                ) : null}
-              </article>
-            ))}
+                </article>
+              )
+            })}
           </div>
         )}
       </div>
+
+      <PortalModal
+        open={detailModalOpen}
+        title="Order Detail"
+        onClose={closeDetailModal}
+      >
+        {detailOrder ? (
+          <div className="order-detail-modal">
+            <div className="order-detail-meta">
+              <p><strong>Order ID:</strong> {detailOrder.OrderId}</p>
+              <p><strong>Created:</strong> {new Date(detailOrder.CreatedAt).toLocaleString('vi-VN')}</p>
+              <p><strong>Payment Status:</strong> {normalizePaymentStatus(detailOrder.PaymentStatus)}</p>
+            </div>
+
+            <div className="order-detail-statusRow">
+              <span className={`history-badge ${statusClass(normalizeOrderStatus(detailOrder.Status))}`}>
+                Order: {normalizeOrderStatus(detailOrder.Status)}
+              </span>
+              <span className={`history-badge ${statusClass(normalizePaymentMethod(detailOrder.PaymentMethod), 'paymentMethod')} ${paymentMethodClass(detailOrder.PaymentMethod)}`}>
+                Method: {normalizePaymentMethod(detailOrder.PaymentMethod)}
+              </span>
+            </div>
+
+            <div className="order-detail-items">
+              {(Array.isArray(detailOrder.Items) ? detailOrder.Items : []).map((item) => (
+                <div key={item.OrderItemId} className="order-detail-itemRow">
+                  <div className="order-detail-itemInfo">
+                    <p className="order-detail-itemName">{cleanProductName(item)}</p>
+                    <p className="order-detail-itemQty">Qty: {Number(item.Quantity || 0)}</p>
+                  </div>
+                  <p className="order-detail-itemPrice">{fmtMoney(item.LineTotal || 0)}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="order-detail-totalRow">
+              <span>Total</span>
+              <strong>{fmtMoney(detailOrder.Total || 0)}</strong>
+            </div>
+          </div>
+        ) : null}
+      </PortalModal>
 
       <PortalModal
         open={ratingModalOpen}
@@ -336,7 +603,7 @@ const OrderHistoryPage = () => {
               >
                 {(Array.isArray(orderToRate?.Items) ? orderToRate.Items : []).map((item) => (
                   <option key={item.OrderItemId} value={item.OrderItemId}>
-                    {item.ProductName || item.ProductId || item.OrderItemId}
+                    {cleanProductName(item)}
                   </option>
                 ))}
               </select>

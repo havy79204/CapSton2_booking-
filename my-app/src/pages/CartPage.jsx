@@ -10,6 +10,7 @@ import {
 import { useCustomerCart } from '../hooks/useCustomerCommerce'
 import { useCustomerContext } from '../hooks/useCustomerCommerce'
 import { formatVnd } from '../lib/currency'
+import { resolveApiImageUrl } from '../lib/api'
 import '../styles/CartPage.css'
 
 const CartPage = () => {
@@ -32,6 +33,7 @@ const CartPage = () => {
   const [paymentMethod, setPaymentMethod] = useState('cod')
   const [selectedMap, setSelectedMap] = useState({})
   const [orderSuccess, setOrderSuccess] = useState(null)
+  const [quantityInputs, setQuantityInputs] = useState({})
 
   const cartItems = useMemo(() => (Array.isArray(cart?.Items) ? cart.Items : []), [cart])
   const defaultAddress = cart?.DefaultAddress || null
@@ -82,9 +84,8 @@ const CartPage = () => {
     return Math.min(subtotal, value)
   }, [appliedPromotion, subtotal])
 
-  const tax = (subtotal - discount) * 0.1
   const shipping = selectedCount > 0 ? 30000 : 0
-  const total = subtotal - discount + tax + shipping
+  const total = subtotal - discount + shipping
 
   const applyPromotionCode = () => {
     const code = String(giftCode || '').trim()
@@ -140,15 +141,112 @@ const CartPage = () => {
     setSelectedMap((prev) => ({ ...prev, [itemId]: !prev[itemId] }))
   }
 
+  const handleVariantChange = async (item, nextVariantId) => {
+    const variantId = String(nextVariantId || '').trim()
+    if (!variantId || variantId === String(item.VariantId || '').trim()) return
+
+    const targetVariant = Array.isArray(item?.VariantOptions)
+      ? item.VariantOptions.find((variant) => String(variant?.VariantId || '').trim() === variantId)
+      : null
+
+    if (targetVariant && Number(targetVariant.Stock || 0) <= 0) {
+      alert('Selected variant is out of stock')
+      return
+    }
+
+    try {
+      await updateItem(item.CartItemId, {
+        quantity: Number(item.Quantity || 1),
+        variantId,
+      })
+    } catch (err) {
+      alert(err?.message || 'Failed to update variant')
+    }
+  }
+
   const changeQuantity = async (item, change) => {
-    const nextQuantity = Number(item.Quantity || 0) + change
+    const cartItemId = String(item.CartItemId || '')
+    const rawDraft = quantityInputs[cartItemId]
+    const baseQuantity = Number.parseInt(String(rawDraft ?? item.Quantity ?? 0), 10)
+    const currentQuantity = Number.isFinite(baseQuantity) ? baseQuantity : Number(item.Quantity || 0)
+    const nextQuantity = currentQuantity + change
     if (nextQuantity < 1) return
+
+    const maxStock = Number(item.Stock || 0)
+    if (maxStock > 0 && nextQuantity > maxStock) return
 
     try {
       await updateItem(item.CartItemId, { quantity: nextQuantity })
+      setQuantityInputs((prev) => {
+        const next = { ...prev }
+        delete next[cartItemId]
+        return next
+      })
     } catch (err) {
       alert(err?.message || 'Failed to update quantity')
+      setQuantityInputs((prev) => ({
+        ...prev,
+        [cartItemId]: String(item.Quantity || 1),
+      }))
     }
+  }
+
+  const handleQuantityInputChange = (item, rawValue) => {
+    const cartItemId = String(item.CartItemId || '')
+    const digitsOnly = String(rawValue || '').replace(/\D/g, '')
+    setQuantityInputs((prev) => ({
+      ...prev,
+      [cartItemId]: digitsOnly,
+    }))
+  }
+
+  const commitQuantityInput = async (item, rawValue) => {
+    const cartItemId = String(item.CartItemId || '')
+    const sourceValue = rawValue ?? quantityInputs[cartItemId] ?? String(item.Quantity || '')
+    const parsed = Number.parseInt(String(sourceValue || '').trim(), 10)
+
+    if (!Number.isFinite(parsed)) {
+      setQuantityInputs((prev) => {
+        const next = { ...prev }
+        delete next[cartItemId]
+        return next
+      })
+      return
+    }
+
+    const maxStock = Number(item.Stock || 0)
+    const bounded = Math.max(1, maxStock > 0 ? Math.min(parsed, maxStock) : parsed)
+
+    if (bounded === Number(item.Quantity || 0)) {
+      setQuantityInputs((prev) => {
+        const next = { ...prev }
+        delete next[cartItemId]
+        return next
+      })
+      return
+    }
+
+    try {
+      await updateItem(item.CartItemId, { quantity: bounded })
+      setQuantityInputs((prev) => {
+        const next = { ...prev }
+        delete next[cartItemId]
+        return next
+      })
+    } catch (err) {
+      alert(err?.message || 'Failed to update quantity')
+      setQuantityInputs((prev) => ({
+        ...prev,
+        [cartItemId]: String(item.Quantity || 1),
+      }))
+    }
+  }
+
+  const getQuantityDisplayValue = (item) => {
+    const cartItemId = String(item.CartItemId || '')
+    const draft = quantityInputs[cartItemId]
+    if (draft !== undefined) return draft
+    return String(item.Quantity || 1)
   }
 
   const handleRemoveItem = async (item) => {
@@ -236,8 +334,8 @@ const CartPage = () => {
                 <h3>Shipping Address</h3>
               </div>
               <div className="shipping-main-row">
-                <p>{defaultAddress?.FullName || customer?.Name || customer?.UserId || 'Customer'}</p>
-                <p>{defaultAddress?.PhoneNumber || customer?.Phone || '-'}</p>
+                <p>{defaultAddress?.FullName || customer?.Name || 'Customer'}</p>
+                <p>{defaultAddress?.PhoneNumber || '-'}</p>
               </div>
               <div className="shipping-bottom-row">
                 <span className="address-badge">Address</span>
@@ -277,11 +375,40 @@ const CartPage = () => {
                       />
 
                       <div className="cart-item-image">
-                        {item.ImageUrl ? <img src={item.ImageUrl} alt={item.Name} /> : <div className="service-image-placeholder" />}
+                        {resolveApiImageUrl(item.ImageUrl) ? (
+                          <img src={resolveApiImageUrl(item.ImageUrl)} alt={item.Name} />
+                        ) : (
+                          <div className="service-image-placeholder" />
+                        )}
                       </div>
 
                       <div className="cart-item-info">
                         <h4>{item.Name}</h4>
+                        {Array.isArray(item.VariantOptions) && item.VariantOptions.length > 0 ? (
+                          <div className="cart-item-variant-row">
+                            <select
+                              className="cart-item-variant-select"
+                              value={item.VariantId || ''}
+                              onChange={(event) => handleVariantChange(item, event.target.value)}
+                              disabled={busy || !item.VariantOptions.some((variant) => Number(variant?.Stock || 0) > 0)}
+                            >
+                              <option value="" disabled>
+                                Select variant
+                              </option>
+                              {item.VariantOptions.map((variant) => (
+                                <option
+                                  key={variant.VariantId}
+                                  value={variant.VariantId}
+                                  disabled={Number(variant?.Stock || 0) <= 0}
+                                >
+                                  {variant.VariantName}{Number(variant?.Stock || 0) <= 0 ? ' (Out of stock)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : item.VariantName ? (
+                          <p className="cart-item-variant">Variant: {item.VariantName}</p>
+                        ) : null}
                         <p>{item.Description}</p>
                         <strong>{formatVnd(item.Price || 0)}</strong>
                       </div>
@@ -289,10 +416,36 @@ const CartPage = () => {
                       <div className="cart-item-actions">
                         <div className="qty-controller">
                           <button onClick={() => changeQuantity(item, -1)} disabled={busy || Number(item.Quantity || 0) <= 1}>-</button>
-                          <span>{item.Quantity}</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            aria-label={`Quantity for ${item.Name}`}
+                            value={getQuantityDisplayValue(item)}
+                            onChange={(event) => handleQuantityInputChange(item, event.target.value)}
+                            onBlur={(event) => commitQuantityInput(item, event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault()
+                                event.currentTarget.blur()
+                              }
+                              if (event.key === 'Escape') {
+                                setQuantityInputs((prev) => {
+                                  const next = { ...prev }
+                                  delete next[String(item.CartItemId || '')]
+                                  return next
+                                })
+                              }
+                            }}
+                            disabled={busy}
+                          />
                           <button
                             onClick={() => changeQuantity(item, 1)}
-                            disabled={busy || Number(item.Quantity || 0) >= Number(item.Stock || 0)}
+                            disabled={
+                              busy
+                              || (Number(item.Stock || 0) > 0
+                                && Number.parseInt(getQuantityDisplayValue(item) || String(item.Quantity || 0), 10) >= Number(item.Stock || 0))
+                            }
                           >
                             +
                           </button>
@@ -319,7 +472,6 @@ const CartPage = () => {
             <div className="summary-rows">
               <div className="summary-row"><span>Subtotal</span><span>{formatVnd(subtotal)}</span></div>
               <div className="summary-row discount"><span>Discount</span><span>- {formatVnd(discount)}</span></div>
-              <div className="summary-row discount"><span>Tax (10%)</span><span>{formatVnd(tax)}</span></div>
               <div className="summary-row"><span>Shipping</span><span>{formatVnd(shipping)}</span></div>
             </div>
 

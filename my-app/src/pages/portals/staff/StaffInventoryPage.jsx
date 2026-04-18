@@ -29,10 +29,6 @@ export default function StaffInventoryPage() {
   const [page, setPage] = useState(1)
   const pageSize = 10
 
-  const [open, setOpen] = useState(false)
-  const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState({ name: '', category: '', quantity: '', unit: '', minStock: '', status: 'active', notes: '' })
-
   async function load() {
     setLoading(true)
     setError('')
@@ -84,36 +80,9 @@ export default function StaffInventoryPage() {
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(filtered.length / pageSize)), [filtered.length])
 
-  function close() {
-    setOpen(false)
-    setEditing(null)
-    setError('')
-  }
-
   function openEdit(item) {
-    setEditing(item)
-    setError('')
-    setForm({
-      name: item?.name || '',
-      category: item?.category || '',
-      quantity: String(item?.stock ?? ''),
-      unit: item?.unit || '',
-      minStock: String(item?.minQty ?? ''),
-      status: item?.status || 'active',
-      notes: item?.notes || '',
-    })
-    setOpen(true)
-  }
-
-  function onSubmit(e) {
-    e.preventDefault()
-    setError('Staff can only view inventory, not edit')
-    return
-  }
-
-  function onDelete(item) {
-    setError('Staff can only view inventory, not delete')
-    return
+    const itemName = String(item?.name || '').trim() || 'this item'
+    setError(`View only mode: ${itemName}`)
   }
 
   return (

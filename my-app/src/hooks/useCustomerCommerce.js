@@ -1,6 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../lib/api'
+
+const CUSTOMER_CART_UPDATED_EVENT = 'customer:cart-updated'
+
+function emitCartUpdated(cart) {
+
+  if (typeof window === 'undefined') return
+
+  window.dispatchEvent(
+
+    new CustomEvent(CUSTOMER_CART_UPDATED_EVENT, {
+
+      detail: { cart: cart || null },
+
+    })
+
+  )
+
+}
 
 
 
@@ -19,24 +37,26 @@ export function useCustomerContext() {
   const [loading, setLoading] = useState(true)
 
   const [error, setError] = useState(null)
+  const hasFetchedRef = useRef(false)
+  const isRefreshingRef = useRef(false)
 
 
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ force = false } = {}) => {
+    if (!force && hasFetchedRef.current) return null
+    if (isRefreshingRef.current) return null
 
     try {
+      isRefreshingRef.current = true
 
       setLoading(true)
 
       setError(null)
 
-      console.log('[DEBUG] useCustomerContext: Calling /api/customer/context')
-
       const data = await api.get('/api/customer/context')
 
-      console.log('[DEBUG] useCustomerContext: Received data:', data)
-
       setContext(data)
+      hasFetchedRef.current = true
 
       return data
 
@@ -47,6 +67,7 @@ export function useCustomerContext() {
       throw err
 
     } finally {
+      isRefreshingRef.current = false
 
       setLoading(false)
 
@@ -77,6 +98,8 @@ export function useCustomerStaff(serviceIds = [], selectedDate = '') {
   const [loading, setLoading] = useState(true)
 
   const [error, setError] = useState(null)
+  const lastRequestKeyRef = useRef('')
+  const inFlightRequestKeyRef = useRef('')
 
 
 
@@ -90,17 +113,20 @@ export function useCustomerStaff(serviceIds = [], selectedDate = '') {
 
   }, [serviceIds])
 
+  const requestKey = useMemo(() => `${selectedDate}::${normalizedServiceIds.join(',')}`, [normalizedServiceIds, selectedDate])
 
 
-  const refresh = useCallback(async () => {
 
+  const refresh = useCallback(async ({ force = false } = {}) => {
+    if (!force && requestKey && lastRequestKeyRef.current === requestKey) return null
+    if (requestKey && inFlightRequestKeyRef.current === requestKey) return null
+
+
+      inFlightRequestKeyRef.current = requestKey
     try {
 
       setLoading(true)
-
       setError(null)
-
-      console.log('[DEBUG] useCustomerStaff: Starting request with', { normalizedServiceIds, selectedDate })
 
       
 
@@ -118,18 +144,13 @@ export function useCustomerStaff(serviceIds = [], selectedDate = '') {
 
       }
 
-      // Add cache-busting timestamp
-      queryParams.append('_t', Date.now())
-
       const queryString = queryParams.toString() ? `?${queryParams.toString()}` : ''
-
-      console.log('[DEBUG] useCustomerStaff: Request URL', `/api/customer/staff${queryString}`)
 
       
 
       const data = await api.get(`/api/customer/staff${queryString}`)
 
-      console.log('[DEBUG] useCustomerStaff: Received data', data)
+      lastRequestKeyRef.current = requestKey
 
       setStaffs(Array.isArray(data) ? data : [])
 
@@ -137,37 +158,28 @@ export function useCustomerStaff(serviceIds = [], selectedDate = '') {
 
     } catch (err) {
 
-      console.error('[DEBUG] useCustomerStaff: Error', err)
-
       setError(toMessage(err, 'Failed to load staff list'))
 
       throw err
 
     } finally {
+      if (inFlightRequestKeyRef.current === requestKey) {
+        inFlightRequestKeyRef.current = ''
+      }
 
       setLoading(false)
 
     }
 
-  }, [normalizedServiceIds, selectedDate])
+  }, [normalizedServiceIds, requestKey, selectedDate])
 
 
-
-  // Debounce refresh to avoid too many API calls
 
   useEffect(() => {
 
-    const timeoutId = setTimeout(() => {
+    refresh().catch(() => {})
 
-      refresh().catch(() => {})
-
-    }, 300) // 300ms debounce
-
-
-
-    return () => clearTimeout(timeoutId)
-
-  }, [refresh])
+  }, [refresh, requestKey])
 
 
 
@@ -329,7 +341,27 @@ export function useCustomerOrders(limit = 20) {
 
 
 
-  return { orders, loading, error, refresh, cancelOrder }
+  const reorderOrder = useCallback(async (orderId) => {
+
+    const result = await api.post(`/api/customer/orders/${orderId}/reorder`, {})
+
+    return result
+
+  }, [])
+
+  const completeOrder = useCallback(async (orderId) => {
+
+    const completed = await api.post(`/api/customer/orders/${orderId}/complete`, {})
+
+    await refresh().catch(() => {})
+
+    return completed
+
+  }, [refresh])
+
+
+
+  return { orders, loading, error, refresh, cancelOrder, completeOrder, reorderOrder }
 
 }
 
@@ -497,6 +529,8 @@ export function useCustomerCart() {
 
       setCart(data)
 
+      emitCartUpdated(data)
+
       return data
 
     } catch (err) {
@@ -526,6 +560,8 @@ export function useCustomerCart() {
       const data = await fn()
 
       setCart(data)
+
+      emitCartUpdated(data)
 
       return data
 
@@ -612,6 +648,26 @@ export function useCustomerCart() {
     refresh().catch(() => {})
 
   }, [refresh])
+
+  useEffect(() => {
+
+    const onCartUpdated = (event) => {
+
+      const nextCart = event?.detail?.cart
+
+      if (nextCart && typeof nextCart === 'object') {
+
+        setCart(nextCart)
+
+      }
+
+    }
+
+    window.addEventListener(CUSTOMER_CART_UPDATED_EVENT, onCartUpdated)
+
+    return () => window.removeEventListener(CUSTOMER_CART_UPDATED_EVENT, onCartUpdated)
+
+  }, [])
 
 
 

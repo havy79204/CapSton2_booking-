@@ -11,6 +11,16 @@ function getActor(req) {
   }
 }
 
+function ensureOwnerOrAdmin(req) {
+  const rawRole = req?.user?.roleKey
+  const roleNum = Number(rawRole)
+  const roleText = String(rawRole || '').trim().toLowerCase()
+  if (roleNum === 1 || roleText === '1' || roleText === 'owner' || roleText === 'admin') return
+  const err = new Error('Owner/Admin access required')
+  err.status = 403
+  throw err
+}
+
 const getRetailProducts = asyncHandler(async (req, res) => {
   const opts = req.query || {}
   const data = await retailService.listRetailProducts(opts)
@@ -162,6 +172,27 @@ const putRetailOrder = asyncHandler(async (req, res) => {
   res.json({ ok: true, data })
 })
 
+const patchRetailOrderProcess = asyncHandler(async (req, res) => {
+  ensureOwnerOrAdmin(req)
+  const { orderId } = req.params || {}
+  const data = await retailService.transitionRetailOrderStatus(orderId, 'PROCESSING', { actor: getActor(req) })
+  res.json({ ok: true, data })
+})
+
+const patchRetailOrderShip = asyncHandler(async (req, res) => {
+  ensureOwnerOrAdmin(req)
+  const { orderId } = req.params || {}
+  const data = await retailService.transitionRetailOrderStatus(orderId, 'SHIPPING', { actor: getActor(req) })
+  res.json({ ok: true, data })
+})
+
+const patchRetailOrderCancel = asyncHandler(async (req, res) => {
+  ensureOwnerOrAdmin(req)
+  const { orderId } = req.params || {}
+  const data = await retailService.transitionRetailOrderStatus(orderId, 'CANCELLED', { actor: getActor(req) })
+  res.json({ ok: true, data })
+})
+
 const deleteRetailOrder = asyncHandler(async (req, res) => {
   const { orderId } = req.params || {}
   if (!orderId) {
@@ -191,5 +222,8 @@ module.exports = {
   postRetailOrder,
   getRetailOrder,
   putRetailOrder,
+  patchRetailOrderProcess,
+  patchRetailOrderShip,
+  patchRetailOrderCancel,
   deleteRetailOrder,
 }
