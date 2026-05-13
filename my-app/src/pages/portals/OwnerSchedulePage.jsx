@@ -61,6 +61,71 @@ function parseTimeToMinutes(value) {
   return Number(m[1]) * 60 + Number(m[2])
 }
 
+function normalizeTimeToken(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+
+  const asMinutes = parseTimeToMinutes(raw)
+  if (asMinutes !== null) return minutesToTimeString(asMinutes)
+
+  const asHour = Number(raw)
+  if (Number.isFinite(asHour) && asHour >= 0 && asHour <= 23) {
+    return minutesToTimeString(Math.trunc(asHour) * 60)
+  }
+
+  return ''
+}
+
+function normalizeScheduleEndTime(value) {
+  const normalized = normalizeTimeToken(value)
+  if (!normalized) return ''
+  return normalized === '12:00' ? '13:00' : normalized
+}
+
+function resolveShiftKeywordRange(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (!normalized) return null
+
+  if (normalized.includes('morning') || normalized.includes('sáng') || normalized.includes('sang')) {
+    return { start: '08:00', end: '13:00' }
+  }
+  if (normalized.includes('afternoon') || normalized.includes('chiều') || normalized.includes('chieu')) {
+    return { start: '13:00', end: '16:00' }
+  }
+  if (normalized.includes('evening') || normalized.includes('tối') || normalized.includes('toi')) {
+    return { start: '16:00', end: '20:00' }
+  }
+  if (normalized.includes('full') || normalized.includes('all day') || normalized.includes('cả ngày') || normalized.includes('ca ngay')) {
+    return { start: '08:00', end: '20:00' }
+  }
+
+  return null
+}
+
+function extractShiftRange(value, fallbackStart = '', fallbackEnd = '') {
+  const text = String(value || '').trim()
+  const rangeMatch = text.match(/(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/)
+  if (rangeMatch) {
+    const start = normalizeTimeToken(rangeMatch[1])
+    const end = normalizeScheduleEndTime(rangeMatch[2])
+    if (start && end) return { start, end }
+  }
+
+  const fromKeyword = resolveShiftKeywordRange(text)
+  if (fromKeyword) return fromKeyword
+
+  const start = normalizeTimeToken(fallbackStart)
+  const end = normalizeScheduleEndTime(fallbackEnd)
+  if (start && end) return { start, end }
+
+  return null
+}
+
+function formatShiftRangeLabel(range) {
+  if (!range?.start || !range?.end) return ''
+  return `${range.start} - ${normalizeScheduleEndTime(range.end)}`
+}
+
 function parseHourFromSetting(value, fallback) {
   const minutes = parseTimeToMinutes(value)
   if (minutes === null) return fallback
@@ -90,6 +155,18 @@ function minutesToTimeString(minutes) {
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+function normalizeShiftSuggestion(option) {
+  const start = normalizeTimeToken(option?.start)
+  const end = normalizeScheduleEndTime(option?.end)
+  if (!start || !end) return null
+  return {
+    ...option,
+    start,
+    end,
+    label: `${start} - ${end}`,
+  }
 }
 
 function parseScheduleQueryState(search) {
@@ -130,26 +207,31 @@ function ShiftPill({ label, onClick }) {
   let note = ''
   let status = 'normal'
   let startText = ''
+  let endText = ''
   if (typeof raw === 'object') {
     display = raw.Label || raw.label || raw.time || String(raw)
     note = raw.Note || raw.note || ''
     status = raw.Status || raw.status || 'normal'
-    startText = (display || '').split('-')[0]?.trim()
+    startText = raw.StartHour || raw.startHour || (display || '').split('-')[0]?.trim()
+    endText = raw.EndHour || raw.endHour || (display || '').split('-')[1]?.trim()
     // If this is an approved leave record, render as Off (red) regardless of time
     const sLower = String(status || '').toLowerCase()
     if (sLower === 'approved' || sLower === 'pending') {
       // show Off as friendly label, keep original display in tooltip
-      startText = ''
       display = raw.Label || raw.label || 'Off'
     }
   } else {
     display = String(raw)
     startText = display.split('-')[0]?.trim()
+    endText = display.split('-')[1]?.trim()
     if (/REQUESTED/i.test(display) || /leave-request/i.test(display)) status = 'Pending'
     if (/\bLEAVE\b/i.test(display) && !/REQUESTED/i.test(display)) status = 'Approved'
   }
 
-  const startMinutes = parseTimeToMinutes(startText)
+  const range = extractShiftRange(display, startText, endText)
+  const rangeLabel = formatShiftRangeLabel(range)
+
+  const startMinutes = parseTimeToMinutes(range?.start || startText)
   const startHour = startMinutes === null ? (Number(startText) || 8) : Math.floor(startMinutes / 60)
   const toneClass = startHour < 12 ? 'portal-shiftPill--morning' : startHour < 16 ? 'portal-shiftPill--afternoon' : 'portal-shiftPill--evening'
 
@@ -164,24 +246,9 @@ function ShiftPill({ label, onClick }) {
     approved ? 'bg-red-600 text-white cursor-not-allowed' : '',
   ].join(' ')
 
-  // Map numeric startHour to friendly Vietnamese shift label when display looks like a time range
-  let friendlyLabel = display
+  let friendlyLabel = rangeLabel || display
   if (isLeave) {
-    const normalizedDisplay = String(display || '').toLowerCase()
-    let shiftRange = ''
-    if (normalizedDisplay.includes('sáng') || normalizedDisplay.includes('sang') || normalizedDisplay.includes('morning')) {
-      shiftRange = '8-12'
-    } else if (normalizedDisplay.includes('chiều') || normalizedDisplay.includes('chieu') || normalizedDisplay.includes('afternoon')) {
-      shiftRange = '13-16'
-    } else if (normalizedDisplay.includes('tối') || normalizedDisplay.includes('toi') || normalizedDisplay.includes('evening')) {
-      shiftRange = '16-20'
-    }
-
-    friendlyLabel = shiftRange ? `${display} ${shiftRange} Off` : `${display} Off`
-  } else if (/^\d{1,2}:\d{2}/.test(display) || /^\d{1,2}\b/.test(display)) {
-  if (startHour < 12) friendlyLabel = 'Morning'
-  else if (startHour < 16) friendlyLabel = 'Afternoon'
-  else friendlyLabel = 'Evening'
+    friendlyLabel = rangeLabel ? `${rangeLabel} Off` : `${display} Off`
   }
 
   return (
@@ -203,7 +270,15 @@ function detectShiftMeta(item) {
     const availabilityId = item.AvailabilityId || item.availabilityId || (item.meta && (item.meta.availabilityId || item.meta.AvailabilityId))
     const startHour = item.StartHour || (item.meta && item.meta.startHour) || ''
     const endHour = item.EndHour || (item.meta && item.meta.endHour) || ''
-    return { status: item.Status || item.status || 'normal', label: item.Label || item.label || item.time || String(item), note: item.Note || item.note || '', availabilityId, startHour, endHour }
+    const fallbackRange = formatShiftRangeLabel(extractShiftRange('', startHour, endHour))
+    return {
+      status: item.Status || item.status || 'normal',
+      label: item.Label || item.label || item.time || fallbackRange || String(item),
+      note: item.Note || item.note || '',
+      availabilityId,
+      startHour,
+      endHour,
+    }
   }
   const s = String(item)
   if (/REQUESTED/i.test(s) || /leave-request/i.test(s)) return { status: 'Pending', label: s, note: s }
@@ -288,7 +363,7 @@ export default function OwnerSchedulePage() {
     const safeEndMin = endMin > startMin ? endMin : Math.min(startMin + 60, startMin + defaultShiftDuration)
     return {
       start: minutesToTimeString(startMin),
-      end: minutesToTimeString(safeEndMin),
+      end: normalizeScheduleEndTime(minutesToTimeString(safeEndMin)),
     }
   }
 
@@ -352,20 +427,20 @@ export default function OwnerSchedulePage() {
   const quickSelectOptions = useMemo(() => {
     const quickStart = selectedBusinessHours.openingHour * 60
     const quickEnd = selectedBusinessHours.closingHour * 60
-    const quickDuration = Math.max(60, quickEnd - quickStart)
-    const segment = Math.max(60, Math.round((quickDuration / 3) / 30) * 30)
-    const firstStart = quickStart
-    const firstEnd = Math.min(firstStart + segment, quickEnd)
-    const secondStart = firstEnd
-    const secondEnd = Math.min(secondStart + segment, quickEnd)
-    const thirdStart = secondEnd
-    const thirdEnd = quickEnd
+    const firstStart = Math.max(quickStart, 8 * 60)
+    const firstEnd = Math.min(quickEnd, 12 * 60)
+    const secondStart = Math.max(quickStart, 13 * 60)
+    const secondEnd = Math.min(quickEnd, 16 * 60)
+    const thirdStart = Math.max(quickStart, 16 * 60)
+    const thirdEnd = Math.min(quickEnd, 20 * 60)
 
     return [
-      { label: 'Morning', start: minutesToTimeString(firstStart), end: minutesToTimeString(firstEnd) },
-      { label: 'Afternoon', start: minutesToTimeString(secondStart), end: minutesToTimeString(secondEnd) },
-      { label: 'Evening', start: minutesToTimeString(thirdStart), end: minutesToTimeString(thirdEnd) },
-    ].filter((opt) => parseTimeToMinutes(opt.start) < parseTimeToMinutes(opt.end))
+      { label: `${minutesToTimeString(firstStart)} - ${minutesToTimeString(firstEnd)}`, start: minutesToTimeString(firstStart), end: minutesToTimeString(firstEnd) },
+      { label: `${minutesToTimeString(secondStart)} - ${minutesToTimeString(secondEnd)}`, start: minutesToTimeString(secondStart), end: minutesToTimeString(secondEnd) },
+      { label: `${minutesToTimeString(thirdStart)} - ${minutesToTimeString(thirdEnd)}`, start: minutesToTimeString(thirdStart), end: minutesToTimeString(thirdEnd) },
+    ]
+      .map((opt) => normalizeShiftSuggestion(opt))
+      .filter((opt) => opt && parseTimeToMinutes(opt.start) < parseTimeToMinutes(opt.end))
   }, [selectedBusinessHours])
 
   const columnsWithIso = useMemo(() => {
@@ -526,7 +601,7 @@ export default function OwnerSchedulePage() {
         date: normalizedDate,
         oldDate: form.oldDate,
         start: form.start,
-        end: form.end,
+        end: normalizeScheduleEndTime(form.end),
         oldLabel: form.oldLabel,
       })
       await refreshSchedule(weekStart)
@@ -671,7 +746,7 @@ export default function OwnerSchedulePage() {
                   value={form.end}
                   onChange={(e) => {
                     if (formError) setFormError('')
-                    setForm((p) => ({ ...p, end: e.target.value }))
+                    setForm((p) => ({ ...p, end: normalizeScheduleEndTime(e.target.value) }))
                   }}
                 />
               </div>
@@ -689,7 +764,7 @@ export default function OwnerSchedulePage() {
                     type="button"
                     className={`portal-quickSelectBtn ${form.start === opt.start && form.end === opt.end ? 'is-active' : ''}`}
                     onClick={() => {
-                      setForm((p) => ({ ...p, start: opt.start, end: opt.end }))
+                      setForm((p) => ({ ...p, start: opt.start, end: normalizeScheduleEndTime(opt.end) }))
                     }}
                   >
                     {opt.label}
@@ -888,14 +963,14 @@ export default function OwnerSchedulePage() {
                                     label={label}
                                     onClick={() => {
                                       if (String(meta.status).toLowerCase() === 'approved') return
-                                      const parts = (meta.label || '').split('-').map((t) => t.trim())
+                                      const selectedRange = extractShiftRange(meta.label, meta.startHour, meta.endHour)
                                       const defaults = getDefaultShiftWindow(c.isoDate || initialTodayIso)
                                       setForm({
                                         staffId: s.staffId,
                                         date: c.isoDate || '',
                                         oldDate: c.isoDate || '',
-                                        start: parts[0] || defaults.start,
-                                        end: parts[1] || defaults.end,
+                                        start: selectedRange?.start || defaults.start,
+                                        end: selectedRange?.end || defaults.end,
                                         isEditing: true,
                                         oldLabel: meta.label,
                                         availabilityId: meta.availabilityId || '',
@@ -992,7 +1067,7 @@ export default function OwnerSchedulePage() {
                         date: dayColumnIsoDate || initialTodayIso,
                         oldDate: '',
                         start: minutesToTimeString(safeStart),
-                        end: minutesToTimeString(safeEnd),
+                        end: normalizeScheduleEndTime(minutesToTimeString(safeEnd)),
                         isEditing: false,
                           oldLabel: '',
                           availabilityId: '',
@@ -1002,9 +1077,9 @@ export default function OwnerSchedulePage() {
                   >
                     {s.dayShifts.map((label, idx) => {
                       const meta = detectShiftMeta(label)
-                      const parts = (meta.label || '').split('-').map((t) => t.trim())
-                      const startMin = parseTimeToMinutes(parts[0])
-                      const endMin = parseTimeToMinutes(parts[1])
+                      const selectedRange = extractShiftRange(meta.label, meta.startHour, meta.endHour)
+                      const startMin = parseTimeToMinutes(selectedRange?.start)
+                      const endMin = parseTimeToMinutes(selectedRange?.end)
                       if (startMin === null || endMin === null) return null
                       const leftPercent = ((startMin - TIMELINE_START) / TIMELINE_DURATION) * 100
                       const widthPercent = ((endMin - startMin) / TIMELINE_DURATION) * 100
@@ -1028,8 +1103,8 @@ export default function OwnerSchedulePage() {
                               staffId: s.staffId,
                               date: dayColumnIsoDate,
                               oldDate: dayColumnIsoDate,
-                              start: parts[0],
-                              end: parts[1],
+                              start: selectedRange?.start || '',
+                              end: selectedRange?.end || '',
                               isEditing: true,
                               oldLabel: meta.label,
                               availabilityId: meta.availabilityId || '',
@@ -1040,7 +1115,7 @@ export default function OwnerSchedulePage() {
                         >
                           {approved ? 'Time Off' : (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                              {meta.label}
+                              {selectedRange ? formatShiftRangeLabel(selectedRange) : meta.label}
                               {pending ? <span style={{ fontSize: 12 }} aria-hidden>⚠️</span> : null}
                             </span>
                           )}

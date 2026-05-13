@@ -50,6 +50,22 @@ function requireAuth(req, res, next) {
   }
 }
 
+function optionalAuth(req, _res, next) {
+  const token = extractBearerToken(req)
+  if (!token) return next()
+
+  try {
+    const payload = jwt.verify(token, env.auth.jwtSecret)
+    req.user = payload
+    const maybeId = payload?.sub || payload?.userId || payload?.UserId || payload?.id || payload?.uid || null
+    req.userId = maybeId !== undefined && maybeId !== null ? String(maybeId) : null
+  } catch (_err) {
+    // Ignore invalid tokens for public routes.
+  }
+
+  return next()
+}
+
 function normalizeRoleKey(value) {
   if (value === undefined || value === null) return NaN
 
@@ -118,8 +134,35 @@ function requireOwner(req, res, next) {
   }
 }
 
+function requireCustomer(req, res, next) {
+  const token = extractBearerToken(req)
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Missing Authorization token' })
+    return
+  }
+
+  try {
+    const payload = jwt.verify(token, env.auth.jwtSecret)
+    req.user = payload
+    const maybeId = payload?.sub || payload?.userId || payload?.UserId || payload?.id || payload?.uid || null
+    req.userId = maybeId !== undefined && maybeId !== null ? String(maybeId) : null
+
+    const roleKey = normalizeRoleKey(payload?.roleKey)
+    if (roleKey !== 3) {
+      res.status(403).json({ ok: false, error: 'Customer access required' })
+      return
+    }
+
+    next()
+  } catch (err) {
+    res.status(401).json({ ok: false, error: 'Invalid or expired token' })
+  }
+}
+
 module.exports = {
   requireAuth,
+  optionalAuth,
   requireStaff,
   requireOwner,
+  requireCustomer,
 }

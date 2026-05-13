@@ -349,19 +349,29 @@ export function useCustomerOrders(limit = 20) {
 
   }, [])
 
-  const completeOrder = useCallback(async (orderId) => {
+  const confirmReceivedOrder = useCallback(async (orderId) => {
 
-    const completed = await api.post(`/api/customer/orders/${orderId}/complete`, {})
+    const confirmed = await api.post(`/api/customer/orders/${orderId}/complete`, {})
 
     await refresh().catch(() => {})
 
-    return completed
+    return confirmed
 
   }, [refresh])
 
 
 
-  return { orders, loading, error, refresh, cancelOrder, completeOrder, reorderOrder }
+  return {
+    orders,
+    loading,
+    error,
+    refresh,
+    cancelOrder,
+    confirmReceivedOrder,
+    // Backward compatibility for existing callers.
+    completeOrder: confirmReceivedOrder,
+    reorderOrder,
+  }
 
 }
 

@@ -94,6 +94,19 @@ function rankFeaturedItems(list = [], type = 'product') {
   });
 }
 
+function sortByRankScore(list = [], type = 'product') {
+  const source = Array.isArray(list) ? list : []
+  if (!source.length) return []
+  const hasRank = source.some((item) => Number.isFinite(Number(item?.RankScore)))
+  if (!hasRank) return rankFeaturedItems(source, type)
+
+  return [...source].sort((a, b) => {
+    const diff = Number(b?.RankScore || 0) - Number(a?.RankScore || 0)
+    if (diff !== 0) return diff
+    return String(a?.Name || '').localeCompare(String(b?.Name || ''))
+  })
+}
+
 const HeroSection = () => {
   const handleNavigation = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -119,7 +132,7 @@ const HeroSection = () => {
 const ServicesSection = () => {
   const { services: apiServices, loading, error } = useServices();
   const [visibleServicesCount, setVisibleServicesCount] = useState(INITIAL_PREVIEW_ITEMS);
-  const services = useMemo(() => rankFeaturedItems(apiServices, 'service'), [apiServices]);
+  const services = useMemo(() => sortByRankScore(apiServices, 'service'), [apiServices]);
 
   if (loading) {
     return <div className="loading">Loading services...</div>;
@@ -206,7 +219,7 @@ const ProductsSection = () => {
   const [visibleProductsCount, setVisibleProductsCount] = useState(INITIAL_PREVIEW_ITEMS);
   const [cartModalOpen, setCartModalOpen] = useState(false);
   const [cartMessage, setCartMessage] = useState('');
-  const products = useMemo(() => rankFeaturedItems(apiProducts, 'product'), [apiProducts]);
+  const products = useMemo(() => sortByRankScore(apiProducts, 'product'), [apiProducts]);
 
   const handleAddToCart = async (productId) => {
     try {
@@ -305,7 +318,7 @@ const ProductsSection = () => {
                   <h3>{product.Name}</h3>
                   <p>{product.Description}</p>
                   <div className="product-footer">
-                    <span className="price">{formatVnd(product.Price || 0)}</span>
+                    <span className="price">{formatVnd(product.DisplayPrice ?? product.Price ?? 0)}</span>
                     <span className="product-stock">{product.Stock} in stock</span>
                   </div>
                 </div>

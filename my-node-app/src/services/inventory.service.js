@@ -407,6 +407,14 @@ function formatDateOnly(value) {
   return `${y}-${m}-${d}`
 }
 
+function formatDateOnlyForImport(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return null
+  const y = value.getFullYear()
+  const m = String(value.getMonth() + 1).padStart(2, '0')
+  const d = String(value.getDate()).padStart(2, '0')
+  return `${m}-${d}-${y}`
+}
+
 function normalizeBase64Payload(value) {
   const raw = String(value || '').trim()
   if (!raw) return ''
@@ -1080,8 +1088,8 @@ async function importInventoryFromExcel(payload, { actor } = {}) {
 
       const existing = await findExistingItemByName(productName, schema)
       if (!existing) {
-        const importDate = formatDateOnly(receivedDate)
-        const importExpiry = formatDateOnly(expiryDate)
+        const importDate = formatDateOnlyForImport(receivedDate)
+        const importExpiry = formatDateOnlyForImport(expiryDate)
         const effectiveVariant = type === 'retail'
           ? (variant || DEFAULT_RETAIL_VARIANT_NAME)
           : variant
@@ -1151,8 +1159,8 @@ async function importInventoryFromExcel(payload, { actor } = {}) {
         throw new Error(`Existing product type is ${existing.type === 'service' ? 'Supplies' : 'Retail'}, but row type is ${String(valueByCol.Type)}`)
       }
 
-      const importDate = formatDateOnly(receivedDate)
-      const importExpiry = formatDateOnly(expiryDate)
+      const importDate = formatDateOnlyForImport(receivedDate)
+      const importExpiry = formatDateOnlyForImport(expiryDate)
       const effectiveVariant = type === 'retail'
         ? (variant || DEFAULT_RETAIL_VARIANT_NAME)
         : variant
@@ -1886,6 +1894,7 @@ async function createInventoryItem(payload, { actor } = {}) {
           qty: Math.trunc(initialQty),
           supplier: supplier || null,
           importPrice: importPrice ?? null,
+          sellPriceVnd: sellPrice !== null && Number.isFinite(sellPrice) && sellPrice > 0 ? sellPrice : null,
           date: date || null,
           expiryDate: expiryDate || null,
           note: 'Initial stock setup',
@@ -2402,7 +2411,12 @@ async function stockIn(payload, { actor } = {}) {
     await query(
       `UPDATE ProductVariants
        SET Stock = COALESCE(Stock, 0) + @qty,
-         Price = COALESCE(@sellPrice, Price)
+         Price = COALESCE(
+           @sellPrice,
+           NULLIF(TRY_CONVERT(DECIMAL(19,2), Price), 0),
+           (SELECT TOP 1 NULLIF(TRY_CONVERT(DECIMAL(19,2), p.Price), 0) FROM Products p WHERE p.ProductId = @productId),
+           Price
+         )
        WHERE VariantId = @variantId;
 
        UPDATE Products

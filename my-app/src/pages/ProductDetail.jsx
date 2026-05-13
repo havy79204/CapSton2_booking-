@@ -85,8 +85,12 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
     setSelectedImage(index);
   };
 
-  const baseUnitPrice = Number(product.Price || 0);
-  const currentUnitPrice = Number(selectedVariant?.PriceVnd ?? selectedVariant?.SellPriceVnd ?? selectedVariant?.Price ?? baseUnitPrice);
+  const baseUnitPriceRaw = Number(product.DisplayPrice ?? product.Price ?? 0);
+  const baseUnitPrice = Number.isFinite(baseUnitPriceRaw) ? baseUnitPriceRaw : 0;
+  const variantUnitPriceRaw = Number(selectedVariant?.PriceVnd ?? selectedVariant?.SellPriceVnd ?? selectedVariant?.Price);
+  const currentUnitPrice = Number.isFinite(variantUnitPriceRaw) && variantUnitPriceRaw > 0
+    ? variantUnitPriceRaw
+    : baseUnitPrice;
 
   const handleQuantityChange = (change) => {
     const currentQuantity = Number(quantity || 1);
@@ -278,6 +282,9 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
                     {selectedVariant.VariantName}
                   </span>
                 ) : null}
+                <span className="selected-variant-name">
+                  Unit: {formatVnd(currentUnitPrice)}
+                </span>
               </div>
               <div className="product-stock-info">
                 <IoCubeOutline />
@@ -894,7 +901,7 @@ const RelatedProductsSection = ({ products, currentProductId, categoryId }) => {
                           <h3>{product.Name}</h3>
                           <p className="product-brief">{product.Description}</p>
                           <div className="product-footer">
-                            <span className="product-price-small">{formatVnd(product.Price || 0)}</span>
+                            <span className="product-price-small">{formatVnd(product.DisplayPrice ?? product.Price ?? 0)}</span>
                             <span className="product-stock-small">{product.Stock} in stock</span>
                           </div>
                           <button className="view-details-btn-small">

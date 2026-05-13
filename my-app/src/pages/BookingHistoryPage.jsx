@@ -98,6 +98,7 @@ function getStaffName(booking) {
 const BookingHistoryPage = () => {
   const navigate = useNavigate()
   const { bookings, loading, error, cancelBooking, refresh } = useCustomerBookings(100)
+  const completedTabLabel = 'Completed'
   const [activeFilter, setActiveFilter] = useState('all')
   const [cancellingId, setCancellingId] = useState('')
   const [ratingModalOpen, setRatingModalOpen] = useState(false)
@@ -270,7 +271,7 @@ const BookingHistoryPage = () => {
             className={`history-filter-tab ${activeFilter === 'completed' ? 'is-active' : ''}`}
             onClick={() => setActiveFilter('completed')}
           >
-            Completed
+            {completedTabLabel}
           </button>
         </div>
 

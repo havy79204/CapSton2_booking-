@@ -163,6 +163,11 @@ export function useProducts(options = {}) {
             .map((img) => resolveApiImageUrl(img))
             .filter(Boolean)
 
+          const displayPriceRaw = Number(
+            product?.DisplayPrice ?? product?.SellPriceVnd ?? product?.PriceVnd ?? product?.Price ?? 0,
+          )
+          const displayPrice = Number.isFinite(displayPriceRaw) ? displayPriceRaw : 0
+
           const primaryImage = resolveApiImageUrl(product?.ImageUrl) || images[0] || ''
           if (primaryImage && !images.includes(primaryImage)) {
             images.unshift(primaryImage)
@@ -170,6 +175,7 @@ export function useProducts(options = {}) {
 
           return {
             ...product,
+            DisplayPrice: displayPrice,
             ImageUrl: primaryImage,
             Images: images,
           }

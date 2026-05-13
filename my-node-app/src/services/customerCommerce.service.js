@@ -7,6 +7,7 @@ const { getSettingsMap } = require('./settings.service')
 const { upsertPaymentRecord, resolveInvoiceIdForPayment } = require('./paymentPersistence.service')
 const { notifyCustomerEvent, notifyOwnerEvent, scheduleBookingReminders } = require('./notifications.service')
 const { setFrontendOriginForTxnRef } = require('./vnpayFrontendReturnStore.service')
+const retailService = require('./retail.service')
 
 let _ordersChannelColumnPromise = null
 let _reviewImageColumnPromise = null
@@ -19,6 +20,7 @@ const ORDER_STATUSES = {
   PENDING: 'PENDING',
   PROCESSING: 'PROCESSING',
   SHIPPING: 'SHIPPING',
+  CONFIRMED: 'CONFIRMED',
   COMPLETED: 'COMPLETED',
   CANCELLED: 'CANCELLED',
 }
@@ -27,9 +29,11 @@ function normalizeOrderLifecycleStatus(rawStatus) {
   const value = String(rawStatus || '').trim().toLowerCase()
   if (!value) return ORDER_STATUSES.PENDING
   if (value === 'pending' || value === 'c' || value === 'awaiting') return ORDER_STATUSES.PENDING
-  if (value === 'processing' || value === 'confirm' || value === 'confirmed') return ORDER_STATUSES.PROCESSING
+  if (value === 'processing' || value === 'process' || value === 'in process' || value === 'inprocess') return ORDER_STATUSES.PROCESSING
   if (value === 'shipping' || value === 'shipped' || value === 'delivering' || value === 'in transit') return ORDER_STATUSES.SHIPPING
-  if (value === 'completed' || value === 'complete' || value === 'delivered' || value === 'done' || value === 'success' || value === 'paid') return ORDER_STATUSES.COMPLETED
+  if (value === 'delivered') return ORDER_STATUSES.CONFIRMED
+  if (value === 'confirm' || value === 'confirmed' || value === 'customer confirmed') return ORDER_STATUSES.CONFIRMED
+  if (value === 'completed' || value === 'complete' || value === 'done' || value === 'success' || value === 'paid') return ORDER_STATUSES.COMPLETED
   if (value === 'cancelled' || value === 'cancel') return ORDER_STATUSES.CANCELLED
   return ORDER_STATUSES.PENDING
 }
@@ -40,7 +44,8 @@ function canTransitionOrderStatus(from, to) {
   const rules = {
     [ORDER_STATUSES.PENDING]: [ORDER_STATUSES.PROCESSING, ORDER_STATUSES.CANCELLED],
     [ORDER_STATUSES.PROCESSING]: [ORDER_STATUSES.SHIPPING, ORDER_STATUSES.CANCELLED],
-    [ORDER_STATUSES.SHIPPING]: [ORDER_STATUSES.COMPLETED],
+    [ORDER_STATUSES.SHIPPING]: [ORDER_STATUSES.CONFIRMED, ORDER_STATUSES.CANCELLED],
+    [ORDER_STATUSES.CONFIRMED]: [ORDER_STATUSES.COMPLETED],
     [ORDER_STATUSES.COMPLETED]: [],
     [ORDER_STATUSES.CANCELLED]: [],
   }
@@ -211,6 +216,39 @@ function findActivePromotionByCode(settingsMap, rawCode) {
   return null
 }
 
+function normalizeClockTime(value, fallback = '') {
+  const fb = String(fallback || '').trim()
+  const raw = String(value || '').trim()
+  if (!raw) return fb
+
+  const isoTime = raw.match(/T(\d{1,2}):(\d{2})(?::\d{2})?/i)
+  if (isoTime) {
+    const hh = Number(isoTime[1])
+    const mm = Number(isoTime[2])
+    if (Number.isFinite(hh) && Number.isFinite(mm) && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+    }
+  }
+
+  const m = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|SA|CH)?$/i)
+  if (m) {
+    let hh = Number(m[1])
+    const mm = Number(m[2])
+    const marker = String(m[3] || '').toUpperCase()
+
+    if (!Number.isFinite(hh) || !Number.isFinite(mm) || mm < 0 || mm > 59) return fb
+    if (marker === 'PM' || marker === 'CH') {
+      if (hh < 12) hh += 12
+    } else if (marker === 'AM' || marker === 'SA') {
+      if (hh === 12) hh = 0
+    }
+    if (hh < 0 || hh > 23) return fb
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+  }
+
+  return fb
+}
+
 async function countPromotionUsageByUser(userId, promotionCode) {
   const marker = promotionUsageMarker(promotionCode)
   const res = await query(
@@ -241,20 +279,22 @@ function buildBookingSettings(settingsMap, bookingDate = null) {
   const dayOpenKey = dayPrefix ? `Schedule${dayPrefix}OpenTime` : null
   const dayCloseKey = dayPrefix ? `Schedule${dayPrefix}CloseTime` : null
 
-  const openTime = (dayOpenKey && settingsMap?.[dayOpenKey])
+  const openTimeRaw = (dayOpenKey && settingsMap?.[dayOpenKey])
     || settingsMap?.ScheduleOpenTime
     || settingsMap?.SalonOpenTime
     || '08:00'
-  const closeTime = (dayCloseKey && settingsMap?.[dayCloseKey])
+  const closeTimeRaw = (dayCloseKey && settingsMap?.[dayCloseKey])
     || settingsMap?.ScheduleCloseTime
     || settingsMap?.SalonCloseTime
     || '20:00'
+  const openTime = normalizeClockTime(openTimeRaw, '08:00')
+  const closeTime = normalizeClockTime(closeTimeRaw, '20:00')
 
   return {
-    openTime: String(openTime),
-    closeTime: String(closeTime),
-    breakStart: String(settingsMap?.ScheduleBreakStart || '').trim() || null,
-    breakEnd: String(settingsMap?.ScheduleBreakEnd || '').trim() || null,
+    openTime,
+    closeTime,
+    breakStart: normalizeClockTime(settingsMap?.ScheduleBreakStart, '') || null,
+    breakEnd: normalizeClockTime(settingsMap?.ScheduleBreakEnd, '') || null,
     slotMinutes: Math.max(5, toNumber(settingsMap?.BookingSlotMinutes, 30)),
     promotionEnabled: parseBool(settingsMap?.PromotionEnabled, false),
     promotionAllowCustomerApply: parseBool(settingsMap?.PromotionAllowCustomerApply, true),
@@ -262,32 +302,32 @@ function buildBookingSettings(settingsMap, bookingDate = null) {
     promotions: readPromotions(settingsMap),
     weekdays: {
       mon: {
-        openTime: String(settingsMap?.ScheduleMonOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
-        closeTime: String(settingsMap?.ScheduleMonCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+        openTime: normalizeClockTime(settingsMap?.ScheduleMonOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime, '08:00'),
+        closeTime: normalizeClockTime(settingsMap?.ScheduleMonCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime, '20:00'),
       },
       tue: {
-        openTime: String(settingsMap?.ScheduleTueOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
-        closeTime: String(settingsMap?.ScheduleTueCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+        openTime: normalizeClockTime(settingsMap?.ScheduleTueOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime, '08:00'),
+        closeTime: normalizeClockTime(settingsMap?.ScheduleTueCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime, '20:00'),
       },
       wed: {
-        openTime: String(settingsMap?.ScheduleWedOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
-        closeTime: String(settingsMap?.ScheduleWedCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+        openTime: normalizeClockTime(settingsMap?.ScheduleWedOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime, '08:00'),
+        closeTime: normalizeClockTime(settingsMap?.ScheduleWedCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime, '20:00'),
       },
       thu: {
-        openTime: String(settingsMap?.ScheduleThuOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
-        closeTime: String(settingsMap?.ScheduleThuCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+        openTime: normalizeClockTime(settingsMap?.ScheduleThuOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime, '08:00'),
+        closeTime: normalizeClockTime(settingsMap?.ScheduleThuCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime, '20:00'),
       },
       fri: {
-        openTime: String(settingsMap?.ScheduleFriOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
-        closeTime: String(settingsMap?.ScheduleFriCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+        openTime: normalizeClockTime(settingsMap?.ScheduleFriOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime, '08:00'),
+        closeTime: normalizeClockTime(settingsMap?.ScheduleFriCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime, '20:00'),
       },
       sat: {
-        openTime: String(settingsMap?.ScheduleSatOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
-        closeTime: String(settingsMap?.ScheduleSatCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+        openTime: normalizeClockTime(settingsMap?.ScheduleSatOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime, '08:00'),
+        closeTime: normalizeClockTime(settingsMap?.ScheduleSatCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime, '20:00'),
       },
       sun: {
-        openTime: String(settingsMap?.ScheduleSunOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime || '08:00'),
-        closeTime: String(settingsMap?.ScheduleSunCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime || '20:00'),
+        openTime: normalizeClockTime(settingsMap?.ScheduleSunOpenTime || settingsMap?.ScheduleOpenTime || settingsMap?.SalonOpenTime, '08:00'),
+        closeTime: normalizeClockTime(settingsMap?.ScheduleSunCloseTime || settingsMap?.ScheduleCloseTime || settingsMap?.SalonCloseTime, '20:00'),
       },
     },
   }
@@ -381,6 +421,10 @@ async function resolvePromotionIdByCode(rawCode) {
   if (!code) return null
 
   try {
+    const hasPromotionsTable = await tableExists('Promotions')
+    const hasPromotionIdColumn = await columnExists('Promotions', 'PromotionId')
+    if (!hasPromotionsTable || !hasPromotionIdColumn) return null
+
     const hasPromotionCode = await columnExists('Promotions', 'PromotionCode')
     const hasCode = await columnExists('Promotions', 'Code')
     const hasStatus = await columnExists('Promotions', 'Status')
@@ -482,28 +526,34 @@ async function upsertInvoiceSnapshot({
   if (discount > 0 && safePromo) {
     const resolvedPromotionId = await resolvePromotionIdByCode(safePromo)
     if (resolvedPromotionId !== null) {
-      await query(
-        `IF EXISTS (
-           SELECT 1 FROM InvoicePromotions
-           WHERE InvoiceId = @invoiceId AND PromotionId = @promotionId
-         )
-         BEGIN
-           UPDATE InvoicePromotions
-           SET DiscountAmount = @discountAmount
-           WHERE InvoiceId = @invoiceId AND PromotionId = @promotionId;
-         END
-         ELSE
-         BEGIN
-           INSERT INTO InvoicePromotions (Id, InvoiceId, PromotionId, DiscountAmount)
-           VALUES (@id, @invoiceId, @promotionId, @discountAmount);
-         END;`,
-        {
-          id: newId(),
-          invoiceId,
-          promotionId: resolvedPromotionId,
-          discountAmount: discount,
-        },
-      )
+      const hasInvoicePromotionsTable = await tableExists('InvoicePromotions')
+      const hasInvoicePromotionsPromotionId = await columnExists('InvoicePromotions', 'PromotionId')
+      const hasInvoicePromotionsDiscountAmount = await columnExists('InvoicePromotions', 'DiscountAmount')
+
+      if (hasInvoicePromotionsTable && hasInvoicePromotionsPromotionId && hasInvoicePromotionsDiscountAmount) {
+        await query(
+          `IF EXISTS (
+             SELECT 1 FROM InvoicePromotions
+             WHERE InvoiceId = @invoiceId AND PromotionId = @promotionId
+           )
+           BEGIN
+             UPDATE InvoicePromotions
+             SET DiscountAmount = @discountAmount
+             WHERE InvoiceId = @invoiceId AND PromotionId = @promotionId;
+           END
+           ELSE
+           BEGIN
+             INSERT INTO InvoicePromotions (Id, InvoiceId, PromotionId, DiscountAmount)
+             VALUES (@id, @invoiceId, @promotionId, @discountAmount);
+           END;`,
+          {
+            id: newId(),
+            invoiceId,
+            promotionId: resolvedPromotionId,
+            discountAmount: discount,
+          },
+        )
+      }
     } else {
       console.warn(`[invoice] Skip InvoicePromotions link: PromotionId not found for code ${safePromo}`)
     }
@@ -598,6 +648,19 @@ async function getOrderItemVariantColumn() {
   if (_orderItemVariantColumnPromise) return _orderItemVariantColumnPromise
   _orderItemVariantColumnPromise = (async () => {
     if (await columnExists('OrderItems', 'VariantId')) return 'VariantId'
+
+    try {
+      await query(`
+        IF COL_LENGTH('OrderItems', 'VariantId') IS NULL
+        BEGIN
+          ALTER TABLE OrderItems ADD VariantId NVARCHAR(100) NULL;
+        END
+      `)
+    } catch (err) {
+      console.warn('[customerCommerce] Unable to ensure OrderItems.VariantId:', err?.message || err)
+    }
+
+    if (await columnExists('OrderItems', 'VariantId')) return 'VariantId'
     return null
   })()
   return _orderItemVariantColumnPromise
@@ -606,6 +669,20 @@ async function getOrderItemVariantColumn() {
 async function getOrderItemVariantNameColumn() {
   if (_orderItemVariantNameColumnPromise) return _orderItemVariantNameColumnPromise
   _orderItemVariantNameColumnPromise = (async () => {
+    await getOrderItemVariantColumn()
+    if (await columnExists('OrderItems', 'VariantName')) return 'VariantName'
+
+    try {
+      await query(`
+        IF COL_LENGTH('OrderItems', 'VariantName') IS NULL
+        BEGIN
+          ALTER TABLE OrderItems ADD VariantName NVARCHAR(255) NULL;
+        END
+      `)
+    } catch (err) {
+      console.warn('[customerCommerce] Unable to ensure OrderItems.VariantName:', err?.message || err)
+    }
+
     if (await columnExists('OrderItems', 'VariantName')) return 'VariantName'
     return null
   })()
@@ -1075,11 +1152,17 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
 
         if (hasStaffAvailability) {
           const availabilityDateExpr = hasAvailabilityDayIndex
-            ? 'DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE))'
+            ? `(CASE
+                 WHEN TRY_CONVERT(INT, sa.DayIndex) BETWEEN 1 AND 7
+                   THEN DATEADD(DAY, TRY_CONVERT(INT, sa.DayIndex) - 1, CAST(sa.WeekStartDate AS DATE))
+                 WHEN TRY_CONVERT(INT, sa.DayIndex) BETWEEN 0 AND 6
+                   THEN DATEADD(DAY, TRY_CONVERT(INT, sa.DayIndex), CAST(sa.WeekStartDate AS DATE))
+                 ELSE CAST(sa.WeekStartDate AS DATE)
+               END)`
             : 'CAST(sa.WeekStartDate AS DATE)'
           const availabilityDatePredicate = hasAvailabilityDayIndex
             ? `${availabilityDateExpr} = @bookingDate`
-            : '@bookingDate BETWEEN CAST(sa.WeekStartDate AS DATE) AND DATEADD(DAY, 6, CAST(sa.WeekStartDate AS DATE))'
+            : `${availabilityDateExpr} = @bookingDate`
 
           existsParts.push(`EXISTS (
             SELECT 1
@@ -1091,7 +1174,13 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
 
         if (hasStaffShifts) {
           const shiftDateExpr = hasShiftDayIndex
-            ? 'DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE))'
+            ? `(CASE
+                 WHEN TRY_CONVERT(INT, sa.DayIndex) BETWEEN 1 AND 7
+                   THEN DATEADD(DAY, TRY_CONVERT(INT, sa.DayIndex) - 1, CAST(sa.WeekStartDate AS DATE))
+                 WHEN TRY_CONVERT(INT, sa.DayIndex) BETWEEN 0 AND 6
+                   THEN DATEADD(DAY, TRY_CONVERT(INT, sa.DayIndex), CAST(sa.WeekStartDate AS DATE))
+                 ELSE CAST(sa.WeekStartDate AS DATE)
+               END)`
             : 'CAST(sa.WeekStartDate AS DATE)'
 
           existsParts.push(`EXISTS (
@@ -1270,29 +1359,8 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
     }
   }
 
-  // If only date availability filtering caused empty result, fall back to all active staff.
-  if ((res.recordset || []).length === 0 && !staffFilterClause.trim() && availabilityFilterClause.trim()) {
-    const fallbackSqlNoAvailability = `SELECT
-        s.StaffId,
-        s.UserId,
-        ${specialtySelectSql},
-        s.Status AS StaffStatus,
-        u.Name,
-        u.Phone,
-        u.Email,
-        u.AvatarUrl
-     FROM Staff s
-     LEFT JOIN Users u ON u.UserId = s.UserId
-      ${specialtyJoinSql}
-     WHERE (s.Status IS NULL OR LOWER(LTRIM(RTRIM(s.Status))) NOT IN (N'nghỉ', 'inactive', 'off'))
-     ORDER BY u.Name, s.StaffId`
-
-    try {
-      res = await query(fallbackSqlNoAvailability, params)
-    } catch (err) {
-      console.error('[listAvailableStaff] no-availability fallback query error:', err?.message || err)
-    }
-  }
+  // Do not fallback to all staff when a booking date is provided.
+  // Showing unscheduled staff causes booking UI mismatch.
 
   const staffList = (res.recordset || [])
 
@@ -1330,6 +1398,7 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
   // Fetch booked slots and working hours for each staff member if date is provided
   const result = []
   for (const row of staffList) {
+    const shouldUseDefaultWorkingHours = !dateInput
     const staff = {
       StaffId: row.StaffId,
       UserId: row.UserId || '',
@@ -1340,7 +1409,10 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
       AvatarUrl: row.AvatarUrl || null,
       Status: row.StaffStatus || '',
       BookedSlots: [],
-      WorkingHours: defaultWorkingHours,
+      WorkingHours: shouldUseDefaultWorkingHours ? defaultWorkingHours : null,
+      WorkingWindows: shouldUseDefaultWorkingHours && defaultWorkingHours
+        ? [{ startHour: defaultWorkingHours.startHour, endHour: defaultWorkingHours.endHour }]
+        : [],
     }
 
     // Get working hours and booked slots if date is provided
@@ -1351,67 +1423,110 @@ async function listAvailableStaff(serviceIdsInput = [], dateInput = '') {
         if (!Number.isNaN(dateObj.getTime())) {
           const dateIso = toIsoDate(dateObj)
 
-          let shiftRow = null
+          const windows = []
 
-          // Prefer StaffAvailability (used by owner schedule page)
+          const pushWindow = (startText, endText) => {
+            const startMin = parseTimeToMinutes(startText)
+            const endMin = parseTimeToMinutes(endText)
+            if (startMin === null || endMin === null || endMin <= startMin) return
+            windows.push({
+              startMin,
+              endMin,
+              startHour: `${String(Math.floor(startMin / 60)).padStart(2, '0')}:${String(startMin % 60).padStart(2, '0')}`,
+              endHour: `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`,
+            })
+          }
+
+          // Prefer StaffAvailability (owner schedule UI writes here)
           if (hasStaffAvailabilityTable) {
             const availabilityPredicate = hasAvailabilityDayIndex
-              ? 'DATEADD(DAY, ISNULL(TRY_CONVERT(INT, DayIndex), 0), CAST(WeekStartDate AS DATE)) = @dateIso'
-              : '@dateIso BETWEEN CAST(WeekStartDate AS DATE) AND DATEADD(DAY, 6, CAST(WeekStartDate AS DATE))'
+              ? `(CASE
+                   WHEN TRY_CONVERT(INT, DayIndex) BETWEEN 1 AND 7
+                     THEN DATEADD(DAY, TRY_CONVERT(INT, DayIndex) - 1, CAST(WeekStartDate AS DATE))
+                   WHEN TRY_CONVERT(INT, DayIndex) BETWEEN 0 AND 6
+                     THEN DATEADD(DAY, TRY_CONVERT(INT, DayIndex), CAST(WeekStartDate AS DATE))
+                   ELSE CAST(WeekStartDate AS DATE)
+                 END) = @dateIso`
+              : 'CAST(WeekStartDate AS DATE) = @dateIso'
 
             const availRes = await query(
-              `SELECT TOP 1 StartHour, EndHour
+              `SELECT StartHour, EndHour
                FROM StaffAvailability
                WHERE CONVERT(NVARCHAR(100), StaffId) = CONVERT(NVARCHAR(100), @staffId)
-                 AND ${availabilityPredicate}
-               ORDER BY StartHour`,
+                 AND ${availabilityPredicate}`,
               { staffId: row.StaffId, dateIso }
             ).catch(() => ({ recordset: [] }))
 
-            if (availRes.recordset?.length) {
-              shiftRow = availRes.recordset[0]
+            for (const availRow of availRes.recordset || []) {
+              const startText = formatHourValue(availRow.StartHour)
+              const endText = formatHourValue(availRow.EndHour)
+              if (startText && endText) {
+                pushWindow(startText, endText)
+              }
             }
           }
 
-          // Fallback to StaffShifts (legacy schema)
-          if (!shiftRow && hasStaffShiftsTable) {
+          // Fallback to StaffShifts (legacy schema) when availability has no rows.
+          if (windows.length === 0 && hasStaffShiftsTable) {
             const shiftDateExpr = hasShiftDayIndex
-              ? 'DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE))'
+              ? `(CASE
+                   WHEN TRY_CONVERT(INT, sa.DayIndex) BETWEEN 1 AND 7
+                     THEN DATEADD(DAY, TRY_CONVERT(INT, sa.DayIndex) - 1, CAST(sa.WeekStartDate AS DATE))
+                   WHEN TRY_CONVERT(INT, sa.DayIndex) BETWEEN 0 AND 6
+                     THEN DATEADD(DAY, TRY_CONVERT(INT, sa.DayIndex), CAST(sa.WeekStartDate AS DATE))
+                   ELSE CAST(sa.WeekStartDate AS DATE)
+                 END)`
               : 'CAST(sa.WeekStartDate AS DATE)'
 
             const shiftsRes = await query(
-              `SELECT TOP 1 sa.StartHour, sa.EndHour, sa.DurationHours
+              `SELECT sa.StartHour, sa.EndHour, sa.DurationHours
                FROM StaffShifts sa
                WHERE CONVERT(NVARCHAR(100), sa.StaffId) = CONVERT(NVARCHAR(100), @staffId)
-                 AND ${shiftDateExpr} = @dateIso
-               ORDER BY sa.StartHour`,
+                 AND ${shiftDateExpr} = @dateIso`,
               { staffId: row.StaffId, dateIso }
             ).catch(() => ({ recordset: [] }))
 
-            if (shiftsRes.recordset?.length) {
-              shiftRow = shiftsRes.recordset[0]
+            for (const shiftRow of shiftsRes.recordset || []) {
+              const startText = formatHourValue(shiftRow.StartHour)
+              let endText = formatHourValue(shiftRow.EndHour)
+
+              if (!endText && shiftRow.DurationHours !== null && shiftRow.DurationHours !== undefined) {
+                const startMin = parseTimeToMinutes(startText)
+                const durationHour = Number(shiftRow.DurationHours)
+                if (startMin !== null && Number.isFinite(durationHour) && durationHour > 0) {
+                  const endMin = startMin + Math.round(durationHour * 60)
+                  const clampedEnd = Math.max(0, Math.min(23 * 60 + 59, endMin))
+                  endText = `${String(Math.floor(clampedEnd / 60)).padStart(2, '0')}:${String(clampedEnd % 60).padStart(2, '0')}`
+                }
+              }
+
+              if (startText && endText) {
+                pushWindow(startText, endText)
+              }
             }
           }
 
-          if (shiftRow) {
-            const startText = formatHourValue(shiftRow.StartHour)
-            let endText = formatHourValue(shiftRow.EndHour)
-
-            if (!endText && shiftRow.DurationHours !== null && shiftRow.DurationHours !== undefined) {
-              const startMin = parseTimeToMinutes(startText)
-              const durationHour = Number(shiftRow.DurationHours)
-              if (startMin !== null && Number.isFinite(durationHour) && durationHour > 0) {
-                const endMin = startMin + Math.round(durationHour * 60)
-                const clampedEnd = Math.max(0, Math.min(23 * 60 + 59, endMin))
-                endText = `${String(Math.floor(clampedEnd / 60)).padStart(2, '0')}:${String(clampedEnd % 60).padStart(2, '0')}`
+          if (windows.length > 0) {
+            windows.sort((a, b) => a.startMin - b.startMin)
+            const merged = []
+            for (const w of windows) {
+              const last = merged[merged.length - 1]
+              if (!last || w.startMin > last.endMin) {
+                merged.push({ ...w })
+              } else if (w.endMin > last.endMin) {
+                last.endMin = w.endMin
+                last.endHour = `${String(Math.floor(last.endMin / 60)).padStart(2, '0')}:${String(last.endMin % 60).padStart(2, '0')}`
               }
             }
 
-            if (startText && endText) {
-              staff.WorkingHours = {
-                startHour: startText,
-                endHour: endText,
-              }
+            staff.WorkingWindows = merged.map((w) => ({
+              startHour: w.startHour,
+              endHour: w.endHour,
+            }))
+
+            staff.WorkingHours = {
+              startHour: merged[0].startHour,
+              endHour: merged[merged.length - 1].endHour,
             }
           }
         }
@@ -1759,7 +1874,7 @@ async function getCart(userIdInput) {
 async function addCartItem(userIdInput, payload = {}) {
   const userId = requireUserId(userIdInput)
   const productId = String(payload.productId || '').trim()
-  const variantId = String(payload.variantId || payload.VariantId || '').trim()
+  let variantId = String(payload.variantId || payload.VariantId || '').trim()
   const quantity = Math.max(1, Math.trunc(toNumber(payload.quantity, 1)))
 
   if (!productId) {
@@ -1780,6 +1895,29 @@ async function addCartItem(userIdInput, payload = {}) {
     const err = new Error('Product not found')
     err.status = 404
     throw err
+  }
+
+  // If product has variants and caller does not provide one (e.g. add from catalog/home),
+  // auto-pick an in-stock variant so cart item still maps to variant-aware stock.
+  if (!variantId) {
+    const fallbackVariantRes = await query(
+      `SELECT TOP 1
+         pv.VariantId
+       FROM ProductVariants pv
+       OUTER APPLY (
+         SELECT COALESCE(SUM(COALESCE(l.RemainingQty, 0)), 0) AS TotalQty
+         FROM InventoryLots l
+         WHERE l.InventoryItemId = CONCAT('retail_variant_', pv.VariantId)
+       ) vlots
+       WHERE pv.ProductId = @productId
+         AND COALESCE(vlots.TotalQty, COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Stock), 0), 0) > 0
+       ORDER BY COALESCE(vlots.TotalQty, COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Stock), 0), 0) DESC,
+                pv.VariantName ASC,
+                pv.VariantId ASC`,
+      { productId }
+    )
+
+    variantId = String(fallbackVariantRes.recordset?.[0]?.VariantId || '').trim()
   }
 
   const cartVariantColumn = await getCartVariantColumn()
@@ -2099,7 +2237,99 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
     throw err
   }
 
+  const variantCache = new Map()
+  const normalizeText = (value) =>
+    String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+
+  const getProductVariants = async (productId) => {
+    const key = String(productId || '').trim()
+    if (!key) return []
+    if (variantCache.has(key)) return variantCache.get(key)
+
+    if (!(await tableExists('ProductVariants'))) {
+      variantCache.set(key, [])
+      return []
+    }
+
+    const res = await query(
+      `SELECT VariantId, VariantName, Price
+       FROM ProductVariants
+       WHERE ProductId = @productId
+       ORDER BY VariantName, VariantId`,
+      { productId: key }
+    )
+
+    const variants = (res.recordset || []).map((row) => ({
+      variantId: String(row.VariantId || '').trim(),
+      variantName: String(row.VariantName || '').trim(),
+      price: Number(row.Price || 0),
+    })).filter((row) => Boolean(row.variantId))
+
+    variantCache.set(key, variants)
+    return variants
+  }
+
+  const resolveVariantForCheckout = async (item) => {
+    const explicit = String(item?.VariantId || '').trim()
+    if (explicit) {
+      const variants = await getProductVariants(item?.ProductId)
+      if (!variants.length) return { variantId: explicit, variantName: String(item?.VariantName || '').trim() || null }
+      const matched = variants.find((v) => v.variantId === explicit)
+      if (matched) return { variantId: matched.variantId, variantName: matched.variantName || null }
+    }
+
+    const variants = await getProductVariants(item?.ProductId)
+    if (!variants.length) return { variantId: null, variantName: null }
+
+    const byVariantName = normalizeText(item?.VariantName)
+    if (byVariantName) {
+      const exact = variants.find((v) => normalizeText(v.variantName) === byVariantName)
+      if (exact?.variantId) return { variantId: exact.variantId, variantName: exact.variantName || null }
+    }
+
+    const rawProductName = String(item?.Name || '').trim()
+    const suffixFromName = rawProductName.includes('-')
+      ? normalizeText(rawProductName.split('-').slice(1).join('-'))
+      : ''
+    if (suffixFromName) {
+      const exactSuffix = variants.find((v) => normalizeText(v.variantName) === suffixFromName)
+      if (exactSuffix?.variantId) return { variantId: exactSuffix.variantId, variantName: exactSuffix.variantName || null }
+
+      const partialSuffix = variants.find((v) => suffixFromName.includes(normalizeText(v.variantName)))
+      if (partialSuffix?.variantId) return { variantId: partialSuffix.variantId, variantName: partialSuffix.variantName || null }
+    }
+
+    const itemPrice = Number(item?.Price || 0)
+    if (Number.isFinite(itemPrice) && itemPrice > 0) {
+      const byPrice = variants.find((v) => Math.abs(Number(v.price || 0) - itemPrice) < 0.0001)
+      if (byPrice?.variantId) return { variantId: byPrice.variantId, variantName: byPrice.variantName || null }
+    }
+
+    return { variantId: null, variantName: null }
+  }
+
+  const normalizedSelectedItems = []
   for (const item of selectedItems) {
+    const resolved = await resolveVariantForCheckout(item)
+    const productVariants = await getProductVariants(item?.ProductId)
+
+    if (productVariants.length > 0 && !resolved.variantId) {
+      const err = new Error(`Product ${item.Name || item.ProductId} requires a valid variant selection`)
+      err.status = 409
+      throw err
+    }
+
+    normalizedSelectedItems.push({
+      ...item,
+      VariantId: resolved.variantId,
+      VariantName: resolved.variantName,
+    })
+  }
+
+  for (const item of normalizedSelectedItems) {
     let stock = 0
     if (item.VariantId) {
       const stockRes = await query(
@@ -2133,7 +2363,7 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
 
   const ctx = await getCustomerContext(userId)
   const defaultAddress = ctx.defaultAddress
-  const subtotal = selectedItems.reduce((sum, item) => sum + item.LineTotal, 0)
+  const subtotal = normalizedSelectedItems.reduce((sum, item) => sum + item.LineTotal, 0)
 
   const settingsMap = await getSettingsMap()
   const bookingSettings = buildBookingSettings(settingsMap)
@@ -2190,11 +2420,12 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
   const promotionDiscount = calcPromotionDiscountAmount(subtotal, appliedPromotion)
   const discountAmount = Math.max(0, promotionDiscount)
   const netAmount = Math.max(0, subtotal - discountAmount)
-  const shippingAmount = selectedItems.length > 0 ? 3 : 0
+  const shippingAmount = normalizedSelectedItems.length > 0 ? 30000 : 0
   const total = Math.max(0, netAmount + shippingAmount)
 
   const paymentMethod = normalizePaymentMethod(payload.paymentMethod)
   const isOnlinePayment = String(paymentMethod || '').toLowerCase() === 'online'
+  const initialOrderStatus = ORDER_STATUSES.PENDING
   const customerName = String(payload.customerName || defaultAddress?.FullName || ctx.user.Name || '').trim() || null
   const customerPhone = String(payload.customerPhone || defaultAddress?.PhoneNumber || ctx.user.Phone || '').trim() || null
   const addressText = String(
@@ -2258,7 +2489,7 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
      );`,
     {
       userId,
-      status: ORDER_STATUSES.PENDING,
+      status: initialOrderStatus,
       customerName,
       customerPhone,
       customerAddress: addressText,
@@ -2291,7 +2522,7 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
   const orderItemVariantColumn = await getOrderItemVariantColumn()
   const orderItemVariantNameColumn = await getOrderItemVariantNameColumn()
 
-  for (const item of selectedItems) {
+  for (const item of normalizedSelectedItems) {
     const insertColumns = ['OrderItemId', 'OrderId', 'ProductId', 'Quantity', 'Price', 'ProductName']
     const insertValues = ['@orderItemId', '@orderId', '@productId', '@quantity', '@price', '@productName']
 
@@ -2322,7 +2553,7 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
   }
 
   if (!isOnlinePayment) {
-    for (const item of selectedItems) {
+    for (const item of normalizedSelectedItems) {
       await query('DELETE FROM CartItems WHERE CartItemId = @cartItemId', { cartItemId: item.CartItemId })
     }
   }
@@ -2390,8 +2621,6 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
     console.warn('[customerCommerce] Order notify/email failed:', err?.message || err)
   }
 
-  const initialOrderStatus = ORDER_STATUSES.PENDING
-
   return {
     OrderId: orderId,
     Status: initialOrderStatus,
@@ -2404,7 +2633,7 @@ async function checkoutCart(userIdInput, payload = {}, options = {}) {
       Shipping: shippingAmount,
       DiscountAmount: discountAmount,
       Total: total,
-      ItemCount: selectedItems.length,
+      ItemCount: normalizedSelectedItems.length,
     },
   }
 }
@@ -2586,6 +2815,8 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
   const openMinutes = parseTimeToMinutes(bookingSettings.openTime)
   const closeMinutes = parseTimeToMinutes(bookingSettings.closeTime)
   const bookingMinutes = when.getHours() * 60 + when.getMinutes()
+  const bookingDateIso = bookingDate
+    || `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')}`
 
   if (openMinutes === null || closeMinutes === null || openMinutes >= closeMinutes) {
     const err = new Error('Salon schedule is not configured correctly')
@@ -2714,7 +2945,7 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
     
     const bookingStart = when
     const bookingEnd = new Date(bookingStart.getTime() + totalDuration * 60000)
-    const bookingDateStr = bookingStart.toISOString().split('T')[0]
+    const bookingDateStr = bookingDateIso
 
     // Check for overlapping appointments/bookings for this staff
     const conflictRes = await query(
@@ -2789,8 +3020,14 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
           : `(TRY_CONVERT(INT, sa.EndHour) * 60)`
 
         const availabilityDatePredicate = hasStaffAvailabilityDayIndex
-          ? `DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) = @bookingDate`
-          : `@bookingDate BETWEEN CAST(sa.WeekStartDate AS DATE) AND DATEADD(DAY, 6, CAST(sa.WeekStartDate AS DATE))`
+          ? `(CASE
+               WHEN TRY_CONVERT(INT, sa.DayIndex) BETWEEN 1 AND 7
+                 THEN DATEADD(DAY, TRY_CONVERT(INT, sa.DayIndex) - 1, CAST(sa.WeekStartDate AS DATE))
+               WHEN TRY_CONVERT(INT, sa.DayIndex) BETWEEN 0 AND 6
+                 THEN DATEADD(DAY, TRY_CONVERT(INT, sa.DayIndex), CAST(sa.WeekStartDate AS DATE))
+               ELSE CAST(sa.WeekStartDate AS DATE)
+             END) = @bookingDate`
+          : `CAST(sa.WeekStartDate AS DATE) = @bookingDate`
 
         const availRes = await query(
           `SELECT TOP 1 sa.StaffId
@@ -2842,10 +3079,18 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
               : `TRY_CONVERT(INT, sa.[${durationCol}])`)
           : null
 
+        const shiftBookingDateExpr = `CASE
+             WHEN TRY_CONVERT(INT, sa.DayIndex) BETWEEN 1 AND 7
+               THEN DATEADD(DAY, TRY_CONVERT(INT, sa.DayIndex) - 1, CAST(sa.WeekStartDate AS DATE))
+             WHEN TRY_CONVERT(INT, sa.DayIndex) BETWEEN 0 AND 6
+               THEN DATEADD(DAY, TRY_CONVERT(INT, sa.DayIndex), CAST(sa.WeekStartDate AS DATE))
+             ELSE CAST(sa.WeekStartDate AS DATE)
+           END`
+
         const staffAvailSql = `SELECT TOP 1 sa.StaffId
            FROM StaffShifts sa
            WHERE CONVERT(NVARCHAR(100), sa.StaffId) = CONVERT(NVARCHAR(100), @staffId)
-             AND DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) = @bookingDate
+             AND ${shiftBookingDateExpr} = @bookingDate
              AND ${startExpr} <= @bookingHour
              AND (${startExpr}
                   + ISNULL(${durationExpr || '0'},
@@ -2878,21 +3123,98 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
   const promoMarker = appliedPromotion ? promotionUsageMarker(giftCode) : ''
   const notesValue = [rawNotes, promoMarker].filter(Boolean).join('\n')
 
-  await query(
-    `INSERT INTO Bookings (BookingId, CustomerUserId, BookingTime, Status, Notes, CreatedAt)
-     VALUES (@bookingId, @userId, @bookingTime, @status, @notes, SYSUTCDATETIME())`,
-    {
-      bookingId,
-      userId,
-      bookingTime: when,
-      status: isOnlinePayment ? 'awaiting' : 'pending',
-      notes: notesValue || null,
+  const staffCandidatesByService = new Map()
+  const getCandidatesForService = async (serviceId) => {
+    const key = String(serviceId || '').trim()
+    if (!key) return []
+    if (staffCandidatesByService.has(key)) return staffCandidatesByService.get(key)
+    const data = await listAvailableStaff([key], bookingDateIso).catch(() => [])
+    const list = Array.isArray(data) ? data : []
+    staffCandidatesByService.set(key, list)
+    return list
+  }
+
+  const staffHasWindowAndNoConflict = (staff, durationMinutes) => {
+    const windows = Array.isArray(staff?.WorkingWindows) && staff.WorkingWindows.length
+      ? staff.WorkingWindows
+      : (staff?.WorkingHours ? [staff.WorkingHours] : [])
+
+    if (!windows.length) return false
+
+    const bookingStartMin = bookingMinutes
+    const bookingEndMin = bookingStartMin + Math.max(1, Number(durationMinutes || 30))
+
+    const inAnyWindow = windows.some((window) => {
+      const startMin = parseTimeToMinutes(window?.startHour)
+      const endMin = parseTimeToMinutes(window?.endHour)
+      if (startMin === null || endMin === null || endMin <= startMin) return false
+      return bookingStartMin >= startMin && bookingEndMin <= endMin
+    })
+
+    if (!inAnyWindow) return false
+
+    const bookedSlots = Array.isArray(staff?.BookedSlots) ? staff.BookedSlots : []
+    const hasConflict = bookedSlots.some((slot) => {
+      const startMin = parseTimeToMinutes(slot?.startTime)
+      const endMin = parseTimeToMinutes(slot?.endTime)
+      if (startMin === null || endMin === null || endMin <= startMin) return false
+      return startMin < bookingEndMin && endMin > bookingStartMin
+    })
+
+    return !hasConflict
+  }
+
+  const staffCanTakeServiceAtTime = async (staffId, serviceId, durationMinutes) => {
+    const sid = String(staffId || '').trim()
+    const svcId = String(serviceId || '').trim()
+    if (!sid || !svcId) return false
+
+    const candidates = await getCandidatesForService(svcId)
+    const staff = candidates.find((x) => String(x?.StaffId || '').trim() === sid)
+    if (!staff) return false
+    if (!staffHasWindowAndNoConflict(staff, durationMinutes)) return false
+
+    const supported = await staffSupportsService(sid, svcId)
+    return Boolean(supported)
+  }
+
+  const chooseAutoStaffForService = async (serviceId, durationMinutes, excluded = new Set()) => {
+    const svcId = String(serviceId || '').trim()
+    if (!svcId) return null
+
+    const candidates = await getCandidatesForService(svcId)
+    const filtered = []
+
+    for (const candidate of candidates) {
+      const sid = String(candidate?.StaffId || '').trim()
+      if (!sid || excluded.has(sid)) continue
+
+      const canTake = await staffCanTakeServiceAtTime(sid, svcId, durationMinutes)
+      if (!canTake) continue
+
+      const bookedSlots = Array.isArray(candidate?.BookedSlots) ? candidate.BookedSlots : []
+      filtered.push({
+        sid,
+        name: String(candidate?.Name || ''),
+        bookedCount: bookedSlots.length,
+      })
     }
-  )
+
+    if (!filtered.length) return null
+
+    filtered.sort((a, b) => {
+      if (a.bookedCount !== b.bookedCount) return a.bookedCount - b.bookedCount
+      return a.name.localeCompare(b.name)
+    })
+
+    return filtered[0]?.sid || null
+  }
+
+  const plannedAssignments = []
 
   for (const item of normalizedItems) {
     const svcRes = await query(
-      `SELECT TOP 1 ServiceId, Price
+      `SELECT TOP 1 ServiceId, Price, DurationMinutes
        FROM Services
        WHERE ServiceId = @serviceId
          AND ${ACTIVE_SERVICE_WHERE}`,
@@ -2907,40 +3229,62 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
     }
 
     bookingSubtotal += Number(svc.Price || 0) * Number(item.quantity || 0)
+    const itemDurationMinutes = Number(svc.DurationMinutes || 30)
 
     let resolvedStaffId = item.staffId || null
-    if (!resolvedStaffId && !isReturningCustomer) {
-      resolvedStaffId = await getAutoAssignedStaffIdForService(item.serviceId)
-      if (!resolvedStaffId) resolvedStaffId = autoStaffId
-    }
-
-    if (!resolvedStaffId && isReturningCustomer) {
-      const err = new Error('Please choose a specialist for your booking')
-      err.status = 400
-      throw err
-    }
-
     if (resolvedStaffId) {
-      assignedStaffIds.add(String(resolvedStaffId))
-      const supported = await staffSupportsService(resolvedStaffId, item.serviceId)
-      if (!supported) {
-        if (!isReturningCustomer) {
-          const fallbackStaffId = await getAutoAssignedStaffIdForService(item.serviceId)
-          if (fallbackStaffId) {
-            resolvedStaffId = fallbackStaffId
-          }
-        }
+      const canTakeSelected = await staffCanTakeServiceAtTime(resolvedStaffId, item.serviceId, itemDurationMinutes)
+      if (!canTakeSelected) {
+        const err = new Error('The selected specialist is not available for this service at the selected time')
+        err.status = 409
+        throw err
+      }
+    } else {
+      resolvedStaffId = await chooseAutoStaffForService(item.serviceId, itemDurationMinutes)
 
-        const supportedAfterFallback = await staffSupportsService(resolvedStaffId, item.serviceId)
-        if (!supportedAfterFallback) {
-          const err = new Error('Selected specialist does not match the chosen service')
-          err.status = 409
-          throw err
-        }
+      if (!resolvedStaffId) {
+        const fallbackStaffId = await getAutoAssignedStaffIdForService(item.serviceId)
+        const fallbackCanTake = fallbackStaffId
+          ? await staffCanTakeServiceAtTime(fallbackStaffId, item.serviceId, itemDurationMinutes)
+          : false
+        resolvedStaffId = fallbackCanTake ? fallbackStaffId : null
+      }
+
+      if (!resolvedStaffId && autoStaffId) {
+        const globalCanTake = await staffCanTakeServiceAtTime(autoStaffId, item.serviceId, itemDurationMinutes)
+        resolvedStaffId = globalCanTake ? autoStaffId : null
+      }
+
+      if (!resolvedStaffId) {
+        const err = new Error('No available specialist matches this service and time. Please choose another time slot.')
+        err.status = 409
+        throw err
       }
     }
 
-    for (let i = 0; i < item.quantity; i += 1) {
+    assignedStaffIds.add(String(resolvedStaffId))
+    plannedAssignments.push({
+      serviceId: item.serviceId,
+      staffId: resolvedStaffId,
+      quantity: Number(item.quantity || 0),
+      price: Number(svc.Price || 0),
+    })
+  }
+
+  await query(
+    `INSERT INTO Bookings (BookingId, CustomerUserId, BookingTime, Status, Notes, CreatedAt)
+     VALUES (@bookingId, @userId, @bookingTime, @status, @notes, SYSUTCDATETIME())`,
+    {
+      bookingId,
+      userId,
+      bookingTime: when,
+      status: isOnlinePayment ? 'awaiting' : 'pending',
+      notes: notesValue || null,
+    }
+  )
+
+  for (const plan of plannedAssignments) {
+    for (let i = 0; i < plan.quantity; i += 1) {
       await query(
         `INSERT INTO BookingServices (
           BookingServiceId,
@@ -2961,9 +3305,9 @@ async function createBooking(userIdInput, payload = {}, options = {}) {
         {
           bookingServiceId: `BKS-${newId()}`,
           bookingId,
-          serviceId: item.serviceId,
-          staffId: resolvedStaffId,
-          price: Number(svc.Price || 0),
+          serviceId: plan.serviceId,
+          staffId: plan.staffId,
+          price: plan.price,
         }
       )
     }
@@ -3329,10 +3673,14 @@ async function cancelOrder(userIdInput, orderIdInput) {
   }
 
   const currentStatus = normalizeOrderLifecycleStatus(order.Status)
-  if (currentStatus !== ORDER_STATUSES.PENDING) {
-    const err = new Error(`Only pending orders can be cancelled. Current status: ${currentStatus}`)
+  if (currentStatus !== ORDER_STATUSES.PENDING && currentStatus !== ORDER_STATUSES.PROCESSING) {
+    const err = new Error(`Only pending or processing orders can be cancelled. Current status: ${currentStatus}`)
     err.status = 409
     throw err
+  }
+
+  if (currentStatus === ORDER_STATUSES.PROCESSING) {
+    await retailService.restoreRetailOrderStock(orderId)
   }
 
   await query(

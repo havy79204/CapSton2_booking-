@@ -43,6 +43,23 @@ function formatHourValue(value) {
     return raw
 }
 
+function formatShiftEndDisplay(value) {
+    const normalized = formatHourValue(value)
+    const m = String(normalized || '').match(/^(\d{2}):(\d{2})$/)
+    if (!m) return normalized
+
+    const hh = Number(m[1])
+    const mm = Number(m[2])
+    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return normalized
+
+    if (mm === 30) {
+        const nextHour = (hh + 1) % 24
+        return `${String(nextHour).padStart(2, '0')}:00`
+    }
+
+    return normalized
+}
+
 function parseHourToInt(value) {
     const raw = String(value || '').trim().toUpperCase();
     const m = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/);
@@ -297,7 +314,7 @@ async function getSchedule(weekStartQuery, options = {}) {
         const dateLabel = toDateLabel(dateValue)
 
         const startHour = formatHourValue(row.StartHour)
-        const endHour = formatHourValue(row.EndHour)
+        const endHour = formatShiftEndDisplay(row.EndHour)
         if (!startHour || !endHour) continue
 
         const label = `${startHour} - ${endHour}`
@@ -312,7 +329,7 @@ async function getSchedule(weekStartQuery, options = {}) {
         if (!sid) continue
 
         const status = String(row.Status || 'Pending').trim().toLowerCase()
-        if (status === 'rejected') continue
+        if (status !== 'approved') continue
 
         const startDate = new Date(row.StartDate)
         if (Number.isNaN(startDate.getTime())) continue
@@ -440,6 +457,55 @@ async function addShift(payload) {
         const err = new Error('Start time must be earlier than end time')
         err.status = 400
         throw err
+    }
+
+    const approvedLeaves = await query(
+        `SELECT OffScheduleId, StartHour, Note, DayIndex, IsRecurring, StartDate, EndDate
+         FROM StaffOffSchedules
+         WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
+           AND CAST(StartDate AS date) <= @shiftDate
+           AND CAST(ISNULL(EndDate, StartDate) AS date) >= @shiftDate
+           AND UPPER(LTRIM(RTRIM(ISNULL(Status, '')))) = 'APPROVED'`,
+        { staffId, shiftDate: shiftDateIso }
+    )
+
+    const shiftDayIndexOneBased = normalizeDayIndexOneBased((shiftDate.getDay() + 6) % 7)
+
+    for (const leave of approvedLeaves.recordset || []) {
+        const leaveStartIso = toIsoDate(new Date(leave?.StartDate))
+        const leaveEndIso = toIsoDate(new Date(leave?.EndDate || leave?.StartDate))
+        if (!leaveStartIso || !leaveEndIso) continue
+        if (shiftDateIso < leaveStartIso || shiftDateIso > leaveEndIso) continue
+
+        const isRecurringLeave = Number(leave?.IsRecurring || 0) === 1
+        if (isRecurringLeave) {
+            const leaveDayIndex = normalizeDayIndexOneBased(leave?.DayIndex)
+            if (!leaveDayIndex || !shiftDayIndexOneBased || leaveDayIndex !== shiftDayIndexOneBased) {
+                continue
+            }
+        }
+
+        const note = String(leave?.Note || '')
+        const leaveTypeMatch = note.match(/LEAVE_REQUEST\[(morning|afternoon|evening|full)\]/i)
+        const leaveTypeFromNote = leaveTypeMatch ? String(leaveTypeMatch[1]).toLowerCase() : ''
+        const leaveStartFromRow = parseHourToInt(leave?.StartHour)
+        const leaveType = leaveTypeFromNote || shiftTypeFromStartHour(leaveStartFromRow)
+        const leaveShift = resolveLeaveShift(leaveType)
+
+        if (leaveShift.shiftType === 'full') {
+            const err = new Error('Cannot add shift because this day has an approved leave')
+            err.status = 409
+            throw err
+        }
+
+        const leaveStart = Number(leaveShift.startHour || 0)
+        const leaveEnd = leaveStart + Number(leaveShift.durationHours || 0)
+        const isOverlap = !(endHourInt <= leaveStart || startHourInt >= leaveEnd)
+        if (isOverlap) {
+            const err = new Error('Cannot add shift because it overlaps an approved leave period')
+            err.status = 409
+            throw err
+        }
     }
 
     const isEditing = Boolean(String(oldLabel || '').trim())
@@ -838,7 +904,7 @@ async function rejectLeave({ offScheduleId, staffId, weekStartDate, dayIndex } =
             `UPDATE StaffOffSchedules
              SET Status = 'Rejected'
              WHERE OffScheduleId = @offScheduleId
-               AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) = 'PENDING'`,
+               AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) IN ('PENDING', 'APPROVED')`,
             { offScheduleId }
         )
         const updated = (res.rowsAffected && res.rowsAffected[0]) || 0
@@ -875,7 +941,7 @@ async function rejectLeave({ offScheduleId, staffId, weekStartDate, dayIndex } =
                  WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
            AND (@targetDate IS NULL OR CAST(StartDate AS date) = @targetDate)
            AND (@dayIndex IS NULL OR TRY_CONVERT(INT, DayIndex) = @dayIndex)
-           AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) = 'PENDING'`,
+           AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) IN ('PENDING', 'APPROVED')`,
         { staffId, targetDate, dayIndex: oneBasedDayIndex }
     )
 
@@ -950,7 +1016,7 @@ async function getStaffScheduleFromShifts({ staffId, weekStartQuery } = {}) {
         if (!map.has(ymd)) map.set(ymd, [])
 
         const startHour = formatHourValue(r.StartHour)
-        const endHour = formatHourValue(r.EndHour)
+        const endHour = formatShiftEndDisplay(r.EndHour)
         if (!startHour || !endHour) continue
 
         map.get(ymd).push({
@@ -1207,18 +1273,32 @@ async function deleteStaffLeaveRequest({ staffId, offScheduleId, date, shiftType
                AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) = 'PENDING'`,
             { offScheduleId, staffId }
         )
-        return { deleted: (res.rowsAffected && res.rowsAffected[0]) || 0 }
+        const deleted = (res.rowsAffected && res.rowsAffected[0]) || 0
+        if (deleted > 0) return { deleted }
+        // Fallback: try matching by date + shiftType when offScheduleId is stale.
     }
 
     const targetDate = date ? toIsoDate(new Date(date)) : null
-    const shift = resolveLeaveShift(shiftType)
+    const hasShiftType = shiftType !== undefined && shiftType !== null && String(shiftType).trim() !== ''
+    const shift = hasShiftType ? resolveLeaveShift(shiftType) : null
+    const offStartHourColType = await columnType('StaffOffSchedules', 'StartHour')
+    const startHourIsTime = offStartHourColType && offStartHourColType.startsWith('time')
+    const startHourClause = startHourIsTime
+        ? 'DATEPART(HOUR, StartHour) = @startHour'
+        : 'TRY_CONVERT(INT, StartHour) = @startHour'
     const res = await query(
         `DELETE FROM StaffOffSchedules
                  WHERE CAST(StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))
            AND (@targetDate IS NULL OR CAST(StartDate AS date) = @targetDate)
-           AND (@startHour IS NULL OR TRY_CONVERT(INT, StartHour) = @startHour)
+           AND (@startHour IS NULL OR ${startHourClause})
            AND UPPER(LTRIM(RTRIM(ISNULL(Status, 'PENDING')))) = 'PENDING'`,
         { staffId, targetDate, startHour: shift?.startHour ?? null }
     )
-    return { deleted: (res.rowsAffected && res.rowsAffected[0]) || 0 }
+    const deleted = (res.rowsAffected && res.rowsAffected[0]) || 0
+    if (!deleted) {
+        const err = new Error('Leave request not found or already processed')
+        err.status = 404
+        throw err
+    }
+    return { deleted }
 }

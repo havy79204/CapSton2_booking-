@@ -39,6 +39,17 @@ function normalizeDisplayStatus(status) {
   return status
 }
 
+const VN_PHONE_REGEX = /^0(3|5|7|8|9)\d{8}$/
+
+function normalizeVietnamPhone(value) {
+  const raw = String(value || '').replace(/[^\d+]/g, '').trim()
+  if (!raw) return ''
+  if (raw.startsWith('+84')) return `0${raw.slice(3).replace(/\D/g, '')}`
+  const digits = raw.replace(/\D/g, '')
+  if (digits.startsWith('84') && digits.length === 11) return `0${digits.slice(2)}`
+  return digits
+}
+
 export default function StaffOrdersPage() {
   const [orderFilters, setOrderFilters] = useState(defaultFilters)
   const [debouncedKeyword, setDebouncedKeyword] = useState('')
@@ -107,6 +118,8 @@ export default function StaffOrdersPage() {
         orderItemId: it.OrderItemId || '',
         productId: String(it.ProductId || ''),
         productName: it.ProductName || '',
+        variantId: String(it.VariantId || ''),
+        variantName: String(it.VariantName || ''),
         quantity: String(Number(it.Quantity || 0) || 0),
       }))
     )
@@ -117,8 +130,24 @@ export default function StaffOrdersPage() {
     e.preventDefault()
     if (!orderEditing?.OrderId) return
 
+    const customerName = String(orderForm.customerName || '').trim()
+    const customerPhone = normalizeVietnamPhone(orderForm.customerPhone)
+    if (!customerName) {
+      setOrdersError('Customer name is required')
+      return
+    }
+    if (!customerPhone) {
+      setOrdersError('Phone number is required')
+      return
+    }
+    if (!VN_PHONE_REGEX.test(customerPhone)) {
+      setOrdersError('Phone number must be a valid Vietnamese phone number')
+      return
+    }
+
     try {
       setOrderSaving(true)
+      setOrdersError('')
       const itemsPayload = (editItems || [])
         .map((l) => ({
           orderItemId: l.orderItemId || undefined,
@@ -128,8 +157,8 @@ export default function StaffOrdersPage() {
         .filter((l) => l.productId && Number.isFinite(l.quantity) && l.quantity > 0)
 
       await api.put(`/api/staff/orders/${orderEditing.OrderId}`, {
-        customerName: orderForm.customerName,
-        customerPhone: orderForm.customerPhone,
+        customerName,
+        customerPhone,
         customerAddress: orderForm.customerAddress,
         paymentMethod: orderForm.paymentMethod,
         status: orderForm.status,

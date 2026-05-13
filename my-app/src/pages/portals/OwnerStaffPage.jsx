@@ -1269,13 +1269,6 @@ export default function OwnerStaffPage() {
                     <td>{Number(m.totalBookings || 0)}</td>
                     <td>{formatMoney(m.salary)}</td>
                     <td>{formatMoney(m.totalCommission)}</td>
-                    <td>{formatMoney(m.totalRevenue)}</td>
-                    <td>
-                      {(() => {
-                        const ratingDisplay = formatRating(m.rating, m.ratingCount)
-                        return <span className={`staff-ratingValue ${ratingDisplay.hasValue ? '' : 'is-empty'}`.trim()}>{ratingDisplay.text}</span>
-                      })()}
-                    </td>
                     <td>
                       {(() => {
                         const ratingDisplay = formatRating(m.rating, m.ratingCount)

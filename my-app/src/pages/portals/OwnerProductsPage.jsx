@@ -24,6 +24,13 @@ function formatRatingWithCount(ratingValue, countValue) {
   return `${rating}(${safeCount})`
 }
 
+function normalizeProductType(value) {
+  const raw = String(value || '').trim().toLowerCase()
+  if (raw === 'service') return 'supplies'
+  if (raw === 'supplies') return 'supplies'
+  return 'retail'
+}
+
 function digitsOnly(value) {
   const raw = String(value ?? '').trim()
   if (!raw) return ''
@@ -80,6 +87,7 @@ export default function OwnerProductsPage() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
   const [sortBy, setSortBy] = useState('name')
   const [sortOrder, setSortOrder] = useState('asc')
   const [page, setPage] = useState(1)
@@ -109,6 +117,9 @@ export default function OwnerProductsPage() {
   const [form, setForm] = useState({
     name: '',
     categoryId: '',
+    type: 'retail',
+    unit: '',
+    minQty: '',
     kind: '',
     status: '',
     supplier: 'Default',
@@ -222,6 +233,9 @@ export default function OwnerProductsPage() {
       setStatusFilter(saved.statusFilter)
     }
     if (typeof saved.categoryFilter === 'string') setCategoryFilter(saved.categoryFilter)
+    if (saved.typeFilter === 'all' || saved.typeFilter === 'retail' || saved.typeFilter === 'supplies') {
+      setTypeFilter(saved.typeFilter)
+    }
     if (typeof saved.sortBy === 'string') setSortBy(saved.sortBy)
     if (saved.sortOrder === 'asc' || saved.sortOrder === 'desc') setSortOrder(saved.sortOrder)
     if (saved.openCat === true || saved.openCat === false) setOpenCat(saved.openCat)
@@ -253,6 +267,7 @@ export default function OwnerProductsPage() {
       query,
       statusFilter,
       categoryFilter,
+      typeFilter,
       sortBy,
       sortOrder,
       openCat,
@@ -261,7 +276,7 @@ export default function OwnerProductsPage() {
       form,
       selectedImageIdx,
     })
-  }, [query, statusFilter, categoryFilter, sortBy, sortOrder, openCat, catForm, open, form, selectedImageIdx])
+  }, [query, statusFilter, categoryFilter, typeFilter, sortBy, sortOrder, openCat, catForm, open, form, selectedImageIdx])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -270,13 +285,15 @@ export default function OwnerProductsPage() {
       const kind = String(p.kind || p.categoryName || '').toLowerCase()
       const status = String(p.status || '').toLowerCase()
       const category = String(p.categoryId || '')
+      const type = normalizeProductType(p?.type || p?.group)
       const queryMatched = !q || name.includes(q) || kind.includes(q)
       const statusMatched = statusFilter === 'all' || status === statusFilter
       const categoryMatched = categoryFilter === 'all' || category === categoryFilter
-      return queryMatched && statusMatched && categoryMatched
+      const typeMatched = typeFilter === 'all' || type === typeFilter
+      return queryMatched && statusMatched && categoryMatched && typeMatched
     })
     return searched
-  }, [items, query, statusFilter, categoryFilter])
+  }, [items, query, statusFilter, categoryFilter, typeFilter])
 
   const sortedFiltered = useMemo(() => {
     const sorted = [...filtered]
@@ -339,7 +356,7 @@ export default function OwnerProductsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [query, statusFilter, categoryFilter, sortBy, sortOrder])
+  }, [query, statusFilter, categoryFilter, typeFilter, sortBy, sortOrder])
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
@@ -505,6 +522,9 @@ export default function OwnerProductsPage() {
     setForm({
       name: '',
       categoryId: '',
+      type: 'retail',
+      unit: '',
+      minQty: '',
       kind: '',
       status: '',
       supplier: 'Default',
@@ -531,6 +551,9 @@ export default function OwnerProductsPage() {
     setForm({
       name: item?.name || '',
       categoryId: fallbackCategoryId,
+      type: normalizeProductType(item?.type || item?.group),
+      unit: item?.unit || '',
+      minQty: String(item?.minQty ?? ''),
       kind: item?.kind || item?.categoryName || '',
       status: item?.status || '',
       supplier: item?.supplier || 'Default',
@@ -568,6 +591,9 @@ export default function OwnerProductsPage() {
       setError('')
       const payload = {
         name: normalizedName,
+        type: normalizeProductType(form.type),
+        unit: String(form.unit || '').trim(),
+        minQty: digitsOnly(form.minQty) || undefined,
         ...(form.categoryId ? { categoryId: form.categoryId } : {}),
         status: form.status,
         supplier: String(form.supplier || 'Default').trim() || 'Default',
@@ -709,6 +735,13 @@ export default function OwnerProductsPage() {
             </span>
             Add Product
           </button>
+
+          <button type="button" className="portal-primaryBtn" onClick={() => setOpenCat(true)}>
+            <span className="portal-primaryBtnIcon" aria-hidden="true">
+              +
+            </span>
+            Add Catalog
+          </button>
         </div>
       </div>
 
@@ -734,8 +767,17 @@ export default function OwnerProductsPage() {
           </select>
         </label>
 
+        <label className="portal-field products-filterField">
+          <span className="portal-label">Filter by type</span>
+          <select className="portal-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            <option value="all">All types</option>
+            <option value="retail">Retail</option>
+            <option value="supplies">Supplies</option>
+          </select>
+        </label>
+
       </div>
-      <PortalCard className="portal-invTableCard" title="Retail Product List">
+      <PortalCard className="portal-invTableCard" title="Product List">
         <div className="portal-tableWrap">
           <table className="portal-table">
             <thead>
@@ -746,10 +788,16 @@ export default function OwnerProductsPage() {
                     {renderSortToggle('name', 'name')}
                   </div>
                 </th>
+                <th>
+                  <div className="products-sortHeader">
+                    <span>Type</span>
+                    {renderSortToggle('type', 'type')}
+                  </div>
+                </th>
                 <th>Category</th>
                 <th>
                   <div className="products-sortHeader">
-                    <span>Price</span>
+                    <span>Sell Price</span>
                     {renderSortToggle('price', 'price')}
                   </div>
                 </th>
@@ -781,14 +829,35 @@ export default function OwnerProductsPage() {
                 const isLowStock = stockNum > 0 && stockNum <= 10
                 const ratingNum = Number(p?.averageRating || 0)
                 const isLowRating = ratingNum > 0 && ratingNum < 3
+                const productType = normalizeProductType(p?.type || p?.group)
 
                 return (
                   <tr key={p.id}>
-                    <td className="portal-invName">{p.name}</td>
+                    <td className="portal-invName" title={p.name || ''}>
+                      <span className="products-nameText">{p.name}</span>
+                    </td>
+                    <td>
+                      <span className="portal-invPill">{normalizeProductType(p?.type || p?.group)}</span>
+                    </td>
                     <td>
                         <span className="portal-invPill">{p.categoryName || p.kind || '-'}</span>
                     </td>
-                    <td>{formatVnd(p.price)} ₫</td>
+                    <td>
+                      {(() => {
+                        const type = normalizeProductType(p?.type || p?.group)
+                        if (type === 'supplies') return '-'
+                        const minVariantPrice = Number(p?.minVariantSellPrice || 0)
+                        const variantPriceCount = Number(p?.variantPriceCount || 0)
+                        const sellPrice = Number(p?.sellPriceVnd ?? p?.price ?? 0)
+                        if (variantPriceCount > 1 && minVariantPrice > 0) {
+                          return `From ${formatVnd(minVariantPrice)} ₫`
+                        }
+                        if (sellPrice > 0) {
+                          return `${formatVnd(sellPrice)} ₫`
+                        }
+                        return 'N/A'
+                      })()}
+                    </td>
                     <td style={{ color: isOutOfStock ? '#dc2626' : isLowStock ? '#f59e0b' : 'inherit' }}>
                       {stockNum}
                       {(isOutOfStock || isLowStock) && (
@@ -821,7 +890,7 @@ export default function OwnerProductsPage() {
               })}
               {pagedItems.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="products-emptyRow">No products found</td>
+                  <td colSpan={8} className="products-emptyRow">No products found</td>
                 </tr>
               ) : null}
             </tbody>
@@ -900,6 +969,18 @@ export default function OwnerProductsPage() {
 
           <div className="portal-modalGrid2">
             <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Type <span className="products-required">*</span></span>
+              <select
+                className="portal-select"
+                value={normalizeProductType(form.type)}
+                onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}
+              >
+                <option value="retail">Retail</option>
+                <option value="supplies">Supplies</option>
+              </select>
+            </label>
+
+            <label className="portal-field" style={{ marginTop: 12 }}>
               <span className="portal-label">Category <span className="products-required">*</span></span>
               <input
                 className="portal-input"
@@ -925,6 +1006,41 @@ export default function OwnerProductsPage() {
                 ))}
               </datalist>
             </label>
+          </div>
+
+          <div className="portal-modalGrid2">
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Unit</span>
+              <input
+                className="portal-input"
+                placeholder="sp, bottle, box..."
+                value={form.unit || ''}
+                onChange={(e) => setForm((p) => ({ ...p, unit: e.target.value }))}
+              />
+            </label>
+
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Minimum Stock</span>
+              <input
+                className="portal-input"
+                inputMode="numeric"
+                placeholder="0"
+                value={form.minQty || ''}
+                onChange={(e) => setForm((p) => ({ ...p, minQty: digitsOnly(e.target.value) }))}
+              />
+            </label>
+          </div>
+
+          <div className="portal-modalGrid2">
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Supplier</span>
+              <input
+                className="portal-input"
+                placeholder="Default"
+                value={form.supplier || ''}
+                onChange={(e) => setForm((p) => ({ ...p, supplier: e.target.value }))}
+              />
+            </label>
 
             <label className="portal-field" style={{ marginTop: 12 }}>
               <span className="portal-label">Status <span className="products-required">*</span></span>
@@ -942,16 +1058,6 @@ export default function OwnerProductsPage() {
               </select>
             </label>
           </div>
-
-          <label className="portal-field" style={{ marginTop: 12 }}>
-            <span className="portal-label">Supplier</span>
-            <input
-              className="portal-input"
-              placeholder="Default"
-              value={form.supplier || ''}
-              onChange={(e) => setForm((p) => ({ ...p, supplier: e.target.value }))}
-            />
-          </label>
 
           <label className="portal-field" style={{ marginTop: 12 }}>
             <span className="portal-label">Images</span>
@@ -1088,34 +1194,6 @@ export default function OwnerProductsPage() {
           </div>
         </div>
 
-        {variantAdding ? (
-          <form onSubmit={onAddVariant} className="products-variantFormInline">
-            <label className="products-variantFormField">
-              <span className="portal-label">Variant Name</span>
-              <input
-                className="portal-input"
-                value={variantAddForm.name}
-                onChange={(e) => setVariantAddForm((p) => ({ ...p, name: e.target.value }))}
-                placeholder="Enter variant name"
-                autoFocus
-              />
-            </label>
-            <div className="products-variantFormActions">
-              <button type="submit" className="portal-ghostBtn">Save</button>
-              <button
-                type="button"
-                className="portal-ghostBtn danger"
-                onClick={() => {
-                  setVariantAdding(false)
-                  setVariantAddForm({ name: '' })
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        ) : null}
-
         <div className="products-variantsTableWrap">
           <table className="portal-table products-variantsTable">
             <thead>
@@ -1179,12 +1257,6 @@ export default function OwnerProductsPage() {
             </tbody>
           </table>
         </div>
-
-        {variantsFor?.itemGroup === 'service' && !variantAdding ? (
-          <button type="button" className="portal-ghostBtn" onClick={openVariantAdding}>
-            Add Variant
-          </button>
-        ) : null}
       </PortalModal>
     </div>
   )

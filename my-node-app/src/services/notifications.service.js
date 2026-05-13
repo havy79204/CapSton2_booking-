@@ -294,6 +294,7 @@ function mapDbNotificationRow(row, { scope = 'customer' } = {}) {
     read: Boolean(row?.IsRead),
     bookingId: row?.BookingId || null,
     orderId: row?.OrderId || null,
+    bookingTime: row?.BookingTime || null,
     channel: row?.Channel || null,
   }
 }
@@ -2332,15 +2333,17 @@ async function listOwnerNotifications({ userId, limit = 80 } = {}) {
         Body,
         Type,
         Channel,
-        BookingId,
-        OrderId,
+        n.BookingId,
+        n.OrderId,
+        b.BookingTime,
         IsRead,
-        CreatedAt,
-        UpdatedAt
-     FROM Notifications
-     WHERE (@userId = '' OR UserId = @userId OR UserId IS NULL)
-       AND (ScheduledAt IS NULL OR ScheduledAt <= SYSUTCDATETIME())
-     ORDER BY COALESCE(CreatedAt, UpdatedAt) DESC, NotificationId DESC`,
+        n.CreatedAt,
+        n.UpdatedAt
+     FROM Notifications n
+     LEFT JOIN Bookings b ON b.BookingId = n.BookingId
+     WHERE (@userId = '' OR n.UserId = @userId OR n.UserId IS NULL)
+       AND (n.ScheduledAt IS NULL OR n.ScheduledAt <= SYSUTCDATETIME())
+     ORDER BY COALESCE(n.CreatedAt, n.UpdatedAt) DESC, n.NotificationId DESC`,
     { limit: maxLimit, userId: safeUserId },
   )
 

@@ -529,12 +529,22 @@ export default function OwnerCustomerDetailPage() {
                       <h3 className="portal-orderId">{displayId}</h3>
 
                       <div className="portal-orderItems" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {(order.Items || []).map((item, idx) => (
-                          <div key={`${id || orderIdx}-${idx}`} className="portal-orderItem">
-                            <span style={{ fontWeight: 600 }}>{item.ProductName || item.Name || 'Item'}</span>
-                            <span style={{ marginLeft: 8, color: '#666' }}>x {item.Quantity || 1}</span>
-                          </div>
-                        ))}
+                        {(order.Items || []).map((item, idx) => {
+                          const variantName = String(item?.VariantName || item?.variantName || '').trim()
+                          return (
+                            <div key={`${id || orderIdx}-${idx}`} className="portal-orderItem" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontWeight: 600 }}>{item.ProductName || item.Name || 'Item'}</span>
+                                <span style={{ color: '#666' }}>x {item.Quantity || 1}</span>
+                              </div>
+                              {variantName ? (
+                                <span style={{ fontSize: 12, color: '#3f4f68', background: '#eef3ff', borderRadius: 999, padding: '2px 10px', width: 'fit-content' }}>
+                                  Variant: {variantName}
+                                </span>
+                              ) : null}
+                            </div>
+                          )
+                        })}
                         {order.Items && order.Items.length === 0 ? (
                           <div className="portal-orderItem">No items</div>
                         ) : null}

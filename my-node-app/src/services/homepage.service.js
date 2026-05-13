@@ -60,10 +60,9 @@ function parseReviewImagesField(rawValue) {
     const parsed = JSON.parse(raw)
     if (Array.isArray(parsed)) return parsed.map((x) => String(x || '').trim()).filter(Boolean)
   } catch (_) {
-    // Ignore and fallback to CSV parsing.
   }
 
-  return raw
+  return raw 
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean)
@@ -189,6 +188,204 @@ function normalizeAvatarUrl(rawUrl) {
   return normalizePublicImageUrl(unixPath)
 }
 
+function toNumber(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+function clamp01(value) {
+  if (!Number.isFinite(value)) return 0
+  if (value < 0) return 0
+  if (value > 1) return 1
+  return value
+}
+
+function normalizeRange(value, min, max) {
+  if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max) || max <= min) return 0
+  return clamp01((value - min) / (max - min))
+}
+
+function bayesianRating(avg, count, globalAvg, minReviews = 10) {
+  const v = Math.max(0, toNumber(count))
+  const R = toNumber(avg)
+  const C = toNumber(globalAvg)
+  const m = Math.max(1, toNumber(minReviews))
+  return (v / (v + m)) * R + (m / (v + m)) * C
+}
+
+function freshnessScore(createdAt, daysHalfLife = 30) {
+  if (!createdAt) return 0.5
+  const ts = Date.parse(createdAt)
+  if (!Number.isFinite(ts)) return 0.5
+  const days = Math.max(0, (Date.now() - ts) / (1000 * 60 * 60 * 24))
+  const lambda = Math.log(2) / Math.max(1, daysHalfLife)
+  return clamp01(Math.exp(-lambda * days))
+}
+
+const FEATURED_MARKERS = ['featured', 'hot', 'popular', 'best']
+
+function isFeaturedItem(item) {
+  if (!item || typeof item !== 'object') return false
+
+  const rawFlag =
+    item.IsFeatured ??
+    item.isFeatured ??
+    item.Featured ??
+    item.featured ??
+    item.IsHot ??
+    item.isHot
+
+  if (rawFlag === true || rawFlag === 1 || rawFlag === '1') return true
+  if (typeof rawFlag === 'string') {
+    const normalized = rawFlag.trim().toLowerCase()
+    if (normalized === 'true' || normalized === 'yes' || normalized === 'featured') return true
+  }
+
+  const tagCandidates = [item.Tag, item.Tags, item.Badge, item.Label, item.CategoryName]
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .filter((value) => value !== null && value !== undefined)
+    .map((value) => String(value).toLowerCase())
+
+  return tagCandidates.some((value) => FEATURED_MARKERS.some((keyword) => value.includes(keyword)))
+}
+
+async function firstExistingColumn(tableName, candidates = []) {
+  for (const col of candidates) {
+    const name = String(col || '').trim()
+    if (!name) continue
+    try {
+      if (await columnExists(tableName, name)) return name
+    } catch {
+      // ignore
+    }
+  }
+  return ''
+}
+
+async function getUserCategoryAffinity(userId) {
+  const safeUserId = String(userId || '').trim()
+  if (!safeUserId) return { product: new Map(), service: new Map(), totalProducts: 0, totalServices: 0 }
+
+  const orderUserColumn = await firstExistingColumn('Orders', ['UserId', 'CustomerUserId'])
+  const bookingUserColumn = await firstExistingColumn('Bookings', ['CustomerUserId', 'UserId'])
+
+  const productMap = new Map()
+  const serviceMap = new Map()
+  let totalProducts = 0
+  let totalServices = 0
+
+  if (orderUserColumn) {
+    const productRes = await query(
+      `SELECT p.[CategoryId], SUM(COALESCE(oi.[Quantity], 1)) AS Qty
+       FROM [Orders] o
+       INNER JOIN [OrderItems] oi ON oi.[OrderId] = o.[OrderId]
+       INNER JOIN [Products] p ON p.[ProductId] = oi.[ProductId]
+       WHERE o.[${orderUserColumn}] = @userId
+         AND (o.[Status] IS NULL OR LOWER(LTRIM(RTRIM(ISNULL(o.[Status], '')))) IN ('completed', 'delivered', 'confirmed', 'done'))
+       GROUP BY p.[CategoryId]`,
+      { userId: safeUserId },
+    ).catch(() => ({ recordset: [] }))
+
+    for (const row of productRes.recordset || []) {
+      const key = String(row.CategoryId || '').trim()
+      const qty = Math.max(0, toNumber(row.Qty))
+      if (!key || qty <= 0) continue
+      productMap.set(key, (productMap.get(key) || 0) + qty)
+      totalProducts += qty
+    }
+  }
+
+  if (bookingUserColumn) {
+    const serviceRes = await query(
+      `SELECT s.[CategoryId], COUNT(1) AS Qty
+       FROM [Bookings] b
+       INNER JOIN [BookingServices] bs ON bs.[BookingId] = b.[BookingId]
+       INNER JOIN [Services] s ON s.[ServiceId] = bs.[ServiceId]
+       WHERE b.[${bookingUserColumn}] = @userId
+         AND LOWER(LTRIM(RTRIM(ISNULL(b.[Status], '')))) IN ('completed', 'confirmed', 'done', 'booked')
+       GROUP BY s.[CategoryId]`,
+      { userId: safeUserId },
+    ).catch(() => ({ recordset: [] }))
+
+    for (const row of serviceRes.recordset || []) {
+      const key = String(row.CategoryId || '').trim()
+      const qty = Math.max(0, toNumber(row.Qty))
+      if (!key || qty <= 0) continue
+      serviceMap.set(key, (serviceMap.get(key) || 0) + qty)
+      totalServices += qty
+    }
+  }
+
+  return { product: productMap, service: serviceMap, totalProducts, totalServices }
+}
+
+function buildRankedList({ items, type, userAffinity, mode }) {
+  const list = Array.isArray(items) ? items : []
+  if (!list.length) return []
+
+  const weights = {
+    personalized: { personal: 0.45, popular: 0.2, featured: 0.1, rating: 0.1, fresh: 0.05, availability: 0.1 },
+    coldStart: { personal: 0, popular: 0.35, featured: 0.2, rating: 0.2, fresh: 0.15, availability: 0.1 },
+    anonymous: { personal: 0, popular: 0.4, featured: 0.2, rating: 0.2, fresh: 0.1, availability: 0.1 },
+  }[mode]
+
+  const popularityValues = list.map((item) =>
+    type === 'service' ? toNumber(item.BookingCount) : toNumber(item.SoldCount)
+  )
+  const stockValues = list.map((item) => toNumber(item.Stock))
+  const ratingValues = list.map((item) => toNumber(item.AverageRating ?? item.AvgRating))
+
+  const popMin = Math.min(...popularityValues)
+  const popMax = Math.max(...popularityValues)
+  const stockMin = Math.min(...stockValues)
+  const stockMax = Math.max(...stockValues)
+
+  const avgRating = ratingValues.length
+    ? ratingValues.reduce((sum, v) => sum + v, 0) / ratingValues.length
+    : 0
+
+  const affinityMap = type === 'service' ? userAffinity?.service : userAffinity?.product
+  const affinityMax = affinityMap && affinityMap.size
+    ? Math.max(...Array.from(affinityMap.values()).map((v) => toNumber(v)))
+    : 0
+
+  return list
+    .map((item) => {
+      const featured = isFeaturedItem(item) ? 1 : 0
+      const popularityRaw = type === 'service' ? toNumber(item.BookingCount) : toNumber(item.SoldCount)
+      const popularity = normalizeRange(popularityRaw, popMin, popMax)
+
+      const reviewCount = toNumber(item.ReviewCount)
+      const bayes = bayesianRating(toNumber(item.AverageRating ?? item.AvgRating), reviewCount, avgRating, 10)
+      const rating = clamp01(bayes / 5)
+
+      const fresh = freshnessScore(item.CreatedAt, 30)
+
+      const availability = type === 'product'
+        ? (toNumber(item.Stock) > 0 ? 1 : 0)
+        : 1
+
+      const categoryId = String(item.CategoryId || '').trim()
+      const personalRaw = affinityMap && categoryId ? toNumber(affinityMap.get(categoryId) || 0) : 0
+      const personal = affinityMax > 0 ? clamp01(personalRaw / affinityMax) : 0
+
+      const score =
+        weights.personal * personal +
+        weights.popular * popularity +
+        weights.featured * featured +
+        weights.rating * rating +
+        weights.fresh * fresh +
+        weights.availability * (type === 'product' ? normalizeRange(toNumber(item.Stock), stockMin, stockMax) : availability)
+
+      return { ...item, RankScore: Math.round(score * 10000) / 10000 }
+    })
+    .sort((a, b) => {
+      const diff = toNumber(b.RankScore) - toNumber(a.RankScore)
+      if (diff !== 0) return diff
+      return String(a?.Name || '').localeCompare(String(b?.Name || ''))
+    })
+}
+
 async function tableExists(tableName) {
   const res = await query(
     `SELECT 1 AS ok
@@ -243,6 +440,7 @@ async function getSalonContactInfo() {
  * Get services list with categories
  */
 async function getServices(opts = {}) {
+  const userId = String(opts?.userId || '').trim()
   const rawCategoryId = opts?.categoryId ?? opts?.CategoryId ?? opts?.category ?? null
   const categoryId = rawCategoryId === undefined || rawCategoryId === null || String(rawCategoryId).trim() === '' || String(rawCategoryId).toLowerCase() === 'all'
     ? null
@@ -255,10 +453,17 @@ async function getServices(opts = {}) {
     : 's.[CategoryId], s.[Name]'
 
   const hasServiceImages = await tableExists('ServiceImages')
+  const hasServiceCreatedAt = await columnExists('Services', 'CreatedAt')
+  const hasServiceFeatured = await columnExists('Services', 'IsFeatured')
+  const hasServiceHot = await columnExists('Services', 'IsHot')
   const params = {}
   const whereClauses = [
     "(s.[Status] IS NULL OR LOWER(LTRIM(RTRIM(s.[Status]))) = 'active')"
   ]
+
+  const createdAtSelect = hasServiceCreatedAt ? ', s.[CreatedAt]' : ', NULL AS CreatedAt'
+  const featuredSelect = hasServiceFeatured ? ', s.[IsFeatured]' : ', NULL AS IsFeatured'
+  const hotSelect = hasServiceHot ? ', s.[IsHot]' : ', NULL AS IsHot'
 
   if (categoryId !== null) {
     whereClauses.push('CAST(s.[CategoryId] AS NVARCHAR(100)) = @categoryId')
@@ -274,9 +479,33 @@ async function getServices(opts = {}) {
       s.[Status],
       s.[CategoryId],
       sc.[Name] AS CategoryName,
-      s.[ImageUrl] AS PrimaryImageUrl
+      s.[ImageUrl] AS PrimaryImageUrl,
+      ISNULL(rating.[AverageRating], 0) AS AverageRating,
+      ISNULL(rating.[ReviewCount], 0) AS ReviewCount,
+      ISNULL(bookings.[BookingCount], 0) AS BookingCount
+      ${createdAtSelect}
+      ${featuredSelect}
+      ${hotSelect}
     FROM [Services] s
     LEFT JOIN [ServiceCategories] sc ON s.[CategoryId] = sc.[CategoryId]
+    LEFT JOIN (
+      SELECT
+        sr.[ServiceId],
+        COUNT(1) AS ReviewCount,
+        AVG(CAST(sr.[Rating] AS FLOAT)) AS AverageRating
+      FROM [SalonReviews] sr
+      WHERE sr.[ServiceId] IS NOT NULL AND sr.[Rating] IS NOT NULL
+      GROUP BY sr.[ServiceId]
+    ) rating ON rating.[ServiceId] = s.[ServiceId]
+    LEFT JOIN (
+      SELECT
+        bs.[ServiceId],
+        COUNT(1) AS BookingCount
+      FROM [BookingServices] bs
+      INNER JOIN [Bookings] b ON b.[BookingId] = bs.[BookingId]
+      WHERE LOWER(LTRIM(RTRIM(ISNULL(b.[Status], '')))) IN ('completed', 'confirmed', 'done', 'booked')
+      GROUP BY bs.[ServiceId]
+    ) bookings ON bookings.[ServiceId] = s.[ServiceId]
     WHERE ${whereClauses.join(' AND ')}
     ORDER BY ${orderClause}`,
     params,
@@ -303,6 +532,12 @@ async function getServices(opts = {}) {
         Status: row.Status,
         CategoryId: row.CategoryId,
         CategoryName: row.CategoryName,
+        AverageRating: Math.round(Number(row.AverageRating || 0) * 10) / 10,
+        ReviewCount: Number(row.ReviewCount || 0),
+        BookingCount: Number(row.BookingCount || 0),
+        CreatedAt: row.CreatedAt || null,
+        IsFeatured: row.IsFeatured ?? null,
+        IsHot: row.IsHot ?? null,
         ImageUrl: imageUrl,
         Images: images
       })
@@ -331,10 +566,15 @@ async function getServices(opts = {}) {
     }
   }
 
-  return Array.from(byServiceId.values()).map(service => ({
+  const list = Array.from(byServiceId.values()).map(service => ({
     ...service,
     ImageUrl: service.ImageUrl || service.Images[0] || null
   }))
+
+  const affinity = userId ? await getUserCategoryAffinity(userId) : null
+  const hasHistory = Boolean(affinity && (affinity.totalServices > 0))
+  const mode = userId ? (hasHistory ? 'personalized' : 'coldStart') : 'anonymous'
+  return buildRankedList({ items: list, type: 'service', userAffinity: affinity, mode })
 }
 
 /**
@@ -356,6 +596,7 @@ async function getServiceCategories() {
  * Get products list with categories
  */
 async function getProducts(opts = {}) {
+  const userId = String(opts?.userId || '').trim()
   const rawCategoryId = opts?.categoryId ?? opts?.CategoryId ?? opts?.category ?? null
   const categoryId = rawCategoryId === undefined || rawCategoryId === null || String(rawCategoryId).trim() === '' || String(rawCategoryId).toLowerCase() === 'all'
     ? null
@@ -367,6 +608,8 @@ async function getProducts(opts = {}) {
   const hasProductImages = await tableExists('ProductImages')
   const hasProductsCreatedAt = await columnExists('Products', 'CreatedAt')
   const hasProductVariants = await tableExists('ProductVariants')
+  const hasProductFeatured = await columnExists('Products', 'IsFeatured')
+  const hasProductHot = await columnExists('Products', 'IsHot')
 
   const newestExpr = hasProductsCreatedAt
     ? 'COALESCE(p.[CreatedAt], GETDATE())'
@@ -397,9 +640,26 @@ async function getProducts(opts = {}) {
          WHERE l.[InventoryItemId] = CONCAT('retail_', p.[ProductId])
        ), COALESCE(TRY_CONVERT(DECIMAL(19,2), p.[Stock]), 0))`
 
+  const displayPriceExpr = hasProductVariants
+    ? `COALESCE((
+         SELECT TOP 1
+           COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.[Price]), TRY_CONVERT(DECIMAL(19,2), p.[Price]), 0)
+         FROM [ProductVariants] pv
+         OUTER APPLY (
+           SELECT SUM(TRY_CONVERT(DECIMAL(19,2), l.[RemainingQty])) AS TotalQty
+           FROM [InventoryLots] l
+           WHERE l.[InventoryItemId] = CONCAT('retail_variant_', pv.[VariantId])
+         ) pvLots
+         WHERE pv.[ProductId] = p.[ProductId]
+         ORDER BY COALESCE(pvLots.[TotalQty], COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.[Stock]), 0), 0) DESC,
+                  pv.[VariantName] ASC,
+                  pv.[VariantId] ASC
+       ), TRY_CONVERT(DECIMAL(19,2), p.[Price]), 0)`
+    : `COALESCE(TRY_CONVERT(DECIMAL(19,2), p.[Price]), 0)`
+
   let orderByClause = `p.[CategoryId] ASC, p.[Name] ASC`
   if (sortBy === 'price') {
-    orderByClause = `TRY_CONVERT(DECIMAL(19,2), p.[Price]) ${sortOrder}, p.[Name] ASC`
+    orderByClause = `${displayPriceExpr} ${sortOrder}, p.[Name] ASC`
   } else if (sortBy === 'best_selling') {
     orderByClause = `ISNULL(sales.SoldCount, 0) DESC, p.[Name] ASC`
   } else if (sortBy === 'newest') {
@@ -415,11 +675,16 @@ async function getProducts(opts = {}) {
     params.categoryId = categoryId
   }
 
+  const createdAtSelect = hasProductsCreatedAt ? ', p.[CreatedAt]' : ', NULL AS CreatedAt'
+  const featuredSelect = hasProductFeatured ? ', p.[IsFeatured]' : ', NULL AS IsFeatured'
+  const hotSelect = hasProductHot ? ', p.[IsHot]' : ', NULL AS IsHot'
+
   const res = await query(hasProductImages
     ? `SELECT
         p.[ProductId],
         p.[Name],
         p.[Price],
+        ${displayPriceExpr} AS DisplayPrice,
         p.[Description],
         p.[ImageUrl],
         ${productStockExpr} AS Stock,
@@ -432,6 +697,9 @@ async function getProducts(opts = {}) {
         pi.[ImageId] AS ExtraImageId,
         pi.[ImageUrl] AS ExtraImageUrl,
         pi.[SortOrder] AS ExtraSortOrder
+        ${createdAtSelect}
+        ${featuredSelect}
+        ${hotSelect}
       FROM [Products] p
       LEFT JOIN [ProductCategories] pc ON p.[CategoryId] = pc.[CategoryId]
       LEFT JOIN (
@@ -460,6 +728,7 @@ async function getProducts(opts = {}) {
         p.[ProductId],
         p.[Name],
         p.[Price],
+        ${displayPriceExpr} AS DisplayPrice,
         p.[Description],
         p.[ImageUrl],
         ${productStockExpr} AS Stock,
@@ -470,7 +739,10 @@ async function getProducts(opts = {}) {
         ISNULL(rating.[ReviewCount], 0) AS ReviewCount,
         ISNULL(sales.[SoldCount], 0) AS SoldCount,
         NULL AS ExtraImageId,
-        NULL AS ExtraImageUrl
+      NULL AS ExtraImageUrl
+      ${createdAtSelect}
+      ${featuredSelect}
+      ${hotSelect}
         FROM [Products] p
         LEFT JOIN [ProductCategories] pc ON p.[CategoryId] = pc.[CategoryId]
         LEFT JOIN (
@@ -511,6 +783,9 @@ async function getProducts(opts = {}) {
         ProductId: row.ProductId,
         Name: row.Name,
         Price: row.Price,
+        DisplayPrice: Number(row.DisplayPrice || 0),
+        PriceVnd: Number(row.DisplayPrice || 0),
+        SellPriceVnd: Number(row.DisplayPrice || 0),
         Description: row.Description,
         ImageUrl: imageUrl,
         Stock: row.Stock,
@@ -520,6 +795,9 @@ async function getProducts(opts = {}) {
         AverageRating: Math.round(Number(row.AverageRating || 0) * 10) / 10,
         ReviewCount: Number(row.ReviewCount || 0),
         SoldCount: Number(row.SoldCount || 0),
+        CreatedAt: row.CreatedAt || null,
+        IsFeatured: row.IsFeatured ?? null,
+        IsHot: row.IsHot ?? null,
         Images: images
       })
     }
@@ -534,10 +812,15 @@ async function getProducts(opts = {}) {
     }
   }
 
-  return Array.from(byProductId.values()).map(product => ({
+  const list = Array.from(byProductId.values()).map(product => ({
     ...product,
     ImageUrl: product.ImageUrl || product.Images[0] || null
   }))
+
+  const affinity = userId ? await getUserCategoryAffinity(userId) : null
+  const hasHistory = Boolean(affinity && (affinity.totalProducts > 0))
+  const mode = userId ? (hasHistory ? 'personalized' : 'coldStart') : 'anonymous'
+  return buildRankedList({ items: list, type: 'product', userAffinity: affinity, mode })
 }
 
 async function getProductVariants(productId) {
@@ -553,8 +836,8 @@ async function getProductVariants(productId) {
        pv.[ProductId],
        pv.[VariantName],
        COALESCE(vlots.[TotalQty], COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.[Stock]), 0), 0) AS Stock,
-       COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.[Price]), 0) AS PriceVnd,
-       COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.[Price]), 0) AS SellPriceVnd
+       COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.[Price]), TRY_CONVERT(DECIMAL(19,2), p.[Price]), 0) AS PriceVnd,
+       COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.[Price]), TRY_CONVERT(DECIMAL(19,2), p.[Price]), 0) AS SellPriceVnd
      FROM [ProductVariants] pv
      INNER JOIN [Products] p ON p.[ProductId] = pv.[ProductId]
      OUTER APPLY (
@@ -1610,7 +1893,7 @@ async function getSalonStats() {
 /**
  * Get all homepage data
  */
-async function getHomepageData() {
+async function getHomepageData(opts = {}) {
   const [
     services,
     serviceCategories,
@@ -1619,9 +1902,9 @@ async function getHomepageData() {
     reviews,
     stats
   ] = await Promise.all([
-    getServices(),
+    getServices(opts),
     getServiceCategories(),
-    getProducts(),
+    getProducts(opts),
     getProductCategories(),
     getTopReviews(11),
     getSalonStats()

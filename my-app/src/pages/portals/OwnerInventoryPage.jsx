@@ -11,6 +11,7 @@ import {
   IconSearch,
 } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
+import { notifySuccess, notifyError } from '../../lib/notify.js'
 import { getToken } from '../../lib/auth.js'
 
 function formatVnd(value) {
@@ -63,8 +64,15 @@ function parseDmyString(value) {
 
 function isValidDateInput(value) {
   if (!value) return true
-  const d = new Date(value)
-  return !Number.isNaN(d.getTime())
+  const raw = String(value).trim()
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return false
+  const y = Number(m[1])
+  const mon = Number(m[2])
+  const day = Number(m[3])
+  if (!Number.isFinite(y) || !Number.isFinite(mon) || !Number.isFinite(day)) return false
+  const d = new Date(y, mon - 1, day)
+  return d.getFullYear() === y && d.getMonth() === mon - 1 && d.getDate() === day
 }
 
 function extractRetailProductId(value) {
@@ -1807,12 +1815,6 @@ export default function OwnerInventoryPage() {
             throw new Error(`Unable to create variant: ${variant.name}`)
           }
 
-          if (normalizedGroup === 'retail' && sellPriceRaw) {
-            await api.put(`/api/owner/retail/variants/${variantId}`, {
-              price: String(sellPrice),
-            })
-          }
-
           if (Number(variant.stock || 0) > 0) {
             await api.post('/api/owner/inventory/stock', {
               inventoryItemId: `variant:${variantId}`,
@@ -1889,8 +1891,15 @@ export default function OwnerInventoryPage() {
     const wantsCreateVariant = wantsCreateRetailVariant || wantsCreateSupplyVariant
 
     if (wantsCreateRetailVariant) {
-      setStockError('Retail stock-in can only use existing variants')
-      return
+      const variantName = String(stockForm.newVariantName || '').trim()
+      if (!variantName) {
+        setStockError('Please enter new variant name')
+        return
+      }
+      if (hasDangerousInput(variantName)) {
+        setStockError('Invalid variant name')
+        return
+      }
     }
 
     if (isRetailProduct && !String(stockForm.variantId || '').trim()) {
@@ -1968,6 +1977,26 @@ export default function OwnerInventoryPage() {
     try {
       setStockError('')
       setStockNote('')
+
+      let nextInventoryItemId = inventoryItemId
+      if (wantsCreateRetailVariant) {
+        const retailProductId = String(selectedProduct?.productId || extractRetailProductId(selectedProduct?.id) || '').trim()
+        if (!retailProductId) {
+          setStockError('Unable to detect retail product id for new variant')
+          return
+        }
+        const createdVariant = await api.post(`/api/owner/retail/products/${retailProductId}/variants`, {
+          name: String(stockForm.newVariantName || '').trim(),
+          stock: 0,
+        })
+        const createdVariantId = String(createdVariant?.id || '').trim()
+        if (!createdVariantId) {
+          setStockError('Unable to create retail variant')
+          return
+        }
+        nextInventoryItemId = buildInventorySkuFromSelection(selectedProduct, createdVariantId)
+      }
+
       const variantLabel = isSuppliesSku
         ? (
           wantsCreateSupplyVariant
@@ -1979,19 +2008,52 @@ export default function OwnerInventoryPage() {
         ? composeLotNoteWithMeta(variantLabel, '', stockForm.note)
         : composeLotNoteWithMeta('', sellPriceRaw ? String(sellPrice) : '', stockForm.note)
 
-      await api.post('/api/owner/inventory/stock', {
-        inventoryItemId,
-        qty: String(qty),
-        importPrice: String(importPrice),
-        sellPriceVnd: sellPriceRaw ? String(sellPrice) : undefined,
-        supplier: stockForm.supplier,
-        date: selectedDate,
-        expiryDate: isSuppliesSku ? stockForm.expiryDate : null,
-        note: noteWithMeta,
-      })
+      const shouldCreateStockLot = Number.isFinite(qty) && qty > 0
+      if (shouldCreateStockLot) {
+        await api.post('/api/owner/inventory/stock', {
+          inventoryItemId: nextInventoryItemId,
+          qty: String(qty),
+          importPrice: String(importPrice),
+          sellPriceVnd: sellPriceRaw ? String(sellPrice) : undefined,
+          supplier: stockForm.supplier,
+          date: selectedDate,
+          expiryDate: isSuppliesSku ? stockForm.expiryDate : null,
+          note: noteWithMeta,
+        })
+      }
 
       await refreshInventory()
-      setStockNote('Stock-in saved. Check lots and history.')
+
+      // If caller provided a sell price, try to persist it to the underlying
+      // inventory item or retail variant so product listing can reflect it
+      // immediately (avoid waiting for other background syncs on the server).
+      if (sellPriceRaw) {
+        try {
+          if (String(nextInventoryItemId || '').startsWith('variant:')) {
+            const vid = String(nextInventoryItemId).split(':')[1]
+            if (vid) {
+              // update variant price (server now accepts price-only update)
+              await api.put(`/api/owner/retail/variants/${vid}`, { price: String(sellPrice) })
+            }
+          } else {
+            // update inventory item sell price (best-effort)
+            const itemId = String(nextInventoryItemId || '')
+            if (itemId) {
+              await api.put(`/api/owner/inventory/items/${itemId}`, { sellPriceVnd: String(sellPrice) })
+            }
+          }
+        } catch (err) {
+          // non-fatal: ignore and continue; UI was already refreshed above
+          if (import.meta.env.DEV) console.warn('Unable to persist sell price automatically', err)
+        }
+      }
+      if (wantsCreateRetailVariant && !shouldCreateStockLot) {
+        setStockNote('Variant created successfully.')
+        notifySuccess('Variant created successfully.')
+      } else {
+        setStockNote('Stock-in saved. Check lots and history.')
+        notifySuccess('Stock-in saved. Check lots and history.')
+      }
       setStockForm({
         productId: '',
         variantId: '',
@@ -2010,7 +2072,9 @@ export default function OwnerInventoryPage() {
       if (import.meta.env.DEV) {
         console.error('Stock-in failed', err)
       }
-      setStockError(resolveUiErrorMessage(err))
+      const msg = resolveUiErrorMessage(err)
+      setStockError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2077,13 +2141,16 @@ export default function OwnerInventoryPage() {
 
       await refreshInventory()
       setStockOutNote('Stock-out saved. Check lots and history.')
+      notifySuccess('Stock-out saved. Check lots and history.')
       setStockOutForm({ productId: '', variantId: '', supplyVariantName: '', inventoryItemId: '', qty: '0', date: getTodayDateInput(), note: '' })
       closeStockOut()
     } catch (err) {
       if (import.meta.env.DEV) {
         console.error('Stock-out failed', err)
       }
-      setStockOutError(resolveUiErrorMessage(err))
+      const msg = resolveUiErrorMessage(err)
+      setStockOutError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2185,9 +2252,12 @@ export default function OwnerInventoryPage() {
 
       await refreshInventory()
       closeEdit()
+      notifySuccess('Item updated successfully')
     } catch (err) {
       console.error(err)
-      setEditError(err?.message || 'Something went wrong')
+      const msg = err?.message || 'Something went wrong'
+      setEditError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2214,12 +2284,17 @@ export default function OwnerInventoryPage() {
       setExpandedLots((prev) => prev.filter((id) => String(id || '') !== targetId))
       setOpenDeleteConfirm(false)
       closeEdit()
-      refreshInventory().catch((err) => {
+      try {
+        await refreshInventory()
+      } catch (err) {
         console.error(err)
-      })
+      }
+      notifySuccess('Item deleted')
     } catch (err) {
       console.error(err)
-      setEditError(err?.message || 'Unable to deactivate item')
+      const msg = err?.message || 'Unable to deactivate item'
+      setEditError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2289,9 +2364,12 @@ export default function OwnerInventoryPage() {
       })
       await refreshInventory()
       closeEditLot()
+      notifySuccess('Lot updated')
     } catch (err) {
       console.error(err)
-      setLotEditError(err?.message || 'Unable to update lot')
+      const msg = err?.message || 'Unable to update lot'
+      setLotEditError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2304,9 +2382,12 @@ export default function OwnerInventoryPage() {
       await api.del(`/api/owner/inventory/lots/${targetLotId}`)
       await refreshInventory()
       closeEditLot()
+      notifySuccess('Lot deleted')
     } catch (err) {
       console.error(err)
-      setLotEditError(err?.message || 'Unable to delete lot')
+      const msg = err?.message || 'Unable to delete lot'
+      setLotEditError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2344,9 +2425,12 @@ export default function OwnerInventoryPage() {
       await refreshVariantsAndProduct(variantsFor.productId)
       setNewVariant({ name: '', stock: '0' })
       await refreshInventory()
+      notifySuccess('Variant created')
     } catch (err) {
       console.error(err)
-      setVariantsError(err?.message || 'Unable to create variant')
+      const msg = err?.message || 'Unable to create variant'
+      setVariantsError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2373,9 +2457,12 @@ export default function OwnerInventoryPage() {
         await refreshVariantsAndProduct(variantsFor.productId)
       }
       await refreshInventory()
+      notifySuccess('Variant updated')
     } catch (err) {
       console.error(err)
-      setVariantsError(err?.message || 'Unable to update variant')
+      const msg = err?.message || 'Unable to update variant'
+      setVariantsError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2392,9 +2479,12 @@ export default function OwnerInventoryPage() {
       await api.del(`/api/owner/retail/variants/${variant.id}`)
       await refreshVariantsAndProduct(variantsFor.productId)
       await refreshInventory()
+      notifySuccess('Variant deleted')
     } catch (err) {
       console.error(err)
-      setVariantsError(err?.message || 'Unable to delete variant')
+      const msg = err?.message || 'Unable to delete variant'
+      setVariantsError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2452,31 +2542,6 @@ export default function OwnerInventoryPage() {
             Stock Out
           </button>
 
-          <button
-            type="button"
-            className="portal-primaryBtn"
-            onClick={() => {
-              setAddError('')
-              setProductForm((p) => ({
-                ...p,
-                group: 'retail',
-                variants: ensureRetailVariantDrafts(p.variants, p.qty || '0'),
-              }))
-              setOpenAdd(true)
-            }}
-          >
-            <span className="portal-primaryBtnIcon" aria-hidden="true">
-              +
-            </span>
-            Add Product
-          </button>
-
-          <button type="button" className="portal-primaryBtn" onClick={openCreateCategory}>
-            <span className="portal-primaryBtnIcon" aria-hidden="true">
-              +
-            </span>
-            Add Category
-          </button>
         </div>
       </div>
 
@@ -3115,10 +3180,16 @@ export default function OwnerInventoryPage() {
 
               const productId = String(selectedProduct?.productId || '').trim()
               const variantOptions = variantOptionsByProductId.get(productId) || []
-              const variantDropdownOptions = variantOptions.map((v) => ({
-                value: String(v.id),
-                label: String(v.name || ''),
-              }))
+              const isCreatingRetailVariant = String(stockForm.variantId || '') === STOCK_IN_NEW_VARIANT_VALUE
+              const variantDropdownOptions = [
+                ...(isCreatingRetailVariant && String(stockForm.newVariantName || '').trim()
+                  ? [{ value: STOCK_IN_NEW_VARIANT_VALUE, label: `New: ${String(stockForm.newVariantName || '').trim()}` }]
+                  : []),
+                ...variantOptions.map((v) => ({
+                  value: String(v.id),
+                  label: String(v.name || ''),
+                })),
+              ]
               return (
                 <label className="portal-field">
                   <span className="portal-label">Variant</span>
@@ -3127,14 +3198,24 @@ export default function OwnerInventoryPage() {
                     placeholder="Select variant"
                     emptyValueLabel="Select variant"
                     options={variantDropdownOptions}
+                    createOptionLabel={(typed) => `+ Create variant "${typed}"`}
+                    onCreateFromQuery={(typed) => {
+                      setStockForm((p) => ({
+                        ...p,
+                        variantId: STOCK_IN_NEW_VARIANT_VALUE,
+                        newVariantName: typed,
+                        inventoryItemId: '',
+                      }))
+                    }}
                     onChange={(nextVariantId) => {
                       const sku = buildInventorySkuFromSelection(selectedProduct, nextVariantId)
                       const selectedItem = items.find((it) => String(it?.id || '') === String(sku || ''))
+                      const isNewVariantSelection = String(nextVariantId || '') === STOCK_IN_NEW_VARIANT_VALUE
                       setStockForId(String(sku || ''))
                       setStockForm((p) => ({
                         ...p,
                         variantId: String(nextVariantId || ''),
-                        newVariantName: '',
+                        newVariantName: isNewVariantSelection ? p.newVariantName : '',
                         inventoryItemId: sku,
                         importPrice: resolveStockInImportPriceInputValue(selectedItem),
                         sellPrice: resolveStockInSellPriceInputValue(selectedItem),
@@ -3462,6 +3543,11 @@ export default function OwnerInventoryPage() {
                   list="owner-inventory-category-list"
                   value={categoryInputEdit}
                 />
+                <datalist id="owner-inventory-category-list">
+                  {(categories || []).map((c) => (
+                    <option key={String(c.id)} value={c.name} />
+                  ))}
+                </datalist>
               </label>
 
               <label className="portal-field">

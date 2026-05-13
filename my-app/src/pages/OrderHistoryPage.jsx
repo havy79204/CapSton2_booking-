@@ -9,9 +9,12 @@ import '../styles/HistoryPage.css'
 function normalizeOrderStatus(status) {
   const value = String(status || '').toLowerCase()
   if (value.includes('cancel')) return 'CANCELLED'
-  if (value.includes('deliver') || value.includes('complete')) return 'COMPLETED'
+  if (value === 'delivered') return 'CONFIRMED'
+  if (value === 'confirmed' || value === 'customer confirmed') return 'CONFIRMED'
+  if (value.includes('complete')) return 'COMPLETED'
+  if (value.includes('deliver')) return 'CONFIRMED'
   if (value.includes('ship')) return 'SHIPPING'
-  if (value.includes('process') || value.includes('confirm')) return 'PROCESSING'
+  if (value.includes('process')) return 'PROCESSING'
   if (value.includes('pending') || value.includes('await')) return 'PENDING'
   return String(status || 'PENDING').trim().toUpperCase()
 }
@@ -43,7 +46,9 @@ function statusClass(status, kind = 'order') {
   }
 
   if (status === 'PENDING') return 'pending'
-  if (status === 'PROCESSING' || status === 'SHIPPING') return 'confirmed'
+  if (status === 'PROCESSING') return 'processing'
+  if (status === 'SHIPPING') return 'shipping'
+  if (status === 'CONFIRMED') return 'confirmed'
   if (status === 'COMPLETED') return 'completed'
   if (status === 'CANCELLED') return 'cancelled'
   return 'default'
@@ -59,17 +64,17 @@ function paymentMethodClass(method) {
 function isPending(status) {
   return normalizeOrderStatus(status) === 'PENDING'
 }
-
-function isCompleted(status) {
-  return normalizeOrderStatus(status) === 'COMPLETED'
-}
-
 function isProcessing(status) {
   return normalizeOrderStatus(status) === 'PROCESSING'
 }
-
 function isShipping(status) {
   return normalizeOrderStatus(status) === 'SHIPPING'
+}
+function isConfirmed(status) {
+  return normalizeOrderStatus(status) === 'CONFIRMED'
+}
+function isCompleted(status) {
+  return normalizeOrderStatus(status) === 'COMPLETED'
 }
 
 function fmtMoney(value) {
@@ -99,7 +104,7 @@ function cleanProductName(item) {
 
 const OrderHistoryPage = () => {
   const navigate = useNavigate()
-  const { orders, loading, error, cancelOrder, completeOrder, reorderOrder, refresh } = useCustomerOrders(100)
+  const { orders, loading, error, cancelOrder, confirmReceivedOrder, reorderOrder, refresh } = useCustomerOrders(100)
   const [activeFilter, setActiveFilter] = useState('all')
   const [sortBy, setSortBy] = useState('newest')
   const [cancellingId, setCancellingId] = useState('')
@@ -118,6 +123,8 @@ const OrderHistoryPage = () => {
   const [resultModalOpen, setResultModalOpen] = useState(false)
   const [resultTitle, setResultTitle] = useState('')
   const [resultMessage, setResultMessage] = useState('')
+  const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false)
+  const [orderToComplete, setOrderToComplete] = useState(null)
 
   const handleCancel = async (order) => {
     const orderId = order?.OrderId
@@ -139,23 +146,41 @@ const OrderHistoryPage = () => {
     }
   }
 
-  const handleComplete = async (order) => {
+  const handleConfirmReceived = async (order) => {
     const orderId = order?.OrderId
     if (!orderId) return
-    if (!isShipping(order.Status)) {
-      alert('Only shipping orders can be marked as completed')
+    if (!isConfirmed(order.Status)) {
+      setResultTitle('Notice')
+      setResultMessage('Only confirmed orders can be completed by customer')
+      setResultModalOpen(true)
       return
     }
-    if (!window.confirm('Confirm you have received this order?')) return
+
+    setOrderToComplete(order)
+    setConfirmCompleteOpen(true)
+  }
+
+  const confirmCompleteOrder = async () => {
+    const orderId = String(orderToComplete?.OrderId || '').trim()
+    if (!orderId) {
+      setConfirmCompleteOpen(false)
+      return
+    }
 
     try {
+      setConfirmCompleteOpen(false)
       setCompletingId(orderId)
-      await completeOrder(orderId)
-      alert('Order marked as completed')
+      await confirmReceivedOrder(orderId)
+      setResultTitle('Successfully!')
+      setResultMessage('Order has been completed successfully.')
+      setResultModalOpen(true)
     } catch (err) {
-      alert(err?.message || 'Failed to confirm receipt')
+      setResultTitle('Error')
+      setResultMessage(err?.message || 'Failed to confirm receipt')
+      setResultModalOpen(true)
     } finally {
       setCompletingId('')
+      setOrderToComplete(null)
     }
   }
 
@@ -292,8 +317,8 @@ const OrderHistoryPage = () => {
   const visibleOrders = useMemo(() => {
     const filtered = (Array.isArray(orders) ? orders : []).filter((order) => {
       const normalized = normalizeOrderStatus(order?.Status)
-      if (activeFilter === 'pending') return normalized === 'PENDING' || normalized === 'PROCESSING' || normalized === 'SHIPPING'
-      if (activeFilter === 'shipping') return normalized === 'SHIPPING'
+      if (activeFilter === 'pending') return normalized === 'PENDING' || normalized === 'PROCESSING'
+      if (activeFilter === 'shipping') return normalized === 'SHIPPING' || normalized === 'CONFIRMED'
       if (activeFilter === 'completed') return normalized === 'COMPLETED'
       if (activeFilter === 'cancelled') return normalized === 'CANCELLED'
       return true
@@ -476,13 +501,13 @@ const OrderHistoryPage = () => {
                       </button>
                     ) : null}
 
-                    {isShipping(order.Status) ? (
+                    {isConfirmed(order.Status) ? (
                       <button
                         className="history-link-btn history-link-btn-primary"
-                        onClick={() => handleComplete(order)}
+                        onClick={() => handleConfirmReceived(order)}
                         disabled={completingId === order.OrderId}
                       >
-                        {completingId === order.OrderId ? 'Confirming...' : 'Confirm Received'}
+                        {completingId === order.OrderId ? 'Verifying...' : 'I have received the goods'}
                       </button>
                     ) : null}
 
@@ -698,6 +723,43 @@ const OrderHistoryPage = () => {
           fontWeight: '500',
         }}>
           {resultMessage}
+        </p>
+      </PortalModal>
+
+      <PortalModal
+        open={confirmCompleteOpen}
+        title="Confirm Received"
+        onClose={() => {
+          if (completingId) return
+          setConfirmCompleteOpen(false)
+          setOrderToComplete(null)
+        }}
+        footer={
+          <>
+            <button
+              type="button"
+              className="portal-modalBtn"
+              onClick={() => {
+                setConfirmCompleteOpen(false)
+                setOrderToComplete(null)
+              }}
+              disabled={Boolean(completingId)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="portal-modalBtn portal-modalBtnPrimary"
+              onClick={confirmCompleteOrder}
+              disabled={Boolean(completingId)}
+            >
+              {completingId ? 'Confirming...' : 'Yes, I received it'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: '15px', color: '#1f2937', lineHeight: '1.6', fontWeight: '500' }}>
+          Confirm you have received this order?
         </p>
       </PortalModal>
     </section>

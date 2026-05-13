@@ -37,11 +37,38 @@ export default function StaffAppointmentsPage() {
   }, [timelineStartMinutes, totalTimeSlots])
 
   const parseHourFromSetting = (value, fallback) => {
-    const m = String(value || '').match(/^(\d{1,2}):(\d{2})$/)
-    if (!m) return fallback
-    const hour = Number(m[1])
-    if (!Number.isFinite(hour) || hour < 0 || hour > 23) return fallback
-    return hour
+    const raw = String(value || '').trim()
+    if (!raw) return fallback
+
+    // Prefer raw clock extraction to avoid timezone conversions (08:00 -> 09:00).
+    const isoTime = raw.match(/T(\d{1,2}):(\d{2})(?::\d{2})?/i)
+    if (isoTime) {
+      const hour = Number(isoTime[1])
+      const minute = Number(isoTime[2])
+      if (Number.isFinite(hour) && Number.isFinite(minute) && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+        return hour
+      }
+    }
+
+    const m = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|SA|CH)?$/i)
+    if (m) {
+      let hour = Number(m[1])
+      const minute = Number(m[2])
+      const marker = String(m[3] || '').toUpperCase()
+      if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute < 0 || minute > 59) return fallback
+      if ((marker === 'PM' || marker === 'CH') && hour < 12) hour += 12
+      if ((marker === 'AM' || marker === 'SA') && hour === 12) hour = 0
+      if (hour < 0 || hour > 23) return fallback
+      return hour
+    }
+
+    return fallback
+  }
+
+  const getWeekdayPrefixFromDate = (date) => {
+    const d = date instanceof Date ? date : new Date(date)
+    if (Number.isNaN(d.getTime())) return null
+    return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()] || null
   }
 
   const normalizeTime = (t) => {
@@ -181,7 +208,7 @@ export default function StaffAppointmentsPage() {
           id: a.BookingId || a.id || a.AppointmentId,
           customerUserId: a.customerUserId || a.customerId,
           staffId: a.staffId || a.StaffId || a.staffID,
-          customer: a.customerName || a.customer || 'Unknown Customer',
+          customer: a.customerName || a.CustomerName || a.customer || 'Unknown Customer',
           service: serviceNames || 'No Service',
           duration: totalDuration || 30,
           date: appointmentDate,
@@ -204,15 +231,24 @@ export default function StaffAppointmentsPage() {
     ;(async () => {
       try {
         const map = (await api.get('/api/staff/settings')) || {}
-        const openingHour = parseHourFromSetting(map.ScheduleOpenTime || map.SalonOpenTime, 8)
-        const closingHour = parseHourFromSetting(map.ScheduleCloseTime || map.SalonCloseTime, 20)
+        const dayPrefix = getWeekdayPrefixFromDate(selectedDate)
+        const dayOpenKey = dayPrefix ? `Schedule${dayPrefix}OpenTime` : ''
+        const dayCloseKey = dayPrefix ? `Schedule${dayPrefix}CloseTime` : ''
+        const openingHour = parseHourFromSetting(
+          (dayOpenKey && map[dayOpenKey]) || map.ScheduleOpenTime || map.SalonOpenTime,
+          8
+        )
+        const closingHour = parseHourFromSetting(
+          (dayCloseKey && map[dayCloseKey]) || map.ScheduleCloseTime || map.SalonCloseTime,
+          20
+        )
         const safeCloseHour = closingHour > openingHour ? closingHour : Math.min(openingHour + 1, 23)
         setBusinessHours({ openingHour, closingHour: safeCloseHour })
       } catch (err) {
         console.error(err)
       }
     })()
-  }, []);
+  }, [selectedDate]);
 
   const handleEditClick = (e, appt) => {
     e.preventDefault();

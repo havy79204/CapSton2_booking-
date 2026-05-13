@@ -9,7 +9,6 @@ async function listTipsForStaff(staffId, options = {}) {
     const month = String(options.month || '').trim()
     if (month.match(/^\d{4}-\d{2}$/)) {
       params.monthStart = `${month}-01`
-      // Use DATEFROMPARTS for SQL Server or convert
       where += ` AND CAST(At AS DATE) >= @monthStart AND CAST(At AS DATE) < DATEADD(MONTH, 1, @monthStart)`
     }
   }

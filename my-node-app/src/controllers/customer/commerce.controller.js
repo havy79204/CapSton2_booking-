@@ -41,6 +41,7 @@ function mapAddressDto(address) {
   return {
     AddressId: address.AddressId || null,
     FullName: address.FullName || '',
+    PhoneNumber: address.PhoneNumber || address.phoneNumber || '',
     AddressLine: address.AddressLine || '',
     City: address.City || '',
     Country: address.Country || '',
@@ -74,7 +75,7 @@ function mapContextDto(raw) {
       RoleKey: user.RoleKey || null,
       Status: user.Status || null,
     },
-    defaultAddress: mapAddressDto(sanitized.defaultAddress),
+    defaultAddress: mapAddressDto(raw?.defaultAddress),
     bookingSettings: mapBookingSettingsDto(sanitized.bookingSettings),
   }
 }
@@ -91,7 +92,7 @@ function mapProfileDto(raw) {
       RoleKey: user.RoleKey || null,
       Status: user.Status || null,
     },
-    defaultAddress: mapAddressDto(sanitized.defaultAddress),
+    defaultAddress: mapAddressDto(raw?.defaultAddress),
     bookingSettings: mapBookingSettingsDto(sanitized.bookingSettings),
   }
 }
@@ -105,6 +106,7 @@ function mapStaffDto(list) {
     AvatarUrl: item.AvatarUrl || null,
     BookedSlots: Array.isArray(item.BookedSlots) ? item.BookedSlots : [],
     WorkingHours: item.WorkingHours || null,
+    WorkingWindows: Array.isArray(item.WorkingWindows) ? item.WorkingWindows : [],
   }))
 }
 
@@ -138,8 +140,14 @@ function mapCartDto(raw) {
       QuantityCount: Number(summary.QuantityCount || 0),
       Subtotal: Number(summary.Subtotal || 0),
     },
-    DefaultAddress: mapAddressDto(sanitized.DefaultAddress),
+    DefaultAddress: mapAddressDto(raw?.DefaultAddress),
   }
+}
+
+function mapAddressListDto(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((address) => mapAddressDto(address))
+    .filter(Boolean)
 }
 
 const getCustomerContext = asyncHandler(async (req, res) => {
@@ -182,34 +190,34 @@ const getStaff = asyncHandler(async (req, res) => {
 const getAddresses = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
   const data = await commerceService.listAddresses(userId)
-  res.json({ data: sanitizeCustomerResponse(data) })
+  res.json({ data: mapAddressListDto(data) })
 })
 
 const postAddress = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
   const data = await commerceService.upsertAddress(userId, req.body || {})
-  res.status(201).json({ data: sanitizeCustomerResponse(data) })
+  res.status(201).json({ data: mapAddressListDto(data) })
 })
 
 const putAddress = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
   const { addressId } = req.params || {}
   const data = await commerceService.upsertAddress(userId, req.body || {}, addressId)
-  res.json({ data: sanitizeCustomerResponse(data) })
+  res.json({ data: mapAddressListDto(data) })
 })
 
 const deleteAddress = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
   const { addressId } = req.params || {}
   const data = await commerceService.deleteAddress(userId, addressId)
-  res.json({ data: sanitizeCustomerResponse(data) })
+  res.json({ data: mapAddressListDto(data) })
 })
 
 const postSetDefaultAddress = asyncHandler(async (req, res) => {
   const userId = getUserIdFromReq(req)
   const { addressId } = req.params || {}
   const data = await commerceService.setDefaultAddress(userId, addressId)
-  res.json({ data: sanitizeCustomerResponse(data) })
+  res.json({ data: mapAddressListDto(data) })
 })
 
 const getBookings = asyncHandler(async (req, res) => {

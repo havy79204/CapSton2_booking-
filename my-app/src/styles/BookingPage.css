@@ -615,6 +615,73 @@
   color: #fff;
 }
 
+.booking-success-page {
+  min-height: 60vh;
+  display: flex;
+  align-items: center;
+}
+
+.booking-success-card {
+  max-width: 720px;
+  margin: 0 auto;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 2rem 1.5rem;
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+}
+
+.booking-success-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  margin: 0 auto 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ecfdf5;
+  color: #10b981;
+  font-size: 2rem;
+}
+
+.booking-success-card h2 {
+  margin: 0;
+  color: var(--color-primary);
+}
+
+.booking-success-card p {
+  margin: 0.75rem 0 0;
+  color: var(--color-text-secondary);
+}
+
+.booking-success-buttons {
+  margin-top: 1.2rem;
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.booking-success-buttons button {
+  min-width: 160px;
+  border: none;
+  border-radius: var(--radius-full);
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.booking-success-buttons .home-btn {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.booking-success-buttons .orders-btn {
+  background: var(--color-secondary);
+  color: #fff;
+}
+
 @media (max-width: 1200px) {
   .booking-grid {
     grid-template-columns: 1fr;
@@ -640,6 +707,14 @@
 
   .booking-page .booking-card {
     padding: var(--spacing-sm);
+  }
+
+  .booking-success-card {
+    padding: 1.35rem 1rem;
+  }
+
+  .booking-success-buttons button {
+    width: 100%;
   }
 
   .info-row {

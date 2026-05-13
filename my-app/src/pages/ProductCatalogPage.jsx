@@ -200,7 +200,7 @@ const ProductCatalogPage = () => {
                   <h3>{product.Name}</h3>
                   <p>{product.Description}</p>
                   <div className="catalog-meta">
-                    <span className="catalog-price">{formatVnd(product.Price || 0)}</span>
+                    <span className="catalog-price">{formatVnd(product.DisplayPrice ?? product.Price ?? 0)}</span>
                     <span className="catalog-stock">{product.Stock} in stock</span>
                   </div>
                   <div className="catalog-stat-row">

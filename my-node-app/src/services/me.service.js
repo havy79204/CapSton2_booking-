@@ -4,6 +4,8 @@ const bcrypt = require('bcryptjs')
 const fs = require('fs/promises')
 const path = require('path')
 
+const PROFILE_PHONE_REGEX = /^0(3|5|7|8|9)\d{8}$/
+
 function getAvatarUploadDir() {
     return path.join(__dirname, '..', '..', 'uploads', 'avatars')
 }
@@ -57,6 +59,22 @@ function normalizeAvatarUrlForDb(input) {
     }
 
     return raw
+}
+
+function normalizePhone(value) {
+    const raw = String(value || '').replace(/[^\d+]/g, '').trim()
+    if (!raw) return ''
+
+    if (raw.startsWith('+84')) {
+        return `0${raw.slice(3).replace(/\D/g, '')}`
+    }
+
+    const digits = raw.replace(/\D/g, '')
+    if (digits.startsWith('84') && digits.length === 11) {
+        return `0${digits.slice(2)}`
+    }
+
+    return digits
 }
 
 async function tableExists(tableName) {
@@ -160,6 +178,7 @@ async function updateMe(userId, { name, email, phone, avatarUrl } = {}) {
     const n = name !== undefined && name !== null ? String(name).trim() : ''
     const e = email !== undefined && email !== null ? String(email).trim() : ''
     const p = phone !== undefined && phone !== null ? String(phone).trim() : ''
+    const normalizedPhone = normalizePhone(p)
     const a = avatarUrl !== undefined ? normalizeAvatarUrlForDb(avatarUrl) : null
 
     if (!n) {
@@ -174,7 +193,13 @@ async function updateMe(userId, { name, email, phone, avatarUrl } = {}) {
         throw err
     }
 
-    const bind = { userId, name: n, email: e || null, phone: p || null }
+    if (p && !PROFILE_PHONE_REGEX.test(normalizedPhone)) {
+        const err = new Error('Phone number must be a valid Vietnamese phone number')
+        err.statusCode = 400
+        throw err
+    }
+
+    const bind = { userId, name: n, email: e || null, phone: normalizedPhone || null }
     let sql = `UPDATE Users
      SET Name = @name,
          Email = @email,

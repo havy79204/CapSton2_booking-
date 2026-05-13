@@ -1,0 +1,9 @@
+IF COL_LENGTH('Bookings', 'CustomerName') IS NULL
+BEGIN
+  ALTER TABLE Bookings ADD CustomerName NVARCHAR(255) NULL;
+END;
+
+IF COL_LENGTH('Bookings', 'Phone') IS NULL
+BEGIN
+  ALTER TABLE Bookings ADD Phone NVARCHAR(50) NULL;
+END;

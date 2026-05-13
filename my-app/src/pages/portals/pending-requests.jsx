@@ -106,13 +106,13 @@ export default function PendingRequestsPage() {
 
   const applyFilters = useCallback((source = requests) => {
     const s = String(search || '').trim().toLowerCase()
-    const list = (source || []).filter((r) => {
+    const base = (source || []).filter((r) => {
       const name = String(r?.StaffName || '').toLowerCase()
       if (s && !name.includes(s)) return false
-      if (!inSelectedMonth(r)) return false
       return true
     })
-    setFilteredRequests(list)
+    const byMonth = base.filter((r) => inSelectedMonth(r))
+    setFilteredRequests(byMonth.length ? byMonth : base)
   }, [requests, search, inSelectedMonth])
 
   useEffect(() => { load() }, [])
@@ -166,7 +166,7 @@ export default function PendingRequestsPage() {
         <h2 style={{ margin: 0 }}>Pending Time-off Requests</h2>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="portal-outlineBtn" onClick={() => navigate(-1)}>Back</button>
-          <button className="portal-primaryBtn" onClick={load}>Refresh</button>
+          <button className="portal-primaryBtn" onClick={() => navigate('/portals/owner/schedule')}>Schedule</button>
         </div>
       </div>
 

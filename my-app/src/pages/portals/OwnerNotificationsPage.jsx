@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { io } from 'socket.io-client'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import { api } from '../../lib/api.js'
@@ -14,6 +15,7 @@ function formatTs(iso) {
 }
 
 export default function OwnerNotificationsPage() {
+  const navigate = useNavigate()
   const [items, setItems] = useState([])
   const [activeCategory, setActiveCategory] = useState('all')
   const [msg, setMsg] = useState('')
@@ -31,6 +33,61 @@ export default function OwnerNotificationsPage() {
     success: 'Positive',
     warning: 'Warning',
     error: 'Critical',
+  }
+
+  function toIsoDate(value) {
+    const raw = String(value || '').trim()
+    if (!raw) return ''
+
+    const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`
+
+    const d = new Date(raw)
+    if (Number.isNaN(d.getTime())) return ''
+
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    if (year < 2020 || year > new Date().getFullYear() + 2) return ''
+    return `${year}-${month}-${day}`
+  }
+
+  function handleNotificationClick(item) {
+    const category = String(item?.category || '').toLowerCase()
+    const type = String(item?.type || '').toLowerCase()
+    const bookingDate = toIsoDate(item?.bookingTime || item?.createdAt)
+    const bookingId = String(item?.bookingId || '').trim()
+    const orderId = String(item?.orderId || '').trim()
+
+    if (type === 'booking' || bookingId) {
+      const query = new URLSearchParams()
+      if (bookingDate) query.set('date', bookingDate)
+      if (bookingId) query.set('bookingId', bookingId)
+      navigate(`/portals/owner/appointments?${query.toString()}`)
+      return
+    }
+
+    if (orderId || type === 'order' || type === 'payment') {
+      const query = new URLSearchParams()
+      if (orderId) query.set('orderId', orderId)
+      const qs = query.toString()
+      navigate(`/portals/owner/orders${qs ? `?${qs}` : ''}`)
+      return
+    }
+
+    if (category === 'inventory') {
+      navigate('/portals/owner/inventory')
+      return
+    }
+
+    if (category === 'hr') {
+      navigate('/portals/owner/staff')
+      return
+    }
+
+    if (category === 'revenue') {
+      navigate('/portals/owner/dashboard')
+    }
   }
 
   function publishUnreadCount(nextItems) {
@@ -151,6 +208,7 @@ export default function OwnerNotificationsPage() {
                 className="portal-listItem"
                 role="listitem"
                 style={{ opacity: n.read ? 0.7 : 1 }}
+                onClick={() => handleNotificationClick(n)}
               >
                 <div className="portal-listPrimary">
                   <div className="portal-listTitle" style={{ fontWeight: 900 }}>

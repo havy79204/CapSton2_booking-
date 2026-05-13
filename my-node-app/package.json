@@ -9,7 +9,9 @@
         "prestart": "npm run guard:optional-chaining",
         "start": "node src/index.js",
         "dev": "nodemon src/index.js",
-        "migrate": "node scripts/runMigrations.js"
+        "migrate": "node scripts/runMigrations.js",
+        "test": "jest --runInBand --testMatch \"**/tests/**/*.test.js\"",
+        "test:watch": "jest --watch --testMatch \"**/tests/**/*.test.js\""
     },
     "keywords": [],
     "author": "",
@@ -34,6 +36,7 @@
         "xlsx": "^0.18.5"
     },
     "devDependencies": {
+        "jest": "^30.3.0",
         "nodemon": "^3.1.14"
     }
 }

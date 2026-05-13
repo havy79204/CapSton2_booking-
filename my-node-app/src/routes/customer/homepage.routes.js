@@ -1,5 +1,5 @@
 const express = require('express')
-const { requireAuth } = require('../../middleware/auth')
+const { requireAuth, optionalAuth } = require('../../middleware/auth')
 const {
   getHomepage,
   getServices,
@@ -21,6 +21,9 @@ const {
 } = require('../../controllers/customer/homepage.controller')
 
 const router = express.Router()
+
+// Attach user info when available, without enforcing login.
+router.use(optionalAuth)
 
 /**
  * Public routes - no authentication required

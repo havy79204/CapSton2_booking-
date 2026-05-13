@@ -24,6 +24,8 @@ router.get('/retail/orders/:orderId', requireAuth, controller.getRetailOrder)
 router.put('/retail/orders/:orderId', requireAuth, controller.putRetailOrder)
 router.patch('/retail/orders/:orderId/process', requireAuth, controller.patchRetailOrderProcess)
 router.patch('/retail/orders/:orderId/ship', requireAuth, controller.patchRetailOrderShip)
+router.patch('/retail/orders/:orderId/confirm', requireAuth, controller.patchRetailOrderConfirm)
+router.patch('/retail/orders/:orderId/complete', requireAuth, controller.patchRetailOrderComplete)
 router.patch('/retail/orders/:orderId/cancel', requireAuth, controller.patchRetailOrderCancel)
 router.delete('/retail/orders/:orderId', requireAuth, controller.deleteRetailOrder)
 

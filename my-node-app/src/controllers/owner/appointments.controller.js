@@ -9,7 +9,9 @@ const getAppointments = asyncHandler(async (req, res) => {
 
   try {
 
-    const data = await appointmentsService.listAppointments()
+    const data = await appointmentsService.listAppointments({
+      month: req.query?.month,
+    })
 
     res.json({ ok: true, data })
 
@@ -29,17 +31,18 @@ const postAppointment = asyncHandler(async (req, res) => {
 
   try {
 
-    const { customerUserId, serviceId, serviceIds, staffId, date, time } = req.body || {}
+    const { customerUserId, customerName, serviceId, serviceIds, staffId, date, time } = req.body || {}
+    const hasCustomer = Boolean(String(customerUserId || '').trim()) || Boolean(String(customerName || '').trim())
 
     const hasService = (serviceIds && Array.isArray(serviceIds) && serviceIds.length > 0) || serviceId;
 
-    if (!customerUserId || !hasService || !staffId || !date || !time) {
+    if (!hasCustomer || !hasService || !staffId || !date || !time) {
 
       res.status(400).json({ 
 
         ok: false, 
 
-        error: 'Missing customerUserId/services/staffId/date/time' 
+        error: 'Missing customer info/services/staffId/date/time' 
 
       })
 

@@ -186,6 +186,20 @@ const patchRetailOrderShip = asyncHandler(async (req, res) => {
   res.json({ ok: true, data })
 })
 
+const patchRetailOrderConfirm = asyncHandler(async (req, res) => {
+  ensureOwnerOrAdmin(req)
+  const { orderId } = req.params || {}
+  const data = await retailService.transitionRetailOrderStatus(orderId, 'CONFIRMED', { actor: getActor(req) })
+  res.json({ ok: true, data })
+})
+
+const patchRetailOrderComplete = asyncHandler(async (req, res) => {
+  ensureOwnerOrAdmin(req)
+  const { orderId } = req.params || {}
+  const data = await retailService.transitionRetailOrderStatus(orderId, 'COMPLETED', { actor: getActor(req) })
+  res.json({ ok: true, data })
+})
+
 const patchRetailOrderCancel = asyncHandler(async (req, res) => {
   ensureOwnerOrAdmin(req)
   const { orderId } = req.params || {}
@@ -224,6 +238,8 @@ module.exports = {
   putRetailOrder,
   patchRetailOrderProcess,
   patchRetailOrderShip,
+  patchRetailOrderConfirm,
+  patchRetailOrderComplete,
   patchRetailOrderCancel,
   deleteRetailOrder,
 }

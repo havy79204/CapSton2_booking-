@@ -5,6 +5,7 @@ type ToastOptions = { duration?: number };
 
 type ToastContextType = {
   show: (message: string, opts?: ToastOptions) => void;
+  showSuccess: (message: string, opts?: ToastOptions) => void;
   showError: (message: string, opts?: ToastOptions) => void;
 };
 
@@ -30,6 +31,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     timeoutRef.current = (setTimeout(() => hide(), opts?.duration ?? 3000) as unknown) as number;
   };
 
+  const showSuccess = (message: string, opts?: ToastOptions) => {
+    show(message, opts);
+  };
+
   const showError = (message: string, opts?: ToastOptions) => {
     setMsg(message);
     setIsError(true);
@@ -43,7 +48,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <ToastContext.Provider value={{ show, showError }}>
+    <ToastContext.Provider value={{ show, showSuccess, showError }}>
       {children}
       {msg ? (
         <Animated.View style={[styles.container, { opacity }]}> 
