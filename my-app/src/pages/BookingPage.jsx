@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   IoCalendarOutline,
   IoCardOutline,
@@ -104,13 +104,33 @@ function isTimeSlotBooked(slotTime, totalDuration, bookedSlots = []) {
   })
 }
 
+function formatStaffWindowsLabel(staff) {
+  const windows = Array.isArray(staff?.WorkingWindows) ? staff.WorkingWindows : []
+  const normalized = windows
+    .map((w) => ({
+      start: String(w?.startHour || '').trim(),
+      end: String(w?.endHour || '').trim(),
+    }))
+    .filter((w) => w.start && w.end)
+
+  if (normalized.length) {
+    return normalized.map((w) => `${w.start}-${w.end}`).join(', ')
+  }
+
+  const start = String(staff?.WorkingHours?.startHour || '').trim()
+  const end = String(staff?.WorkingHours?.endHour || '').trim()
+  if (start && end) return `${start}-${end}`
+  return ''
+}
+
 const BookingPage = () => {
+  const navigate = useNavigate()
 
   const mapBookingStatus = (s) => {
     const st = String(s || '').trim().toLowerCase()
     if (!st) return 'Unknown'
     if (st === 'completed' || st === 'done') return 'Completed'
-    if (st === 'booked') return 'Booked'
+    if (st === 'booked') return 'Confirmed'
     if (st === 'pending') return 'Pending'
     if (st === 'cancel' || st === 'cancelled') return 'Cancelled'
     return st.charAt(0).toUpperCase() + st.slice(1)
@@ -143,6 +163,7 @@ const BookingPage = () => {
   const [resultModalOpen, setResultModalOpen] = useState(false)
   const [resultMessage, setResultMessage] = useState('')
   const [resultTitle, setResultTitle] = useState('')
+  const [bookingSuccessId, setBookingSuccessId] = useState('')
 
   // Test modal rendering - uncomment to debug
   useEffect(() => {
@@ -269,17 +290,22 @@ const BookingPage = () => {
     const slotEndMinutes = slotStartMinutes + totalDuration
     
     return (Array.isArray(staffs) ? staffs : []).filter((staff) => {
-      const workingHours = staff?.WorkingHours
-      if (!workingHours || !workingHours.startHour || !workingHours.endHour) {
+      const windows = Array.isArray(staff?.WorkingWindows) && staff.WorkingWindows.length
+        ? staff.WorkingWindows
+        : (staff?.WorkingHours ? [staff.WorkingHours] : [])
+
+      if (windows.length === 0) {
         return false
       }
-      
-      const [workStartHour, workStartMinute] = workingHours.startHour.split(':').map(Number)
-      const [workEndHour, workEndMinute] = workingHours.endHour.split(':').map(Number)
-      const workStartMinutes = workStartHour * 60 + workStartMinute
-      const workEndMinutes = workEndHour * 60 + workEndMinute
-      
-      if (slotStartMinutes < workStartMinutes || slotEndMinutes > workEndMinutes) {
+
+      const fitsAnyWindow = windows.some((window) => {
+        const workStartMinutes = parseTimeToMinutes(window?.startHour)
+        const workEndMinutes = parseTimeToMinutes(window?.endHour)
+        if (workStartMinutes === null || workEndMinutes === null) return false
+        return slotStartMinutes >= workStartMinutes && slotEndMinutes <= workEndMinutes
+      })
+
+      if (!fitsAnyWindow) {
         return false
       }
       
@@ -291,18 +317,28 @@ const BookingPage = () => {
   
   // Get time slots for a specific staff (for manual select)
   const getTimeSlotsForStaff = useCallback((staff) => {
-    if (!staff || !staff.WorkingHours || !staff.WorkingHours.startHour || !staff.WorkingHours.endHour) {
+    if (!staff) {
       return []
     }
-    
-    const workingStart = parseTimeToMinutes(staff.WorkingHours.startHour)
-    const workingEnd = parseTimeToMinutes(staff.WorkingHours.endHour)
+
+    const windows = Array.isArray(staff?.WorkingWindows) && staff.WorkingWindows.length
+      ? staff.WorkingWindows
+      : (staff?.WorkingHours ? [staff.WorkingHours] : [])
+
+    if (!windows.length) return []
     
     return availableTimeSlots.filter((slot) => {
       const slotMin = parseTimeToMinutes(slot)
       const slotEndMin = slotMin + totalDuration
-      
-      if (slotMin < workingStart || slotEndMin > workingEnd) return false
+
+      const inWindow = windows.some((window) => {
+        const workingStart = parseTimeToMinutes(window?.startHour)
+        const workingEnd = parseTimeToMinutes(window?.endHour)
+        if (workingStart === null || workingEnd === null) return false
+        return slotMin >= workingStart && slotEndMin <= workingEnd
+      })
+
+      if (!inWindow) return false
       
       const bookedSlots = staff?.BookedSlots || []
       return !isTimeSlotBooked(slot, totalDuration, bookedSlots)
@@ -312,23 +348,92 @@ const BookingPage = () => {
   const selectedStaff = staffs.find((staff) => String(staff.StaffId) === String(selectedStaffId)) || null
   const selectedTechnician = selectedServiceItems.length === 0
     ? 'Choose services first'
-    : staffSelectionMode === 'auto' && selectedStaff?.Name
-    ? `Auto: ${selectedStaff.Name}`
+    : staffSelectionMode === 'auto'
+    ? 'Auto assignment by system'
     : selectedStaff?.Name || 'Please choose a specialist'
+
+  const pickBestStaffForAuto = useCallback((slot) => {
+    const available = getAvailableStaffForTimeSlot(slot)
+    if (!available.length) return null
+
+    const toMinutes = (timeText) => parseTimeToMinutes(timeText) || 0
+    const staffScore = (staff) => {
+      const bookedSlots = Array.isArray(staff?.BookedSlots) ? staff.BookedSlots : []
+      const bookedMinutes = bookedSlots.reduce((sum, b) => {
+        const start = toMinutes(b?.startTime)
+        const end = toMinutes(b?.endTime)
+        if (end <= start) return sum
+        return sum + (end - start)
+      }, 0)
+      return {
+        bookedCount: bookedSlots.length,
+        bookedMinutes,
+        name: String(staff?.Name || ''),
+      }
+    }
+
+    const ranked = [...available].sort((a, b) => {
+      const sa = staffScore(a)
+      const sb = staffScore(b)
+      if (sa.bookedCount !== sb.bookedCount) return sa.bookedCount - sb.bookedCount
+      if (sa.bookedMinutes !== sb.bookedMinutes) return sa.bookedMinutes - sb.bookedMinutes
+      return sa.name.localeCompare(sb.name)
+    })
+
+    return ranked[0] || null
+  }, [getAvailableStaffForTimeSlot])
 
   // Auto-assign staff when time is selected in auto mode
   const handleTimeSelect = useCallback((slot) => {
     setSelectedTime(slot)
     
     if (staffSelectionMode === 'auto') {
-      const availableStaff = getAvailableStaffForTimeSlot(slot)
-      if (availableStaff.length > 0) {
-        setSelectedStaffId(availableStaff[0].StaffId)
+      const bestStaff = pickBestStaffForAuto(slot)
+      if (bestStaff?.StaffId) {
+        setSelectedStaffId(bestStaff.StaffId)
       } else {
         setSelectedStaffId('')
       }
     }
-  }, [staffSelectionMode, getAvailableStaffForTimeSlot])
+  }, [staffSelectionMode, pickBestStaffForAuto])
+
+  useEffect(() => {
+    if (staffSelectionMode !== 'auto') return
+    if (!selectedServiceItems.length) {
+      setSelectedStaffId('')
+      return
+    }
+    if (!availableTimeSlots.length) {
+      setSelectedTime('')
+      setSelectedStaffId('')
+      return
+    }
+
+    const currentBest = selectedTime ? pickBestStaffForAuto(selectedTime) : null
+    if (selectedTime && currentBest?.StaffId) {
+      if (String(selectedStaffId || '') !== String(currentBest.StaffId)) {
+        setSelectedStaffId(currentBest.StaffId)
+      }
+      return
+    }
+
+    const firstSlot = availableTimeSlots.find((slot) => Boolean(pickBestStaffForAuto(slot)?.StaffId))
+    if (!firstSlot) {
+      setSelectedStaffId('')
+      return
+    }
+
+    const staff = pickBestStaffForAuto(firstSlot)
+    setSelectedTime(firstSlot)
+    setSelectedStaffId(staff?.StaffId || '')
+  }, [
+    staffSelectionMode,
+    selectedServiceItems,
+    availableTimeSlots,
+    selectedTime,
+    selectedStaffId,
+    pickBestStaffForAuto,
+  ])
   
   // Clear time when staff changes in manual mode
   const handleStaffSelect = useCallback((staffId) => {
@@ -437,6 +542,7 @@ const BookingPage = () => {
   }
 
   const checkBookingConflict = () => {
+    if (staffSelectionMode === 'auto') return null
     if (!isReturningCustomer || !selectedStaffId) return null
 
     const [selectedHour, selectedMinute] = selectedTime.split(':').map(Number)
@@ -473,7 +579,7 @@ const BookingPage = () => {
       return
     }
 
-    if (!selectedStaffId) {
+    if (staffSelectionMode === 'manual' && !selectedStaffId) {
       alert('Please choose a specialist before booking.')
       return
     }
@@ -499,11 +605,11 @@ const BookingPage = () => {
         notes,
         paymentMethod,
         giftCode: allowCustomerApply ? giftCode : '',
-        staffId: selectedStaffId || null,
+        staffId: staffSelectionMode === 'manual' ? (selectedStaffId || null) : null,
         serviceItems: selectedServiceItems.map((service) => ({
           serviceId: service.ServiceId,
           quantity: Number(service.quantity || 1),
-          staffId: selectedStaffId || null,
+          staffId: staffSelectionMode === 'manual' ? (selectedStaffId || null) : null,
         })),
       })
 
@@ -512,9 +618,7 @@ const BookingPage = () => {
         return
       }
 
-      setResultTitle('Successfully!')
-      setResultMessage('Your booking request has been submitted. We will contact you soon!')
-      setResultModalOpen(true)
+      setBookingSuccessId(String(result?.BookingId || result?.bookingId || ''))
       setNotes('')
       setGiftCode('')
       setAppliedPromotion(null)
@@ -575,6 +679,26 @@ const BookingPage = () => {
 
   if (servicesError || contextError || staffError || bookingsError) {
     return <div className="error">{servicesError || contextError || staffError || bookingsError}</div>
+  }
+
+  if (bookingSuccessId) {
+    return (
+      <section className="booking-page booking-success-page">
+        <div className="booking-container">
+          <div className="booking-success-card">
+            <div className="booking-success-icon">
+              <IoCheckmarkCircleOutline />
+            </div>
+            <h2>Booking #{bookingSuccessId} created successfully!</h2>
+            <p>Your booking request has been submitted. We will contact you soon!</p>
+            <div className="booking-success-buttons">
+              <button type="button" className="home-btn" onClick={() => navigate('/')}>Go to Home</button>
+              <button type="button" className="orders-btn" onClick={() => navigate('/bookings')}>View Bookings</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    )
   }
 
   return (
@@ -745,26 +869,9 @@ const BookingPage = () => {
                             })}
                           </div>
                           
-                          {selectedStaff && (
-                            <div className="auto-staff-info" style={{ marginTop: '1rem', background: '#f0fdf4', borderColor: '#86efac' }}>
-                              <p className="staff-assigned" style={{ color: '#166534' }}>
-                                <strong>Assigned:</strong> {selectedStaff.Name}
-                                {selectedStaff.WorkingHours && (
-                                  <span style={{ marginLeft: '0.5rem', color: '#6b7280' }}>
-                                    ({selectedStaff.WorkingHours.startHour}-{selectedStaff.WorkingHours.endHour})
-                                  </span>
-                                )}
-                              </p>
-                            </div>
-                          )}
+                          {/* Auto mode intentionally does not display assigned specialist details. */}
                           
-                          {!selectedStaff && selectedTime && (
-                            <div className="auto-staff-info" style={{ marginTop: '1rem', background: '#fff5f5', borderColor: '#ffcdd2' }}>
-                              <p className="staff-assigned" style={{ color: '#c62828' }}>
-                                No specialist available at {selectedTime}. Please choose another time.
-                              </p>
-                            </div>
-                          )}
+                          {/* Intentionally hide the "no specialist" warning in auto mode. */}
                         </div>
                       )}
                       
@@ -788,7 +895,7 @@ const BookingPage = () => {
                               return (
                                 <div className="staff-list-container">
                                   {allStaff.map((staff) => {
-                                    const hasWorkingHours = staff?.WorkingHours?.startHour && staff?.WorkingHours?.endHour
+                                    const hasWorkingHours = Boolean(formatStaffWindowsLabel(staff))
                                     const staffTimeSlots = getTimeSlotsForStaff(staff)
                                     const hasAvailableSlots = staffTimeSlots.length > 0
                                     
@@ -831,9 +938,9 @@ const BookingPage = () => {
                                           </div>
                                           <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
                                             {staff.Specialty || 'Specialist'}
-                                            {staff.WorkingHours?.startHour && staff.WorkingHours?.endHour && (
+                                            {formatStaffWindowsLabel(staff) && (
                                               <span style={{ marginLeft: '0.5rem', color: hasAvailableSlots ? '#059669' : '#9ca3af' }}>
-                                                ({staff.WorkingHours.startHour}-{staff.WorkingHours.endHour})
+                                                ({formatStaffWindowsLabel(staff)})
                                               </span>
                                             )}
                                           </div>
@@ -866,9 +973,9 @@ const BookingPage = () => {
                                     </div>
                                     <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
                                       {selectedStaff.Specialty || 'Specialist'}
-                                      {selectedStaff.WorkingHours?.startHour && selectedStaff.WorkingHours?.endHour && (
+                                      {formatStaffWindowsLabel(selectedStaff) && (
                                         <span style={{ marginLeft: '0.5rem' }}>
-                                          ({selectedStaff.WorkingHours.startHour}-{selectedStaff.WorkingHours.endHour})
+                                          ({formatStaffWindowsLabel(selectedStaff)})
                                         </span>
                                       )}
                                     </div>
@@ -968,7 +1075,7 @@ const BookingPage = () => {
               </div>
 
               <div className="info-inputs">
-                <input type="text" value={currentUser?.Phone || ''} readOnly placeholder="Your phone" />
+                <input type="text" value={''} readOnly placeholder="Phone hidden for privacy" />
                 <input type="text" value={currentUser?.Name || ''} readOnly placeholder="Your name" />
               </div>
 
@@ -1088,7 +1195,7 @@ const BookingPage = () => {
                 </label>
               </div>
 
-              <button className="book-now-btn-main" onClick={handleBookNow} disabled={submitting}>
+              <button type="button" className="book-now-btn-main" onClick={handleBookNow} disabled={submitting}>
                 <IoCalendarOutline /> {submitting ? 'Booking...' : 'Book Now'}
               </button>
               

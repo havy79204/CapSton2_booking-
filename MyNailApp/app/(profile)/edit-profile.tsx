@@ -5,6 +5,24 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as ImagePicker from 'expo-image-picker'
 import { get, put, post } from '@/services/apiClient'
 
+const VN_PHONE_REGEX = /^0(3|5|7|8|9)\d{8}$/
+
+function normalizeVietnamPhone(value: string) {
+  const raw = String(value || '').replace(/[^\d+]/g, '').trim()
+  if (!raw) return ''
+
+  if (raw.startsWith('+84')) {
+    return `0${raw.slice(3).replace(/\D/g, '')}`
+  }
+
+  const digits = raw.replace(/\D/g, '')
+  if (digits.startsWith('84') && digits.length === 11) {
+    return `0${digits.slice(2)}`
+  }
+
+  return digits
+}
+
 export default function EditProfileScreen() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
@@ -87,6 +105,12 @@ export default function EditProfileScreen() {
   async function handleSave() {
     if (!name.trim()) { Alert.alert('Lỗi', 'Tên không được để trống'); return }
 
+    const normalizedPhone = normalizeVietnamPhone(phone)
+    if (phone.trim() && !VN_PHONE_REGEX.test(normalizedPhone)) {
+      Alert.alert('Lỗi', 'Số điện thoại không đúng định dạng Việt Nam (ví dụ: 09xxxxxxxx)')
+      return
+    }
+
     setSaving(true)
     try {
       let latestUser: any = null
@@ -95,7 +119,7 @@ export default function EditProfileScreen() {
         latestUser = avatarRes?.data || null
       }
 
-      const res = await put('/auth/me', { name: name.trim(), email: email.trim(), phone: phone.trim() })
+      const res = await put('/auth/me', { name: name.trim(), email: email.trim(), phone: normalizedPhone })
 
       const user = { ...(latestUser || {}), ...(res?.data || {}) }
       if (user?.avatarUrl) setAvatarUrl(String(user.avatarUrl))
@@ -119,7 +143,14 @@ export default function EditProfileScreen() {
       </View>
       <TextInput placeholder="Họ tên" style={styles.input} value={name} onChangeText={setName} />
       <TextInput placeholder="Email" style={styles.input} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-      <TextInput placeholder="Số điện thoại" style={styles.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+      <TextInput
+        placeholder="Số điện thoại"
+        style={styles.input}
+        value={phone}
+        onChangeText={setPhone}
+        keyboardType="phone-pad"
+        maxLength={15}
+      />
 
       <TouchableOpacity style={styles.button} onPress={handleSave} disabled={saving}>{saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Lưu thay đổi</Text>}</TouchableOpacity>
 

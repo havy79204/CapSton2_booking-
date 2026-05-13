@@ -4,33 +4,102 @@ import { IoCalendarOutline, IoCheckmarkCircleOutline, IoTimeOutline } from 'reac
 import { useCustomerBookings } from '../hooks/useCustomerCommerce'
 import PortalModal from '../components/Layout portal/PortalModal.jsx'
 import { api } from '../lib/api.js'
-import { formatVnd } from '../lib/currency'
 import '../styles/HistoryPage.css'
 
-function bookingStatusClass(status) {
+function normalizeStatus(status) {
   const value = String(status || '').trim().toLowerCase()
-  if (value === 'pending') return 'pending'
-  if (value.includes('cancel')) return 'cancelled'
-  if (value.includes('complete') || value.includes('confirm')) return 'success'
+  if (value === 'pending') return 'PENDING'
+  if (value.includes('confirm')) return 'CONFIRMED'
+  if (value.includes('complete') || value.includes('done')) return 'COMPLETED'
+  if (value.includes('cancel')) return 'CANCELLED'
+  return 'PENDING'
+}
+
+function bookingStatusClass(status) {
+  const normalized = normalizeStatus(status)
+  if (normalized === 'PENDING') return 'pending'
+  if (normalized === 'CONFIRMED') return 'confirmed'
+  if (normalized === 'COMPLETED') return 'completed'
+  if (normalized === 'CANCELLED') return 'cancelled'
   return 'default'
 }
 
 function isPending(status) {
-  return String(status || '').trim().toLowerCase() === 'pending'
+  return normalizeStatus(status) === 'PENDING'
+}
+
+function isConfirmed(status) {
+  return normalizeStatus(status) === 'CONFIRMED'
 }
 
 function isCompleted(status) {
-  const value = String(status || '').trim().toLowerCase()
-  return value.includes('complete') || value.includes('confirm') || value.includes('done')
+  return normalizeStatus(status) === 'COMPLETED'
+}
+
+function isCancelled(status) {
+  return normalizeStatus(status) === 'CANCELLED'
 }
 
 function fmtMoney(value) {
-  return formatVnd(value || 0)
+  return new Intl.NumberFormat('vi-VN', {
+    style: 'currency',
+    currency: 'VND',
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0))
+}
+
+function cleanServiceName(service) {
+  const name = String(service?.ServiceName || '').trim()
+  if (!name) return String(service?.ServiceId || 'Service')
+  const invalidNames = ['null', 'undefined', 'nan', 'n/a', '-', '']
+  if (invalidNames.includes(name.toLowerCase())) {
+    return String(service?.ServiceId || 'Service')
+  }
+  return name
+}
+
+function formatTimeRange(booking) {
+  const bookingTime = new Date(booking?.BookingTime)
+  if (Number.isNaN(bookingTime.getTime())) return '--:-- - --:--'
+
+  const totalDuration = Number(booking?.TotalDuration || 0)
+  const endTime = new Date(bookingTime.getTime() + Math.max(0, totalDuration) * 60000)
+
+  const startLabel = bookingTime.toLocaleTimeString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  const endLabel = endTime.toLocaleTimeString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  return `${startLabel} - ${endLabel}`
+}
+
+function getStaffName(booking) {
+  const directCandidate = booking?.StaffName || booking?.EmployeeName || booking?.TechnicianName || ''
+  const directName = String(directCandidate).trim()
+  if (directName) return directName
+
+  const services = Array.isArray(booking?.Services) ? booking.Services : []
+  const uniqueNames = Array.from(
+    new Set(
+      services
+        .map((service) => String(service?.StaffName || '').trim())
+        .filter(Boolean),
+    ),
+  )
+
+  if (uniqueNames.length === 1) return uniqueNames[0]
+  if (uniqueNames.length > 1) return `${uniqueNames[0]} +${uniqueNames.length - 1}`
+  return 'Unassigned'
 }
 
 const BookingHistoryPage = () => {
   const navigate = useNavigate()
   const { bookings, loading, error, cancelBooking, refresh } = useCustomerBookings(100)
+  const completedTabLabel = 'Completed'
+  const [activeFilter, setActiveFilter] = useState('all')
   const [cancellingId, setCancellingId] = useState('')
   const [ratingModalOpen, setRatingModalOpen] = useState(false)
   const [bookingToRate, setBookingToRate] = useState(null)
@@ -136,6 +205,13 @@ const BookingHistoryPage = () => {
   if (loading) return <div className="loading">Loading booking history...</div>
   if (error) return <div className="error">{error}</div>
 
+  const filteredBookings = bookings.filter((booking) => {
+    const status = normalizeStatus(booking?.Status)
+    if (activeFilter === 'pending') return status === 'PENDING' || status === 'CONFIRMED'
+    if (activeFilter === 'completed') return status === 'COMPLETED'
+    return true
+  })
+
   const handleRatingImageChange = async (event) => {
     const files = Array.from(event.target.files || [])
     if (!files.length) return
@@ -155,7 +231,7 @@ const BookingHistoryPage = () => {
         const unique = Array.from(new Set(merged))
         return unique.slice(0, 3)
       })
-    } catch (_err) {
+    } catch {
       alert('Failed to read selected image files')
     } finally {
       event.target.value = ''
@@ -168,49 +244,65 @@ const BookingHistoryPage = () => {
         <div className="history-head">
           <div>
             <h2 className="history-title"><IoCalendarOutline /> Booking History</h2>
-            <p className="history-subtitle">Track all appointments and cancel pending ones quickly.</p>
+            <p className="history-subtitle">Track all appointments, review completed services, and rebook quickly.</p>
           </div>
-          <button className="history-link-btn" onClick={() => navigate('/booking')}>Book New Service</button>
+          <button className="history-link-btn history-link-btn-primary" onClick={() => navigate('/booking')}>
+            Book New Service
+          </button>
         </div>
 
-        {bookings.length === 0 ? (
+        <div className="history-filter-tabs" role="tablist" aria-label="Booking status filter">
+          <button
+            type="button"
+            className={`history-filter-tab ${activeFilter === 'all' ? 'is-active' : ''}`}
+            onClick={() => setActiveFilter('all')}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            className={`history-filter-tab ${activeFilter === 'pending' ? 'is-active' : ''}`}
+            onClick={() => setActiveFilter('pending')}
+          >
+            Pending
+          </button>
+          <button
+            type="button"
+            className={`history-filter-tab ${activeFilter === 'completed' ? 'is-active' : ''}`}
+            onClick={() => setActiveFilter('completed')}
+          >
+            {completedTabLabel}
+          </button>
+        </div>
+
+        {filteredBookings.length === 0 ? (
           <div className="history-empty">No bookings found.</div>
         ) : (
           <div className="history-list">
-            {bookings.map((booking) => {
+            {filteredBookings.map((booking) => {
               const when = new Date(booking.BookingTime)
+              const normalizedStatus = normalizeStatus(booking?.Status)
               const services = Array.isArray(booking.Services) ? booking.Services : []
               return (
                 <article key={booking.BookingId} className="history-card">
                   <header className="history-card-head">
                     <div>
                       <h3 className="history-card-id">{booking.BookingId}</h3>
-                      <p className="history-card-time"><IoTimeOutline /> {when.toLocaleString()}</p>
+                      <p className="history-card-time"><IoTimeOutline /> {when.toLocaleString('vi-VN')}</p>
+                      <p className="history-card-meta">Staff: {getStaffName(booking)} | {formatTimeRange(booking)}</p>
                     </div>
                     <div className="history-badges">
                       <span className={`history-badge ${bookingStatusClass(booking.Status)}`}>
-                        <IoCheckmarkCircleOutline /> {booking.Status}
+                        <IoCheckmarkCircleOutline /> {normalizedStatus}
                       </span>
                     </div>
                   </header>
 
-                  <div className="history-grid">
-                    <div className="history-kv">
-                      <p className="history-kv-label">Total Services</p>
-                      <p className="history-kv-value">{services.length}</p>
-                    </div>
-                    <div className="history-kv">
-                      <p className="history-kv-label">Total Duration</p>
-                      <p className="history-kv-value">{Number(booking.TotalDuration || 0)} mins</p>
-                    </div>
-                    <div className="history-kv">
-                      <p className="history-kv-label">Discount</p>
-                      <p className="history-kv-value">- {fmtMoney(booking.DiscountAmount || 0)}</p>
-                    </div>
-                    <div className="history-kv">
-                      <p className="history-kv-label">Total Price</p>
-                      <p className="history-kv-value">{fmtMoney(booking.TotalPrice || 0)}</p>
-                    </div>
+                  <div className="history-summary-row">
+                    <span>{services.length} services</span>
+                    <span>{Number(booking.TotalDuration || 0)} mins</span>
+                    <span>Discount: - {fmtMoney(booking.DiscountAmount || 0)}</span>
+                    <strong>Total: {fmtMoney(booking.TotalPrice || 0)}</strong>
                   </div>
 
                   <div className="history-items">
@@ -220,21 +312,19 @@ const BookingHistoryPage = () => {
                           <th>Service</th>
                           <th>Duration</th>
                           <th>Price</th>
-                          <th>Discount</th>
                         </tr>
                       </thead>
                       <tbody>
                         {services.length === 0 ? (
                           <tr>
-                            <td colSpan={4}>No service detail</td>
+                            <td colSpan={3}>No service detail</td>
                           </tr>
                         ) : (
                           services.map((service) => (
                             <tr key={service.BookingServiceId || `${booking.BookingId}-${service.ServiceId}`}>
-                              <td>{service.ServiceName || service.ServiceId}</td>
+                              <td>{cleanServiceName(service)}</td>
                               <td>{Number(service.DurationMinutes || 0)} mins</td>
                               <td>{fmtMoney(service.Price || 0)}</td>
-                              <td>{formatVnd(0)}</td>
                             </tr>
                           ))
                         )}
@@ -243,7 +333,6 @@ const BookingHistoryPage = () => {
                         <tr>
                           <td colSpan={2}><strong>Subtotal</strong></td>
                           <td><strong>{fmtMoney(booking.Subtotal || booking.TotalPrice || 0)}</strong></td>
-                          <td><strong>- {fmtMoney(booking.DiscountAmount || 0)}</strong></td>
                         </tr>
                       </tfoot>
                     </table>
@@ -259,6 +348,10 @@ const BookingHistoryPage = () => {
                         {cancellingId === booking.BookingId ? 'Cancelling...' : 'Cancel Booking'}
                       </button>
                     </div>
+                  ) : isConfirmed(booking.Status) ? (
+                    <div className="history-actions">
+                      <span className="history-action-note">Confirmed by salon</span>
+                    </div>
                   ) : isCompleted(booking.Status) ? (
                     <div className="history-actions">
                       <button
@@ -266,6 +359,15 @@ const BookingHistoryPage = () => {
                         onClick={() => openRatingModal(booking)}
                       >
                         {booking?.IsRated ? 'Review / Override Services' : 'Review'}
+                      </button>
+                    </div>
+                  ) : isCancelled(booking.Status) ? (
+                    <div className="history-actions">
+                      <button
+                        className="history-link-btn"
+                        onClick={() => navigate('/booking')}
+                      >
+                        Book Again
                       </button>
                     </div>
                   ) : null}

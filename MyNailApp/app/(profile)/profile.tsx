@@ -111,6 +111,14 @@ export default function ProfileScreen() {
   const incomeNumber = summaryStats ? (summaryStats.monthIncome ?? summaryStats.weekIncome ?? summaryStats.weeklyRevenue ?? 0) : 0
   const incomeText = `${Number(incomeNumber || 0).toLocaleString()}đ`
   const ratingText = summaryStats ? Number(summaryStats.avgRatingAll ?? summaryStats.avgRating ?? 0).toFixed(1) : '0.0'
+  const emailText = profile?.email ? String(profile.email) : '—'
+  const phoneText = profile?.phone ? String(profile.phone) : '—'
+  const createdAtText = (() => {
+    if (!profile?.createdAt) return '—'
+    const date = new Date(profile.createdAt)
+    if (Number.isNaN(date.getTime())) return '—'
+    return date.toLocaleDateString()
+  })()
 
   if (loading) {
     return (
@@ -159,9 +167,9 @@ export default function ProfileScreen() {
       <View style={{ marginTop: 16 }}>
         <Card>
           <Text style={styles.cardTitle}>Thông tin liên hệ</Text>
-          <View style={styles.infoRow}><Feather name="mail" size={18} color="#6b7280"/><Text style={styles.infoText}>{profile?.email || ''}</Text></View>
-          <View style={styles.infoRow}><Feather name="phone" size={18} color="#6b7280"/><Text style={styles.infoText}>{profile?.phone || ''}</Text></View>
-          <View style={styles.infoRow}><Feather name="calendar" size={18} color="#6b7280"/><Text style={styles.infoText}>{profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString() : ''}</Text></View>
+          <View style={styles.infoRow}><Feather name="mail" size={18} color="#6b7280"/><Text style={styles.infoText}>{emailText}</Text></View>
+          <View style={styles.infoRow}><Feather name="phone" size={18} color="#6b7280"/><Text style={styles.infoText}>{phoneText}</Text></View>
+          <View style={styles.infoRow}><Feather name="calendar" size={18} color="#6b7280"/><Text style={styles.infoText}>{createdAtText}</Text></View>
         </Card>
       </View>
 

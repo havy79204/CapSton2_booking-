@@ -514,18 +514,49 @@ function detectIntent(prompt) {
   return 'general'
 }
 
+function parseExplicitDateIso(prompt = '') {
+  const t = normalize(prompt)
+  const m = t.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/)
+  if (!m) return null
+
+  const day = Number(m[1])
+  const month = Number(m[2])
+  if (!Number.isFinite(day) || !Number.isFinite(month) || day < 1 || day > 31 || month < 1 || month > 12) return null
+
+  let year = m[3] ? Number(m[3]) : new Date().getFullYear()
+  if (!Number.isFinite(year)) year = new Date().getFullYear()
+  if (year < 100) year += 2000
+
+  const d = new Date(year, month - 1, day)
+  if (Number.isNaN(d.getTime())) return null
+  if (d.getFullYear() !== year || d.getMonth() !== (month - 1) || d.getDate() !== day) return null
+  return toIsoDate(d)
+}
+
 function parseNaturalDateTime(prompt) {
   const t = normalize(prompt)
   const now = new Date()
   let base = new Date(now)
 
-  if (t.includes('ngày kia') || t.includes('ngay kia')) {
+  const explicitIso = parseExplicitDateIso(prompt)
+  if (explicitIso) {
+    const ed = new Date(`${explicitIso}T00:00:00`)
+    if (!Number.isNaN(ed.getTime())) base = ed
+  }
+
+  const weekdayIso = resolveWeekdayDateIso(prompt)
+  if (!explicitIso && weekdayIso) {
+    const wd = new Date(`${weekdayIso}T00:00:00`)
+    if (!Number.isNaN(wd.getTime())) base = wd
+  }
+
+  if (!explicitIso && (t.includes('ngày kia') || t.includes('ngay kia'))) {
     base.setDate(base.getDate() + 2)
-  } else if (t.includes('mai') || t.includes('tomorrow')) {
+  } else if (!explicitIso && (t.includes('mai') || t.includes('tomorrow'))) {
     base.setDate(base.getDate() + 1)
   }
 
-  const m = t.match(/(\d{1,2})\s*(?:h|:|giờ|gio)?\s*(\d{1,2})?/)
+  const m = t.match(/\b(\d{1,2})\s*(?:h|:|giờ|gio)\s*(\d{1,2})?\b/)
   if (!m) return null
 
   let hour = Number(m[1])
@@ -1049,48 +1080,128 @@ async function getBookingAvailabilityContext(dt) {
   }
 }
 
-async function getDetailedAvailabilityForDate(dateIso, windowStartHour = 9, windowEndHour = 12, staffIdFilter = null) {
+function normalizeHourToFloat(value) {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.getUTCHours() + (value.getUTCMinutes() / 60)
+  }
+
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const hhmm = raw.match(/^(\d{1,2}):(\d{2})/)
+  if (hhmm) {
+    const hh = Number(hhmm[1])
+    const mm = Number(hhmm[2])
+    if (Number.isFinite(hh) && Number.isFinite(mm)) return hh + (mm / 60)
+  }
+
+  const numeric = Number(raw)
+  if (Number.isFinite(numeric)) return numeric
+  return null
+}
+
+function resolveLeaveWindow(leaveType) {
+  const t = String(leaveType || '').toLowerCase()
+  if (t === 'morning') return { start: 8, end: 12 }
+  if (t === 'afternoon') return { start: 13, end: 17 }
+  if (t === 'evening') return { start: 16, end: 20 }
+  return { start: 8, end: 17 }
+}
+
+function resolveLeaveTypeFromNote(note = '', startHourValue = null) {
+  const raw = String(note || '')
+  const match = raw.match(/LEAVE_REQUEST\[(morning|afternoon|evening|full)\]/i)
+  if (match) return String(match[1]).toLowerCase()
+  const h = normalizeHourToFloat(startHourValue)
+  if (h === 8) return 'morning'
+  if (h === 13) return 'afternoon'
+  if (h === 16) return 'evening'
+  return 'full'
+}
+
+function getDayIndexOneBased(dateObj) {
+  const d = dateObj.getDay()
+  return ((d + 6) % 7) + 1
+}
+
+async function getDetailedAvailabilityForDate(dateIso, windowStartHour = 9, windowEndHour = 12, staffIdFilter = null, slotMinutes = 60) {
   if (!dateIso) return { date: null, slots: [] }
   // normalize dateIso to YYYY-MM-DD
   const d = new Date(dateIso + 'T00:00:00')
   if (Number.isNaN(d.getTime())) return { date: null, slots: [] }
   const date = dateIso
 
+  const safeSlotMinutes = Number.isFinite(Number(slotMinutes)) && Number(slotMinutes) > 0
+    ? Math.max(15, Math.min(120, Math.trunc(Number(slotMinutes))))
+    : 60
+
   // fetch staff availability rows for that exact date
   const binds = { date }
-  const staffWhere = staffIdFilter ? 'AND sa.StaffId = @staffId' : ''
+  const staffWhere = staffIdFilter ? 'AND CAST(sa.StaffId AS NVARCHAR(100)) = CAST(@staffId AS NVARCHAR(100))' : ''
   if (staffIdFilter) binds.staffId = staffIdFilter
 
   const staffRes = await query(
     `SELECT sa.StaffId,
             sa.StartHour,
-            (TRY_CONVERT(INT, sa.StartHour)
-              + ISNULL(TRY_CONVERT(INT, sa.DurationHours),
-                  CASE
-                    WHEN TRY_CONVERT(INT, sa.EndHour) > TRY_CONVERT(INT, sa.StartHour)
-                      THEN TRY_CONVERT(INT, sa.EndHour) - TRY_CONVERT(INT, sa.StartHour)
-                    ELSE 0
-                  END
-                )) AS EndHour,
+            sa.EndHour,
             u.Name
-     FROM StaffShifts sa
+     FROM StaffAvailability sa
      LEFT JOIN Staff st ON st.StaffId = sa.StaffId
      LEFT JOIN Users u ON u.UserId = st.UserId
-     WHERE DATEADD(DAY, ISNULL(TRY_CONVERT(INT, sa.DayIndex), 0), CAST(sa.WeekStartDate AS DATE)) = @date
+     WHERE CAST(sa.WeekStartDate AS DATE) = @date
      ${staffWhere}`,
     binds
   ).catch(() => ({ recordset: [] }))
 
-  const staffRows = (staffRes.recordset || []).map((r) => ({
-    staffId: r.StaffId,
-    name: r.Name || `NV-${r.StaffId}`,
-    startHour: Number.isFinite(Number(r.StartHour)) ? Number(r.StartHour) : null,
-    endHour: Number.isFinite(Number(r.EndHour)) ? Number(r.EndHour) : null,
-  }))
+  const staffShiftMap = new Map()
+  for (const r of staffRes.recordset || []) {
+    const staffId = r.StaffId
+    if (!staffId) continue
+    const startHour = normalizeHourToFloat(r.StartHour)
+    const endHour = normalizeHourToFloat(r.EndHour)
+    if (startHour === null || endHour === null) continue
+    const entry = staffShiftMap.get(staffId) || { staffId, name: r.Name || `NV-${staffId}`, shifts: [] }
+    entry.shifts.push({ startHour, endHour })
+    staffShiftMap.set(staffId, entry)
+  }
+
+  const staffRows = Array.from(staffShiftMap.values())
 
   // If staffIdFilter provided but no staffRows found => staff has no schedule
   if (staffIdFilter && (!staffRows || !staffRows.length)) {
     return { date, slots: [], staffMissing: true }
+  }
+
+  // fetch approved off schedules for that date
+  const dayIndex = getDayIndexOneBased(d)
+  const offRes = await query(
+    `SELECT StaffId, DayIndex, StartHour, IsRecurring, StartDate, EndDate, Note, Status
+     FROM StaffOffSchedules
+     WHERE CAST(StartDate AS date) <= @date
+       AND CAST(ISNULL(EndDate, StartDate) AS date) >= @date
+       AND UPPER(LTRIM(RTRIM(ISNULL(Status, '')))) = 'APPROVED'`,
+    { date }
+  ).catch(() => ({ recordset: [] }))
+
+  const leaveMap = new Map()
+  for (const r of offRes.recordset || []) {
+    const sid = r.StaffId
+    if (!sid) continue
+    const isRecurring = Number(r.IsRecurring || 0) === 1
+    const dayIndexRaw = Number(r.DayIndex)
+    if (isRecurring) {
+      const normalized = Number.isFinite(dayIndexRaw)
+        ? (dayIndexRaw >= 1 && dayIndexRaw <= 7 ? dayIndexRaw : dayIndexRaw + 1)
+        : null
+      if (normalized !== dayIndex) continue
+    }
+
+    const leaveType = resolveLeaveTypeFromNote(r.Note, r.StartHour)
+    const window = resolveLeaveWindow(leaveType)
+    if (!leaveMap.has(sid)) leaveMap.set(sid, [])
+    leaveMap.get(sid).push(window)
   }
 
   // fetch bookings on that date (with assigned staff if any)
@@ -1107,25 +1218,43 @@ async function getDetailedAvailabilityForDate(dateIso, windowStartHour = 9, wind
   for (const r of bookingRes.recordset || []) {
     const bt = r.BookingTime ? new Date(r.BookingTime) : null
     if (!bt || Number.isNaN(bt.getTime())) continue
-    const hm = `${String(bt.getHours()).padStart(2, '0')}:00`
+    const totalMinutes = bt.getHours() * 60 + bt.getMinutes()
+    const slotStartMinutes = Math.floor(totalMinutes / safeSlotMinutes) * safeSlotMinutes
+    const slotHour = Math.floor(slotStartMinutes / 60)
+    const slotMinute = slotStartMinutes % 60
+    const hm = `${String(slotHour).padStart(2, '0')}:${String(slotMinute).padStart(2, '0')}`
     const sid = r.StaffId || '*'
     if (!bookedMap.has(sid)) bookedMap.set(sid, new Set())
     bookedMap.get(sid).add(hm)
   }
 
   const slots = []
-  for (let h = windowStartHour; h < windowEndHour; h += 1) {
-    const slotStart = `${String(h).padStart(2, '0')}:00`
-    const slotEnd = `${String(h + 1).padStart(2, '0')}:00`
+  const startMinutes = Math.max(0, Math.trunc(windowStartHour * 60))
+  const endMinutes = Math.max(startMinutes, Math.trunc(windowEndHour * 60))
+
+  for (let m = startMinutes; m < endMinutes; m += safeSlotMinutes) {
+    const slotStartHour = Math.floor(m / 60)
+    const slotStartMinute = m % 60
+    const slotEndMinutes = Math.min(m + safeSlotMinutes, endMinutes)
+    const slotEndHour = Math.floor(slotEndMinutes / 60)
+    const slotEndMinute = slotEndMinutes % 60
+    const slotStart = `${String(slotStartHour).padStart(2, '0')}:${String(slotStartMinute).padStart(2, '0')}`
+    const slotEnd = `${String(slotEndHour).padStart(2, '0')}:${String(slotEndMinute).padStart(2, '0')}`
     const available = []
     for (const s of staffRows) {
-      if (s.startHour === null || s.endHour === null) continue
-      // staff available if their availability covers the whole slot
-      if (s.startHour <= h && s.endHour >= (h + 1)) {
-        // check if this staff has a booking at this slot
-        const bookedSet = bookedMap.get(s.staffId) || new Set()
-        if (!bookedSet.has(slotStart)) available.push(s.name)
-      }
+      const slotStartFloat = slotStartHour + slotStartMinute / 60
+      const slotEndFloat = slotEndHour + slotEndMinute / 60
+
+      const shifts = Array.isArray(s.shifts) ? s.shifts : []
+      const hasShift = shifts.some((shift) => shift.startHour <= slotStartFloat && shift.endHour >= slotEndFloat)
+      if (!hasShift) continue
+
+      const leaveWindows = leaveMap.get(s.staffId) || []
+      const isOnLeave = leaveWindows.some((lw) => !(slotEndFloat <= lw.start || slotStartFloat >= lw.end))
+      if (isOnLeave) continue
+
+      const bookedSet = bookedMap.get(s.staffId) || new Set()
+      if (!bookedSet.has(slotStart)) available.push(s.name)
     }
     slots.push({ start: slotStart, end: slotEnd, available })
   }
@@ -1163,6 +1292,7 @@ async function findStaffByName(prompt) {
 
 function detectWindowFromPrompt(prompt = '') {
   const t = normalize(prompt)
+  if (/trưa|trua|buổi trưa/.test(t)) return { start: 11, end: 13 }
   if (/sáng|sang|buổi sáng|sang mai|sáng mai/.test(t)) return { start: 9, end: 12 }
   if (/chiều|chieu|buổi chiều/.test(t)) return { start: 13, end: 16 }
   if (/tối|toi|buổi tối/.test(t)) return { start: 18, end: 20 }
@@ -1180,13 +1310,19 @@ function buildSystemPrompt({ intent, userPrompt, services, products, orderCatalo
 
   return [
     'Bạn là trợ lý CSKH cho salon nail.',
-    'Mục tiêu: tư vấn dịch vụ, cung cấp thông tin giá/thời lượng, hỗ trợ đặt lịch, trả lời FAQ.',
+    'Mục tiêu: tư vấn dịch vụ, gợi ý mẫu móng, cung cấp thông tin giá/thời lượng, hỗ trợ đặt lịch, trả lời FAQ.',
     'QUY TẮC BẮT BUỘC: bạn KHÔNG có quyền tạo/đặt lịch thay khách; chỉ được tra cứu lịch trống, giờ làm và nhân viên rảnh.',
     'Không được nói các câu như: "đã đặt lịch", "đã ghi nhận yêu cầu đặt lịch", "đã tạo lịch".',
     'Khi khách muốn đặt lịch, hãy hướng dẫn khách tự đặt qua trang đặt lịch hoặc liên hệ lễ tân.',
     'Chỉ dùng dữ liệu nội bộ được cung cấp bên dưới; không bịa thông tin ngoài hệ thống.',
     'Nếu thiếu dữ liệu, nói rõ là hệ thống chưa có thông tin đó.',
     'Giọng điệu lịch sự, tư vấn ngắn gọn, thực tế.',
+    'Tư vấn thông minh:',
+    '- Gợi ý dịch vụ/mẫu móng theo phong cách, sự kiện (đám cưới, du lịch biển, tiệc công ty) dựa trên dữ liệu có sẵn; nếu thiếu dữ liệu thì hỏi thêm sở thích hoặc màu sắc.',
+    '- Nếu khách quan tâm thử mẫu, hãy gợi ý chức năng thử mẫu/try-on khi có hỗ trợ (không tự nhận đã thực hiện nếu chưa có dữ liệu).',
+    '- Tư vấn đặt lịch tối ưu: ưu tiên nhân viên quen nếu có lịch sử; gợi ý khung giờ trống phù hợp và đề xuất giờ thấp điểm nếu có dữ liệu ưu đãi.',
+    '- Chăm sóc sau dịch vụ: nhắc bảo trì 2-3 tuần và hướng dẫn chăm sóc tại nhà dựa trên loại dịch vụ đã làm nếu có lịch sử.',
+    '- Nếu khách phản hồi thấp (1-2 sao), xin lỗi và đề xuất hướng khắc phục (voucher/ưu tiên sửa chữa) nhưng không tự tạo ưu đãi nếu chưa có dữ liệu.',
     `Intent: ${intent}`,
     `Dịch vụ (DB): ${serviceJson}`,
     `Sản phẩm (DB: Products + ProductImages): ${productJson}`,
@@ -1205,6 +1341,78 @@ function buildSystemPrompt({ intent, userPrompt, services, products, orderCatalo
 function formatVnd(value) {
   const n = Number(value || 0)
   return `${n.toLocaleString('vi-VN')} VNĐ`
+}
+
+function getVietnameseWeekday(dateObj) {
+  const days = ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy']
+  const idx = dateObj instanceof Date && !Number.isNaN(dateObj.getTime()) ? dateObj.getDay() : null
+  return idx === null ? '' : days[idx]
+}
+
+function formatDateLabel(dateIso) {
+  const d = new Date(`${dateIso}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return dateIso
+  const day = String(d.getDate()).padStart(2, '0')
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const weekday = getVietnameseWeekday(d)
+  return `${weekday}, ngày ${day}/${month}`.trim()
+}
+
+function resolveWindowDateIso(prompt = '', parsedDateTime = null) {
+  const t = normalize(prompt)
+  const now = new Date()
+  const todayIso = toIsoDate(now)
+
+  const explicitIso = parseExplicitDateIso(prompt)
+  if (explicitIso) return explicitIso
+
+  const weekdayIso = resolveWeekdayDateIso(prompt)
+  if (weekdayIso) return weekdayIso
+
+  if (t.includes('ngày kia') || t.includes('ngay kia')) {
+    const dt = new Date(now); dt.setDate(dt.getDate() + 2)
+    return toIsoDate(dt)
+  }
+  if (t.includes('mai') || t.includes('tomorrow')) {
+    if (parsedDateTime?.date && parsedDateTime.date !== todayIso) return parsedDateTime.date
+    const dt = new Date(now); dt.setDate(dt.getDate() + 1)
+    return toIsoDate(dt)
+  }
+  if (t.includes('hôm nay') || t.includes('hom nay')) {
+    return todayIso
+  }
+  return parsedDateTime?.date || null
+}
+
+function resolveWeekdayDateIso(prompt = '') {
+  const t = normalize(prompt)
+  const now = new Date()
+  const todayDow = now.getDay()
+
+  let targetDow = null
+  if (/chu nhat|chủ nhật|cn\b/.test(t)) targetDow = 0
+
+  const thuMatch = t.match(/thu\s*(2|3|4|5|6|7|8)/)
+    || t.match(/thứ\s*(2|3|4|5|6|7|8)/)
+
+  if (thuMatch) {
+    const n = Number(thuMatch[1])
+    if (n === 8) targetDow = 0
+    else if (n >= 2 && n <= 7) targetDow = n - 1
+  }
+
+  if (targetDow === null) return null
+
+  const hasNext = /tuan sau|tuần sau/.test(t)
+  const deltaBase = (targetDow - todayDow + 7) % 7
+  let delta = deltaBase
+  if (hasNext) {
+    delta = deltaBase === 0 ? 7 : deltaBase + 7
+  }
+
+  const dt = new Date(now)
+  dt.setDate(dt.getDate() + delta)
+  return toIsoDate(dt)
 }
 
 function localFallbackResponse({
@@ -2086,6 +2294,40 @@ async function generateAIResponse(prompt, userId = null, options = {}) {
     ])
 
     const mentionedServices = findMentionedServices(prompt, services)
+
+    if (/nhan vien|nhân viên|tho|thợ/.test(normalize(prompt)) && /cu the|cụ thể|ten|tên/.test(normalize(prompt))) {
+      const maybeStaff = await findStaffByName(prompt)
+      if (!maybeStaff) {
+        return 'Bạn muốn kiểm tra lịch cho nhân viên nào? Bạn gửi giúp mình tên nhân viên và ngày cụ thể nhé.'
+      }
+    }
+
+    // Weekly availability summary
+    if (/tuan nay|tuần này/.test(normalize(prompt)) && /ngay nao|ngày nào|hom nao|hôm nào/.test(normalize(prompt)) && /tho|thợ|nhan vien|nhân viên|ranh|rảnh/.test(normalize(prompt))) {
+      const today = new Date()
+      const weekStart = new Date(today)
+      const day = weekStart.getDay()
+      const diff = weekStart.getDate() - day + (day === 0 ? -6 : 1)
+      weekStart.setDate(diff)
+      weekStart.setHours(0, 0, 0, 0)
+
+      const availableDays = []
+      for (let i = 0; i < 7; i += 1) {
+        const d = new Date(weekStart)
+        d.setDate(d.getDate() + i)
+        const iso = toIsoDate(d)
+        const avail = await getDetailedAvailabilityForDate(iso, 8, 20, null, 60)
+        const hasAny = Array.isArray(avail?.slots) && avail.slots.some((s) => Array.isArray(s.available) && s.available.length > 0)
+        if (hasAny) {
+          availableDays.push(`${formatDateLabel(iso)}`)
+        }
+      }
+
+      if (availableDays.length) {
+        return `Tuần này có thợ rảnh vào: ${availableDays.join('; ')}. Bạn muốn mình kiểm tra khung giờ cụ thể ngày nào?`
+      }
+      return 'Tuần này mình chưa thấy lịch rảnh rõ ràng. Bạn cho mình biết ngày và khung giờ mong muốn để mình kiểm tra cụ thể nhé.'
+    }
     const deterministicCatalogAnswer = getDeterministicCatalogAnswer(prompt, orderCatalogCtx)
     if (deterministicCatalogAnswer) return deterministicCatalogAnswer
 
@@ -2120,25 +2362,15 @@ async function generateAIResponse(prompt, userId = null, options = {}) {
     try {
       const window = detectWindowFromPrompt(prompt)
       const wantsWindowInfo = Boolean(window && /khung giờ|khung gio|mấy giờ|may gio|trống|trong|còn trống|có/.test(normalize(prompt)))
-      if (intent === 'booking' && wantsWindowInfo) {
+      if (wantsWindowInfo) {
         // determine date: prefer parsedDateTime.date, otherwise use natural keywords (mai/ngày kia)
-        let dateIso = parsedDateTime?.date || null
-        if (!dateIso) {
-          // look for 'mai' or 'ngày kia'
-          const t = normalize(prompt)
-          const now = new Date()
-          if (t.includes('ngày kia') || t.includes('ngay kia')) {
-            const dt = new Date(now); dt.setDate(dt.getDate() + 2); dateIso = toIsoDate(dt)
-          } else if (t.includes('mai') || t.includes('tomorrow')) {
-            const dt = new Date(now); dt.setDate(dt.getDate() + 1); dateIso = toIsoDate(dt)
-          }
-        }
+        const dateIso = resolveWindowDateIso(prompt, parsedDateTime)
         if (dateIso) {
           // detect whether the user mentioned a specific staff
           const maybeStaff = await findStaffByName(prompt)
           let avail
           if (maybeStaff) {
-            avail = await getDetailedAvailabilityForDate(dateIso, window.start, window.end, maybeStaff.staffId)
+            avail = await getDetailedAvailabilityForDate(dateIso, window.start, window.end, maybeStaff.staffId, 30)
             if (avail && avail.staffMissing) {
               return `Nhân viên ${maybeStaff.name} không có lịch làm vào ngày ${dateIso}.`
             }
@@ -2163,16 +2395,18 @@ async function generateAIResponse(prompt, userId = null, options = {}) {
           }
 
           // no specific staff mentioned: return all staff availability
-          avail = await getDetailedAvailabilityForDate(dateIso, window.start, window.end)
+          avail = await getDetailedAvailabilityForDate(dateIso, window.start, window.end, null, 30)
           if (avail && Array.isArray(avail.slots) && avail.slots.length) {
-            const lines = [`Khung giờ trống cho ngày ${avail.date}:`]
+            const label = formatDateLabel(avail.date)
+            const lines = [`Khung giờ trống ${label}:`]
             for (const s of avail.slots) {
-              if (Array.isArray(s.available) && s.available.length) {
-                lines.push(`${s.start}-${s.end}: Nhân viên rảnh: ${s.available.join(', ')}`)
-              } else {
-                lines.push(`${s.start}-${s.end}: Không có nhân viên rảnh`)
-              }
+              const count = Array.isArray(s.available) ? s.available.length : 0
+              lines.push(count > 0
+                ? `${s.start}-${s.end}: Còn ${count} thợ rảnh`
+                : `${s.start}-${s.end}: Hết thợ rảnh`
+              )
             }
+            lines.push('Bạn muốn mình giữ chỗ khung giờ nào? Mình sẽ hướng dẫn bạn xác nhận đặt lịch ngay.')
             return lines.join('\n')
           }
           // fallback to bookingCtx alternatives (times without staff mapping)
@@ -2185,6 +2419,29 @@ async function generateAIResponse(prompt, userId = null, options = {}) {
     } catch (availErr) {
       // ignore and continue to AI generation
       console.warn('availability check failed', String(availErr?.message || availErr))
+    }
+
+    // Staff-specific availability without a time window
+    if (/nhan vien|nhân viên|tho|thợ/.test(normalize(prompt))) {
+      const maybeStaff = await findStaffByName(prompt)
+      const dateIso = resolveWindowDateIso(prompt, parsedDateTime)
+      if (maybeStaff && dateIso) {
+        const avail = await getDetailedAvailabilityForDate(dateIso, 8, 20, maybeStaff.staffId, 30)
+        if (avail && avail.staffMissing) {
+          return `Nhân viên ${maybeStaff.name} không có lịch làm vào ngày ${dateIso}.`
+        }
+        const slots = (avail?.slots || []).filter((s) => Array.isArray(s.available) && s.available.length > 0)
+        if (slots.length) {
+          const label = formatDateLabel(dateIso)
+          const lines = [`Lịch rảnh của ${maybeStaff.name} ${label}:`]
+          for (const s of slots) {
+            lines.push(`${s.start}-${s.end}`)
+          }
+          lines.push('Bạn muốn mình giữ chỗ khung giờ nào?')
+          return lines.join('\n')
+        }
+        return `Ngày ${dateIso} nhân viên ${maybeStaff.name} không có khung giờ rảnh. Bạn muốn mình kiểm tra ngày khác không?`
+      }
     }
 
     // Chatbox runs in information-only mode for booking: never auto-create bookings.

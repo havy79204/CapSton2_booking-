@@ -280,17 +280,6 @@ export default function OwnerCustomersPage() {
 
   return (
     <div className="customers-page">
-      <div className="portal-pageHeader">
-        <div className="portal-pageHeaderLeft" />
-
-        <button type="button" className="portal-primaryBtn" onClick={openCreate}>
-          <span className="portal-primaryBtnIcon" aria-hidden="true">
-            +
-          </span>
-          Add customer
-        </button>
-      </div>
-
       <PortalModal
         open={open}
         title={editing ? 'Edit customer' : 'Add new customer'}
@@ -359,8 +348,8 @@ export default function OwnerCustomersPage() {
       />
 
       <div className="portal-customer">
-      <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', marginBottom: '12px', flexWrap: 'wrap' }}>
-        <div className="portal-search portal-searchFull" role="search" style={{ flex: 1, minWidth: '200px', display: 'flex', alignItems: 'center' }}>
+      <div className="customers-toolbar">
+        <div className="portal-search portal-searchFull customers-toolbarSearch" role="search">
           <span className="portal-searchIcon" aria-hidden="true">
             <IconSearch />
           </span>
@@ -372,71 +361,49 @@ export default function OwnerCustomersPage() {
           />
         </div>
         
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-end', justifyContent: 'center' }}>
-          <label style={{ fontSize: '13px', fontWeight: '600', color: '#301103', whiteSpace: 'nowrap', marginBottom: '6px' }}>
+        <div className="customers-dateFilter">
+          <label className="customers-dateLabel">
             From:
           </label>
           <input
             type="date"
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
-            style={{
-              padding: '10px 14px',
-              borderRadius: '6px',
-              border: '1px solid #d4af86',
-              fontSize: '12px',
-              backgroundColor: '#fff',
-              cursor: 'pointer',
-              boxSizing: 'border-box',
-            }}
+            className="customers-dateInput"
           />
         </div>
         
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-end', justifyContent: 'center' }}>
-          <label style={{ fontSize: '13px', fontWeight: '600', color: '#301103', whiteSpace: 'nowrap', marginBottom: '6px' }}>
+        <div className="customers-dateFilter">
+          <label className="customers-dateLabel">
             To:
           </label>
           <input
             type="date"
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
-            style={{
-              padding: '10px 14px',
-              borderRadius: '6px',
-              border: '1px solid #d4af86',
-              fontSize: '12px',
-              backgroundColor: '#fff',
-              cursor: 'pointer',
-              boxSizing: 'border-box',
-            }}
+            className="customers-dateInput"
           />
         </div>
 
         {(fromDate || toDate) && (
           <button
             type="button"
+            className="customers-clearDateBtn"
             onClick={() => {
               setFromDate('')
               setToDate('')
             }}
-            style={{
-              padding: '10px 14px',
-              borderRadius: '6px',
-              border: 'none',
-              backgroundColor: '#f0f0f0',
-              color: '#666',
-              fontSize: '12px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: '0.2s',
-              marginBottom: '0px',
-            }}
-            onMouseEnter={(e) => e.target.style.backgroundColor = '#e0e0e0'}
-            onMouseLeave={(e) => e.target.style.backgroundColor = '#f0f0f0'}
           >
             Clear dates
           </button>
         )}
+
+        <button type="button" className="portal-primaryBtn" onClick={openCreate}>
+          <span className="portal-primaryBtnIcon" aria-hidden="true">
+            +
+          </span>
+          Add customer
+        </button>
       </div>
 
       <div className="portal-tableWrap" style={{ marginTop: 8 }}>

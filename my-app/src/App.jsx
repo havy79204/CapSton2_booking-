@@ -43,12 +43,21 @@ import ServiceCatalogPage from './pages/ServiceCatalogPage.jsx'
 import ProductCatalogPage from './pages/ProductCatalogPage.jsx'
 import PaymentVnpayReturnPage from './pages/PaymentVnpayReturnPage.jsx'
 import './App.css'
+import Toast from './components/Toast.jsx'
 
-import { getToken } from './lib/auth.js'
+import { getRoleKeyFromToken, getToken } from './lib/auth.js'
 
 function RequireAuth({ children }) {
   const token = getToken()
   if (!token) return <Navigate to="/login" replace />
+  return children
+}
+
+function RequireRole({ allowed = [], children }) {
+  const token = getToken()
+  if (!token) return <Navigate to="/login" replace />
+  const roleKey = getRoleKeyFromToken(token)
+  if (!allowed.includes(roleKey)) return <Navigate to="/" replace />
   return children
 }
 
@@ -71,35 +80,40 @@ function LegacyVnpayReturnRedirect() {
 
 function App() {
   return (
-    <Routes>
+    <>
+      <Toast />
+      <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/signup" element={<LoginPage />} />
+      <Route path="/register" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<LoginPage />} />
       <Route path="/payment/vnpay-return" element={<PaymentVnpayReturnPage />} />
       <Route path="/api/payments/vnpay-return" element={<LegacyVnpayReturnRedirect />} />
 
       <Route
         path="/portals/owner/services/:id"
         element={
-          <RequireAuth>
+          <RequireRole allowed={[1]}>
             <ServiceDetail ownerMode />
-          </RequireAuth>
+          </RequireRole>
         }
       />
 
       <Route
         path="/portals/owner/products/:id"
         element={
-          <RequireAuth>
+          <RequireRole allowed={[1]}>
             <ProductDetail ownerMode />
-          </RequireAuth>
+          </RequireRole>
         }
       />
 
       <Route
         path="/"
         element={
-          <RequireAuth>
+          <RequireRole allowed={[3]}>
             <CustomerLayout />
-          </RequireAuth>
+          </RequireRole>
         }
       >
         <Route index element={<HomePage />} />
@@ -121,9 +135,9 @@ function App() {
       <Route
         path="/portals/owner"
         element={
-          <RequireAuth>
+          <RequireRole allowed={[1]}>
             <OwnerPortalLayout />
-          </RequireAuth>
+          </RequireRole>
         }
       >
         <Route path="pending-requests" element={<PendingRequestsPage />} />
@@ -148,9 +162,9 @@ function App() {
       <Route
         path="/portals/staff"
         element={
-          <RequireAuth>
+          <RequireRole allowed={[1, 2]}>
             <StaffPortalLayout />
-          </RequireAuth>
+          </RequireRole>
         }
       >
         <Route path="appointments" element={<StaffAppointmentsPage />} />
@@ -166,7 +180,8 @@ function App() {
       </Route>
 
       <Route path="*" element={<Navigate to="/login" replace />} />
-    </Routes>
+      </Routes>
+    </>
   )
 }
 

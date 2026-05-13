@@ -11,6 +11,7 @@ import {
   IconSearch,
 } from '../../components/Layout portal/PortalIcons.jsx'
 import { api } from '../../lib/api.js'
+import { notifySuccess, notifyError } from '../../lib/notify.js'
 import { getToken } from '../../lib/auth.js'
 
 function formatVnd(value) {
@@ -63,8 +64,15 @@ function parseDmyString(value) {
 
 function isValidDateInput(value) {
   if (!value) return true
-  const d = new Date(value)
-  return !Number.isNaN(d.getTime())
+  const raw = String(value).trim()
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return false
+  const y = Number(m[1])
+  const mon = Number(m[2])
+  const day = Number(m[3])
+  if (!Number.isFinite(y) || !Number.isFinite(mon) || !Number.isFinite(day)) return false
+  const d = new Date(y, mon - 1, day)
+  return d.getFullYear() === y && d.getMonth() === mon - 1 && d.getDate() === day
 }
 
 function extractRetailProductId(value) {
@@ -174,25 +182,58 @@ function summarizeLots(lots) {
   return { distinctPrices: prices.size }
 }
 
+function parseLotMeta(note) {
+  let rest = String(note || '').trim()
+  const meta = {}
+
+  while (rest.startsWith('[')) {
+    const m = rest.match(/^\[\s*([^:\]]+)\s*:\s*([^\]]*)\]\s*/)
+    if (!m) break
+    const key = String(m[1] || '').trim().toLowerCase()
+    const value = String(m[2] || '').trim()
+    if (key && !Object.prototype.hasOwnProperty.call(meta, key)) {
+      meta[key] = value
+    }
+    rest = rest.slice(m[0].length)
+  }
+
+  return { meta, note: rest.trim() }
+}
+
 function extractVariantFromLotNote(note) {
-  const raw = String(note || '').trim()
-  if (!raw) return ''
-  const m = raw.match(/^\[\s*Variant\s*:\s*([^\]]+)\]/i)
-  if (!m) return ''
-  return String(m[1] || '').trim()
+  const parsed = parseLotMeta(note)
+  return String(parsed.meta?.variant || '').trim()
+}
+
+function extractSellPriceFromLotNote(note) {
+  const parsed = parseLotMeta(note)
+  const raw = String(parsed.meta?.sellprice || '').trim()
+  const n = Number(digitsOnly(raw) || 0)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+function resolveLotSellPrice(lot) {
+  const direct = Number(lot?.sellPriceVnd ?? lot?.sellPrice)
+  if (Number.isFinite(direct) && direct > 0) return direct
+  return extractSellPriceFromLotNote(lot?.note)
 }
 
 function stripVariantPrefixFromLotNote(note) {
-  const raw = String(note || '')
-  return raw.replace(/^\[\s*Variant\s*:\s*[^\]]+\]\s*/i, '').trim()
+  return parseLotMeta(note).note
 }
 
-function composeLotNoteWithVariant(variantName, note) {
+function composeLotNoteWithMeta(variantName, sellPrice, note) {
   const cleanVariant = String(variantName || '').trim()
+  const parsedSell = Number(digitsOnly(sellPrice) || 0)
   const cleanNote = String(note || '').trim()
-  if (!cleanVariant) return cleanNote
-  if (!cleanNote) return `[Variant: ${cleanVariant}]`
-  return `[Variant: ${cleanVariant}] ${cleanNote}`
+
+  const prefixes = []
+  if (cleanVariant) prefixes.push(`[Variant: ${cleanVariant}]`)
+  if (Number.isFinite(parsedSell) && parsedSell > 0) prefixes.push(`[SellPrice: ${Math.trunc(parsedSell)}]`)
+
+  if (!prefixes.length) return cleanNote
+  if (!cleanNote) return prefixes.join(' ')
+  return `${prefixes.join(' ')} ${cleanNote}`
 }
 
 function listSupplyVariantsFromLots(lots) {
@@ -477,12 +518,21 @@ export default function OwnerInventoryPage() {
   const [openCat, setOpenCat] = useState(false)
   const [catError, setCatError] = useState('')
   const [catForm, setCatForm] = useState({ name: '', description: '' })
+  const [categoryInputAdd, setCategoryInputAdd] = useState('')
+  const [categoryInputEdit, setCategoryInputEdit] = useState('')
   const [openImport, setOpenImport] = useState(false)
   const [importError, setImportError] = useState('')
   const [importLoading, setImportLoading] = useState(false)
   const [importFile, setImportFile] = useState(null)
   const [importFileName, setImportFileName] = useState('')
   const [importReport, setImportReport] = useState(null)
+  const [exportingKind, setExportingKind] = useState('')
+  const [openExport, setOpenExport] = useState(false)
+  const [exportForm, setExportForm] = useState({
+    type: 'snapshot',
+    fromDate: '',
+    toDate: '',
+  })
   const [importOptions, setImportOptions] = useState({
     duplicateMode: 'update',
     updatePrices: true,
@@ -732,14 +782,6 @@ export default function OwnerInventoryPage() {
       setCategories([])
     }
   }
-
-  const categoriesById = useMemo(() => {
-    const map = new Map()
-    for (const c of categories || []) {
-      if (c && c.id !== undefined && c.id !== null) map.set(String(c.id), c)
-    }
-    return map
-  }, [categories])
 
   function findCategoryIdByName(name) {
     const n = String(name || '').trim()
@@ -1138,7 +1180,7 @@ export default function OwnerInventoryPage() {
         return sortOrder === 'asc' ? cmp : -cmp
       }
       if (sortBy === 'price') {
-        const cmp = Number(resolveImportPrice(a) || 0) - Number(resolveImportPrice(b) || 0)
+        const cmp = Number(resolveSellPrice(a) || 0) - Number(resolveSellPrice(b) || 0)
         return sortOrder === 'asc' ? cmp : -cmp
       }
       if (sortBy === 'sellPrice') {
@@ -1146,8 +1188,8 @@ export default function OwnerInventoryPage() {
         return sortOrder === 'asc' ? cmp : -cmp
       }
       if (sortBy === 'total') {
-        const aTotal = Number(resolveImportPrice(a) || 0) * Number(a?.stock || 0)
-        const bTotal = Number(resolveImportPrice(b) || 0) * Number(b?.stock || 0)
+        const aTotal = Number(resolveSellPrice(a) || 0) * Number(a?.stock || 0)
+        const bTotal = Number(resolveSellPrice(b) || 0) * Number(b?.stock || 0)
         const cmp = aTotal - bTotal
         return sortOrder === 'asc' ? cmp : -cmp
       }
@@ -1216,6 +1258,7 @@ export default function OwnerInventoryPage() {
   function closeAdd() {
     setOpenAdd(false)
     setAddError('')
+    setCategoryInputAdd('')
   }
 
   function closeStock() {
@@ -1239,10 +1282,12 @@ export default function OwnerInventoryPage() {
     setEditFor(null)
     setEditError('')
     setOpenDeleteConfirm(false)
+    setCategoryInputEdit('')
   }
 
   function openEditLot(item, lot) {
     const variantName = extractVariantFromLotNote(lot?.note)
+    const lotSellPrice = resolveLotSellPrice(lot)
     const itemSellPrice = resolveSellPrice(item)
     setLotEditError('')
     setLotEditFor({
@@ -1254,7 +1299,11 @@ export default function OwnerInventoryPage() {
       variantName: String(variantName || ''),
       remainingQty: String(Number(lot?.remaining || 0)),
       price: String(Number(lot?.price || 0)),
-      sellPrice: itemSellPrice !== null ? String(Math.round(itemSellPrice)) : '',
+      sellPrice: lotSellPrice !== null
+        ? String(Math.round(lotSellPrice))
+        : itemSellPrice !== null
+          ? String(Math.round(itemSellPrice))
+          : '',
       receivedAt: formatDateInput(lot?.receivedAt) || getTodayDateInput(),
       expiryDate: formatDateInput(lot?.expiryDate),
       supplier: String(lot?.supplier || ''),
@@ -1313,6 +1362,19 @@ export default function OwnerInventoryPage() {
     setImportFileName('')
   }
 
+  function openExportModal() {
+    setOpenExport(true)
+    setExportForm((prev) => ({
+      ...prev,
+      fromDate: fromDate || prev.fromDate || '',
+      toDate: toDate || prev.toDate || '',
+    }))
+  }
+
+  function closeExportModal() {
+    setOpenExport(false)
+  }
+
   async function onDownloadImportTemplate() {
     try {
       const token = getToken()
@@ -1338,6 +1400,101 @@ export default function OwnerInventoryPage() {
       console.error(err)
       setImportError(err?.message || 'Unable to download template')
     }
+  }
+
+  function resolveExportGroupFromTab() {
+    if (tab === 'service') return 'service'
+    if (tab === 'retail') return 'retail'
+    return 'all'
+  }
+
+  async function onExportExcel(kind, options = {}) {
+    const normalizedKind = String(kind || '').trim().toLowerCase()
+    if (normalizedKind !== 'snapshot' && normalizedKind !== 'movement' && normalizedKind !== 'low-stock') return
+
+    try {
+      setExportingKind(normalizedKind)
+      setLoadError('')
+
+      const params = new URLSearchParams()
+      if (normalizedKind === 'snapshot' || normalizedKind === 'low-stock') {
+        params.set('group', resolveExportGroupFromTab())
+        if (query.trim()) params.set('q', query.trim())
+        if (categoryFilter !== 'all') params.set('category', categoryFilter)
+        if (normalizedKind === 'snapshot' && stockStateFilter !== 'all') params.set('stockState', stockStateFilter)
+      }
+      if (normalizedKind === 'movement') {
+        const movementFromDate = String(options?.fromDate || '').trim()
+        const movementToDate = String(options?.toDate || '').trim()
+        if (movementFromDate) params.set('fromDate', movementFromDate)
+        if (movementToDate) params.set('toDate', movementToDate)
+      }
+
+      const token = getToken()
+      const endpoint = normalizedKind === 'snapshot'
+        ? '/api/owner/inventory/export/snapshot'
+        : normalizedKind === 'movement'
+          ? '/api/owner/inventory/export/movement'
+          : '/api/owner/inventory/export/low-stock'
+      const res = await fetch(`${API_BASE_URL}${endpoint}?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      })
+
+      if (!res.ok) {
+        throw new Error('Unable to export Excel')
+      }
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const datePart = new Date().toISOString().slice(0, 10)
+      a.download = normalizedKind === 'snapshot'
+        ? `inventory-snapshot-${datePart}.xlsx`
+        : normalizedKind === 'movement'
+          ? `inventory-movement-${datePart}.xlsx`
+          : `inventory-low-stock-${datePart}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error(err)
+      setLoadError(err?.message || 'Unable to export Excel')
+    } finally {
+      setExportingKind('')
+    }
+  }
+
+  async function onSubmitExport(e) {
+    e.preventDefault()
+    const selectedType = String(exportForm.type || '').trim().toLowerCase()
+    if (selectedType === 'movement') {
+      const movementFromDate = String(exportForm.fromDate || '').trim()
+      const movementToDate = String(exportForm.toDate || '').trim()
+      if (movementFromDate && movementToDate && movementFromDate > movementToDate) {
+        setLoadError('From Date must be less than or equal to To Date')
+        return
+      }
+      await onExportExcel('movement', {
+        fromDate: movementFromDate,
+        toDate: movementToDate,
+      })
+      closeExportModal()
+      return
+    }
+
+    if (selectedType === 'low-stock') {
+      await onExportExcel('low-stock')
+      closeExportModal()
+      return
+    }
+
+    await onExportExcel('snapshot')
+    closeExportModal()
   }
 
   function onPickImportFile(e) {
@@ -1403,8 +1560,14 @@ export default function OwnerInventoryPage() {
 
       const nextId = created?.id !== undefined && created?.id !== null ? String(created.id) : ''
       if (nextId) {
-        if (openAdd) setProductForm((p) => ({ ...p, categoryId: nextId }))
-        if (openEdit) setEditForm((p) => ({ ...p, categoryId: nextId }))
+        if (openAdd) {
+          setProductForm((p) => ({ ...p, categoryId: nextId }))
+          setCategoryInputAdd(String(created?.name || ''))
+        }
+        if (openEdit) {
+          setEditForm((p) => ({ ...p, categoryId: nextId }))
+          setCategoryInputEdit(String(created?.name || ''))
+        }
       }
 
       closeCreateCategory()
@@ -1435,6 +1598,7 @@ export default function OwnerInventoryPage() {
       images: item?.imageUrl ? [item.imageUrl] : [],
       status: item?.status || '',
     })
+    setCategoryInputEdit(String(item?.category || item?.kind || '').trim())
     setOpenEdit(true)
 
     if (item?.group === 'retail') {
@@ -1564,11 +1728,15 @@ export default function OwnerInventoryPage() {
       setAddError(`Purchase price must be less than or equal to ${MAX_PRICE_VND}`)
       return
     }
-    if (normalizedGroup === 'retail' && sellPriceRaw && (!Number.isFinite(sellPrice) || sellPrice <= 0)) {
+    if (normalizedGroup === 'retail' && !sellPriceRaw) {
+      setAddError('Sell price is required for Retail')
+      return
+    }
+    if (normalizedGroup === 'retail' && (!Number.isFinite(sellPrice) || sellPrice <= 0)) {
       setAddError('Sell price must be greater than 0')
       return
     }
-    if (normalizedGroup === 'retail' && sellPriceRaw && sellPrice > MAX_PRICE_VND) {
+    if (normalizedGroup === 'retail' && sellPrice > MAX_PRICE_VND) {
       setAddError(`Sell price must be less than or equal to ${MAX_PRICE_VND}`)
       return
     }
@@ -1619,7 +1787,7 @@ export default function OwnerInventoryPage() {
       if (normalizedGroup !== 'retail' && productForm.expiryDate) {
         payload.expiryDate = productForm.expiryDate
       }
-      if (normalizedGroup === 'retail' && sellPriceRaw) {
+      if (normalizedGroup === 'retail') {
         payload.sellPriceVnd = String(sellPrice)
       }
       if (description) payload.description = description
@@ -1652,6 +1820,7 @@ export default function OwnerInventoryPage() {
               inventoryItemId: `variant:${variantId}`,
               qty: String(Math.trunc(variant.stock)),
               importPrice: normalizedPrice,
+              sellPriceVnd: sellPriceRaw ? String(sellPrice) : undefined,
               supplier: productForm.supplier,
               date: receivedDate,
               note: `Initial variant stock: ${variant.name}`,
@@ -1674,7 +1843,7 @@ export default function OwnerInventoryPage() {
             supplier: productForm.supplier,
             date: receivedDate,
             expiryDate: productForm.expiryDate,
-            note: composeLotNoteWithVariant(variant.name, `Initial variant stock: ${variant.name}`),
+            note: composeLotNoteWithMeta(variant.name, '', `Initial variant stock: ${variant.name}`),
           })
         }
       }
@@ -1698,6 +1867,7 @@ export default function OwnerInventoryPage() {
         imageUrl: '',
         variants: ensureRetailVariantDrafts([], '0'),
       }))
+      setCategoryInputAdd('')
       setAddImageIdx(-1)
       closeAdd()
     } catch (err) {
@@ -1720,14 +1890,7 @@ export default function OwnerInventoryPage() {
     const wantsCreateSupplyVariant = isSuppliesProduct && String(stockForm.variantId || '') === STOCK_IN_NEW_SUPPLY_VARIANT_VALUE
     const wantsCreateVariant = wantsCreateRetailVariant || wantsCreateSupplyVariant
 
-    if (isRetailProduct && !wantsCreateRetailVariant && !String(stockForm.variantId || '').trim()) {
-      setStockError('Please select a variant for retail stock-in')
-      return
-    }
-
-    let inventoryItemId = buildInventorySkuFromSelection(selectedProduct, stockForm.variantId)
     if (wantsCreateRetailVariant) {
-      inventoryItemId = ''
       const variantName = String(stockForm.newVariantName || '').trim()
       if (!variantName) {
         setStockError('Please enter new variant name')
@@ -1737,7 +1900,15 @@ export default function OwnerInventoryPage() {
         setStockError('Invalid variant name')
         return
       }
-    } else if (wantsCreateSupplyVariant) {
+    }
+
+    if (isRetailProduct && !String(stockForm.variantId || '').trim()) {
+      setStockError('Please select a variant for retail stock-in')
+      return
+    }
+
+    let inventoryItemId = buildInventorySkuFromSelection(selectedProduct, stockForm.variantId)
+    if (wantsCreateSupplyVariant) {
       const variantName = String(stockForm.newVariantName || '').trim()
       if (!variantName) {
         setStockError('Please enter new variant name')
@@ -1806,6 +1977,26 @@ export default function OwnerInventoryPage() {
     try {
       setStockError('')
       setStockNote('')
+
+      let nextInventoryItemId = inventoryItemId
+      if (wantsCreateRetailVariant) {
+        const retailProductId = String(selectedProduct?.productId || extractRetailProductId(selectedProduct?.id) || '').trim()
+        if (!retailProductId) {
+          setStockError('Unable to detect retail product id for new variant')
+          return
+        }
+        const createdVariant = await api.post(`/api/owner/retail/products/${retailProductId}/variants`, {
+          name: String(stockForm.newVariantName || '').trim(),
+          stock: 0,
+        })
+        const createdVariantId = String(createdVariant?.id || '').trim()
+        if (!createdVariantId) {
+          setStockError('Unable to create retail variant')
+          return
+        }
+        nextInventoryItemId = buildInventorySkuFromSelection(selectedProduct, createdVariantId)
+      }
+
       const variantLabel = isSuppliesSku
         ? (
           wantsCreateSupplyVariant
@@ -1813,71 +2004,56 @@ export default function OwnerInventoryPage() {
             : String(stockForm.variantId || '').trim()
         )
         : String(stockForm.newVariantName || '').trim()
-      const noteWithVariant = isSuppliesSku && variantLabel
-        ? composeLotNoteWithVariant(variantLabel, stockForm.note)
-        : stockForm.note
+      const noteWithMeta = isSuppliesSku
+        ? composeLotNoteWithMeta(variantLabel, '', stockForm.note)
+        : composeLotNoteWithMeta('', sellPriceRaw ? String(sellPrice) : '', stockForm.note)
 
-      if (wantsCreateRetailVariant) {
-        const productId = String(selectedProduct?.productId || extractRetailProductId(selectedProduct?.id) || '').trim()
-        if (!productId) {
-          setStockError('Cannot resolve product id for new variant')
-          return
-        }
-
-        const createdVariant = await api.post(`/api/owner/retail/products/${productId}/variants`, {
-          name: String(stockForm.newVariantName || '').trim(),
-          stock: '0',
+      const shouldCreateStockLot = Number.isFinite(qty) && qty > 0
+      if (shouldCreateStockLot) {
+        await api.post('/api/owner/inventory/stock', {
+          inventoryItemId: nextInventoryItemId,
+          qty: String(qty),
+          importPrice: String(importPrice),
+          sellPriceVnd: sellPriceRaw ? String(sellPrice) : undefined,
+          supplier: stockForm.supplier,
+          date: selectedDate,
+          expiryDate: isSuppliesSku ? stockForm.expiryDate : null,
+          note: noteWithMeta,
         })
-        const createdVariantId = String(createdVariant?.id || '').trim()
-        if (!createdVariantId) {
-          setStockError('Unable to create new variant')
-          return
-        }
-        inventoryItemId = `variant:${createdVariantId}`
-
-        if (qty === 0) {
-          if (sellPriceRaw) {
-            const productId = String(selectedProduct?.id || '').trim()
-            if (productId) {
-              await api.put(`/api/owner/inventory/items/${productId}`, {
-                sellPriceVnd: String(sellPrice),
-              })
-            }
-          }
-          await refreshInventory()
-          setStockNote('New variant created successfully.')
-          setStockForm((p) => ({
-            ...p,
-            variantId: createdVariantId,
-            newVariantName: '',
-            inventoryItemId,
-            sellPrice: sellPriceRaw ? String(sellPrice) : p.sellPrice,
-          }))
-          return
-        }
-      }
-
-      await api.post('/api/owner/inventory/stock', {
-        inventoryItemId,
-        qty: String(qty),
-        importPrice: String(importPrice),
-        supplier: stockForm.supplier,
-        date: selectedDate,
-        expiryDate: isSuppliesSku ? stockForm.expiryDate : null,
-        note: noteWithVariant,
-      })
-
-      if (!isSuppliesSku && sellPriceRaw) {
-        const productId = String(selectedProduct?.id || '').trim()
-        if (productId) {
-          await api.put(`/api/owner/inventory/items/${productId}`, {
-            sellPriceVnd: String(sellPrice),
-          })
-        }
       }
 
       await refreshInventory()
-      setStockNote('Stock-in saved. Check lots and history.')
+
+      // If caller provided a sell price, try to persist it to the underlying
+      // inventory item or retail variant so product listing can reflect it
+      // immediately (avoid waiting for other background syncs on the server).
+      if (sellPriceRaw) {
+        try {
+          if (String(nextInventoryItemId || '').startsWith('variant:')) {
+            const vid = String(nextInventoryItemId).split(':')[1]
+            if (vid) {
+              // update variant price (server now accepts price-only update)
+              await api.put(`/api/owner/retail/variants/${vid}`, { price: String(sellPrice) })
+            }
+          } else {
+            // update inventory item sell price (best-effort)
+            const itemId = String(nextInventoryItemId || '')
+            if (itemId) {
+              await api.put(`/api/owner/inventory/items/${itemId}`, { sellPriceVnd: String(sellPrice) })
+            }
+          }
+        } catch (err) {
+          // non-fatal: ignore and continue; UI was already refreshed above
+          if (import.meta.env.DEV) console.warn('Unable to persist sell price automatically', err)
+        }
+      }
+      if (wantsCreateRetailVariant && !shouldCreateStockLot) {
+        setStockNote('Variant created successfully.')
+        notifySuccess('Variant created successfully.')
+      } else {
+        setStockNote('Stock-in saved. Check lots and history.')
+        notifySuccess('Stock-in saved. Check lots and history.')
+      }
       setStockForm({
         productId: '',
         variantId: '',
@@ -1896,7 +2072,9 @@ export default function OwnerInventoryPage() {
       if (import.meta.env.DEV) {
         console.error('Stock-in failed', err)
       }
-      setStockError(resolveUiErrorMessage(err))
+      const msg = resolveUiErrorMessage(err)
+      setStockError(msg)
+      notifyError(msg)
     }
   }
 
@@ -1963,13 +2141,16 @@ export default function OwnerInventoryPage() {
 
       await refreshInventory()
       setStockOutNote('Stock-out saved. Check lots and history.')
+      notifySuccess('Stock-out saved. Check lots and history.')
       setStockOutForm({ productId: '', variantId: '', supplyVariantName: '', inventoryItemId: '', qty: '0', date: getTodayDateInput(), note: '' })
       closeStockOut()
     } catch (err) {
       if (import.meta.env.DEV) {
         console.error('Stock-out failed', err)
       }
-      setStockOutError(resolveUiErrorMessage(err))
+      const msg = resolveUiErrorMessage(err)
+      setStockOutError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2071,9 +2252,12 @@ export default function OwnerInventoryPage() {
 
       await refreshInventory()
       closeEdit()
+      notifySuccess('Item updated successfully')
     } catch (err) {
       console.error(err)
-      setEditError(err?.message || 'Something went wrong')
+      const msg = err?.message || 'Something went wrong'
+      setEditError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2100,12 +2284,17 @@ export default function OwnerInventoryPage() {
       setExpandedLots((prev) => prev.filter((id) => String(id || '') !== targetId))
       setOpenDeleteConfirm(false)
       closeEdit()
-      refreshInventory().catch((err) => {
+      try {
+        await refreshInventory()
+      } catch (err) {
         console.error(err)
-      })
+      }
+      notifySuccess('Item deleted')
     } catch (err) {
       console.error(err)
-      setEditError(err?.message || 'Unable to deactivate item')
+      const msg = err?.message || 'Unable to deactivate item'
+      setEditError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2119,6 +2308,9 @@ export default function OwnerInventoryPage() {
     const sellPriceRaw = digitsOnly(lotEditForm.sellPrice)
     const sellPrice = Number(sellPriceRaw || 0)
     const currentItem = items.find((it) => String(it?.id || '') === String(lotEditFor?.itemId || ''))
+    const currentLots = Array.isArray(currentItem?.lots) ? currentItem.lots : []
+    const currentLot = currentLots.find((lot) => String(lot?.lotId || '') === targetLotId)
+    const lockedVariantName = extractVariantFromLotNote(currentLot?.note)
     const isRetailLotItem = String(currentItem?.group || '').toLowerCase() === 'retail'
 
     if (!Number.isFinite(remainingQty) || remainingQty < 0) {
@@ -2156,30 +2348,28 @@ export default function OwnerInventoryPage() {
 
     try {
       setLotEditError('')
+      const lotNote = composeLotNoteWithMeta(
+        lockedVariantName,
+        '',
+        lotEditForm.note
+      )
       await api.put(`/api/owner/inventory/lots/${targetLotId}`, {
         remainingQty: String(remainingQty),
         price: String(price),
+        sellPriceVnd: isRetailLotItem && sellPriceRaw ? String(sellPrice) : undefined,
         receivedAt: lotEditForm.receivedAt,
         expiryDate: lotEditForm.expiryDate || null,
         supplier: lotEditForm.supplier,
-        note: composeLotNoteWithVariant(lotEditForm.variantName, lotEditForm.note),
+        note: lotNote,
       })
-
-      if (isRetailLotItem && sellPriceRaw) {
-        const retailItemId = isVariantItem(currentItem)
-          ? String(currentItem?.productId || '').trim()
-          : String(currentItem?.id || '').trim()
-        if (retailItemId) {
-          await api.put(`/api/owner/inventory/items/${retailItemId}`, {
-            sellPriceVnd: String(sellPrice),
-          })
-        }
-      }
       await refreshInventory()
       closeEditLot()
+      notifySuccess('Lot updated')
     } catch (err) {
       console.error(err)
-      setLotEditError(err?.message || 'Unable to update lot')
+      const msg = err?.message || 'Unable to update lot'
+      setLotEditError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2192,9 +2382,12 @@ export default function OwnerInventoryPage() {
       await api.del(`/api/owner/inventory/lots/${targetLotId}`)
       await refreshInventory()
       closeEditLot()
+      notifySuccess('Lot deleted')
     } catch (err) {
       console.error(err)
-      setLotEditError(err?.message || 'Unable to delete lot')
+      const msg = err?.message || 'Unable to delete lot'
+      setLotEditError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2223,13 +2416,6 @@ export default function OwnerInventoryPage() {
       return
     }
 
-    const cap = Number(variantsProductStock ?? variantsFor?.qty ?? 0)
-    const nextTotal = Number(variantsTotalStock || 0) + Number(digitsOnly(newVariant.stock) || 0)
-    if (nextTotal > cap) {
-      setVariantsError('Insufficient stock')
-      return
-    }
-
     try {
       setVariantsError('')
       await api.post(`/api/owner/retail/products/${variantsFor.productId}/variants`, {
@@ -2239,9 +2425,12 @@ export default function OwnerInventoryPage() {
       await refreshVariantsAndProduct(variantsFor.productId)
       setNewVariant({ name: '', stock: '0' })
       await refreshInventory()
+      notifySuccess('Variant created')
     } catch (err) {
       console.error(err)
-      setVariantsError(err?.message || 'Unable to create variant')
+      const msg = err?.message || 'Unable to create variant'
+      setVariantsError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2258,11 +2447,6 @@ export default function OwnerInventoryPage() {
       return
     }
 
-    const cap = Number(variantsProductStock ?? variantsFor?.qty ?? 0)
-    if (Number(variantsTotalStock || 0) > cap) {
-      setVariantsError('Insufficient stock')
-      return
-    }
     try {
       setVariantsError('')
       await api.put(`/api/owner/retail/variants/${variant.id}`, {
@@ -2273,9 +2457,12 @@ export default function OwnerInventoryPage() {
         await refreshVariantsAndProduct(variantsFor.productId)
       }
       await refreshInventory()
+      notifySuccess('Variant updated')
     } catch (err) {
       console.error(err)
-      setVariantsError(err?.message || 'Unable to update variant')
+      const msg = err?.message || 'Unable to update variant'
+      setVariantsError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2292,9 +2479,12 @@ export default function OwnerInventoryPage() {
       await api.del(`/api/owner/retail/variants/${variant.id}`)
       await refreshVariantsAndProduct(variantsFor.productId)
       await refreshInventory()
+      notifySuccess('Variant deleted')
     } catch (err) {
       console.error(err)
-      setVariantsError(err?.message || 'Unable to delete variant')
+      const msg = err?.message || 'Unable to delete variant'
+      setVariantsError(msg)
+      notifyError(msg)
     }
   }
 
@@ -2315,6 +2505,13 @@ export default function OwnerInventoryPage() {
               <IconDownload />
             </span>
             Import Excel
+          </button>
+
+          <button type="button" className="portal-outlineBtn" disabled={Boolean(exportingKind)} onClick={openExportModal}>
+            <span className="portal-outlineBtnIcon" aria-hidden="true">
+              <IconDownload />
+            </span>
+            {exportingKind ? 'Exporting...' : 'Export Excel'}
           </button>
 
           <button
@@ -2345,31 +2542,6 @@ export default function OwnerInventoryPage() {
             Stock Out
           </button>
 
-          <button
-            type="button"
-            className="portal-primaryBtn"
-            onClick={() => {
-              setAddError('')
-              setProductForm((p) => ({
-                ...p,
-                group: 'retail',
-                variants: ensureRetailVariantDrafts(p.variants, p.qty || '0'),
-              }))
-              setOpenAdd(true)
-            }}
-          >
-            <span className="portal-primaryBtnIcon" aria-hidden="true">
-              +
-            </span>
-            Add Product
-          </button>
-
-          <button type="button" className="portal-primaryBtn" onClick={openCreateCategory}>
-            <span className="portal-primaryBtnIcon" aria-hidden="true">
-              +
-            </span>
-            Add Category
-          </button>
         </div>
       </div>
 
@@ -2412,18 +2584,28 @@ export default function OwnerInventoryPage() {
             <div className="portal-modalGrid2">
               <label className="portal-field">
                 <span className="portal-label">Category <span className="products-required">*</span></span>
-                <select
-                  className="portal-select"
-                  value={productForm.categoryId || ''}
-                  onChange={(e) => setProductForm((p) => ({ ...p, categoryId: e.target.value }))}
-                >
-                  <option value="">-- Select category --</option>
-                  {categories.map((c) => (
-                    <option key={String(c.id)} value={String(c.id)}>
-                      {c.name}
-                    </option>
+                <input
+                  className="portal-input"
+                  placeholder="Search category..."
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setCategoryInputAdd(value)
+                    const matched = (categories || []).find(
+                      (c) => String(c?.name || '').trim().toLowerCase() === String(value || '').trim().toLowerCase()
+                    )
+                    setProductForm((p) => ({
+                      ...p,
+                      categoryId: matched?.id !== undefined && matched?.id !== null ? String(matched.id) : '',
+                    }))
+                  }}
+                  list="owner-inventory-category-list"
+                  value={categoryInputAdd}
+                />
+                <datalist id="owner-inventory-category-list">
+                  {(categories || []).map((c) => (
+                    <option key={String(c.id)} value={c.name} />
                   ))}
-                </select>
+                </datalist>
               </label>
 
               <label className="portal-field">
@@ -2725,6 +2907,61 @@ export default function OwnerInventoryPage() {
       </PortalModal>
 
       <PortalModal
+        open={openExport}
+        title="Export Inventory Excel"
+        onClose={closeExportModal}
+        footer={
+          <>
+            <button type="button" className="portal-modalBtn" onClick={closeExportModal} disabled={Boolean(exportingKind)}>
+              Cancel
+            </button>
+            <button type="submit" form="inventory-export-form" className="portal-modalBtn portal-modalBtnPrimary" disabled={Boolean(exportingKind)}>
+              {exportingKind ? 'Exporting...' : 'Export'}
+            </button>
+          </>
+        }
+      >
+        <form id="inventory-export-form" onSubmit={onSubmitExport}>
+          <label className="portal-field" style={{ marginTop: 4 }}>
+            <span className="portal-label">Report Type</span>
+            <select
+              className="portal-select"
+              value={exportForm.type}
+              onChange={(e) => setExportForm((p) => ({ ...p, type: e.target.value }))}
+            >
+              <option value="snapshot">Inventory Snapshot (Current Stock)</option>
+              <option value="movement">Inventory Movement (Stock In/Out History)</option>
+              <option value="low-stock">Low Stock / Alert Report</option>
+            </select>
+          </label>
+
+          {exportForm.type === 'movement' ? (
+            <div className="portal-modalGrid2">
+              <label className="portal-field" style={{ marginTop: 12 }}>
+                <span className="portal-label">From Date</span>
+                <input
+                  className="portal-input"
+                  type="date"
+                  value={exportForm.fromDate}
+                  onChange={(e) => setExportForm((p) => ({ ...p, fromDate: e.target.value }))}
+                />
+              </label>
+
+              <label className="portal-field" style={{ marginTop: 12 }}>
+                <span className="portal-label">To Date</span>
+                <input
+                  className="portal-input"
+                  type="date"
+                  value={exportForm.toDate}
+                  onChange={(e) => setExportForm((p) => ({ ...p, toDate: e.target.value }))}
+                />
+              </label>
+            </div>
+          ) : null}
+        </form>
+      </PortalModal>
+
+      <PortalModal
         open={openImport}
         title="Import Inventory from Excel"
         onClose={closeImportModal}
@@ -2963,26 +3200,22 @@ export default function OwnerInventoryPage() {
                     options={variantDropdownOptions}
                     createOptionLabel={(typed) => `+ Create variant "${typed}"`}
                     onCreateFromQuery={(typed) => {
-                      const productSku = String(buildInventorySkuFromSelection(selectedProduct, '') || '')
-                      const selectedItem = items.find((it) => String(it?.id || '') === productSku)
-                      setStockForId('')
                       setStockForm((p) => ({
                         ...p,
                         variantId: STOCK_IN_NEW_VARIANT_VALUE,
                         newVariantName: typed,
                         inventoryItemId: '',
-                        importPrice: resolveStockInImportPriceInputValue(selectedItem),
-                        sellPrice: resolveStockInSellPriceInputValue(selectedItem),
                       }))
                     }}
                     onChange={(nextVariantId) => {
                       const sku = buildInventorySkuFromSelection(selectedProduct, nextVariantId)
                       const selectedItem = items.find((it) => String(it?.id || '') === String(sku || ''))
+                      const isNewVariantSelection = String(nextVariantId || '') === STOCK_IN_NEW_VARIANT_VALUE
                       setStockForId(String(sku || ''))
                       setStockForm((p) => ({
                         ...p,
                         variantId: String(nextVariantId || ''),
-                        newVariantName: '',
+                        newVariantName: isNewVariantSelection ? p.newVariantName : '',
                         inventoryItemId: sku,
                         importPrice: resolveStockInImportPriceInputValue(selectedItem),
                         sellPrice: resolveStockInSellPriceInputValue(selectedItem),
@@ -3291,27 +3524,30 @@ export default function OwnerInventoryPage() {
             <div className="portal-modalGrid2">
               <label className="portal-field">
                 <span className="portal-label">Category</span>
-                <select
-                  className="portal-select"
-                  value={editForm.categoryId || ''}
+                <input
+                  className="portal-input"
+                  placeholder="Search category..."
                   onChange={(e) => {
-                    const nextId = e.target.value
-                    const cat = categoriesById.get(String(nextId))
+                    const value = e.target.value
+                    setCategoryInputEdit(value)
+                    const matched = (categories || []).find(
+                      (c) => String(c?.name || '').trim().toLowerCase() === String(value || '').trim().toLowerCase()
+                    )
                     setEditForm((p) => ({
                       ...p,
-                      categoryId: nextId,
-                      category: cat?.name || p.category,
-                      kind: cat?.name || p.kind,
+                      categoryId: matched?.id !== undefined && matched?.id !== null ? String(matched.id) : '',
+                      category: matched?.name || p.category,
+                      kind: matched?.name || p.kind,
                     }))
                   }}
-                >
-                  <option value="">-- Select category --</option>
-                  {categories.map((c) => (
-                    <option key={String(c.id)} value={String(c.id)}>
-                      {c.name}
-                    </option>
+                  list="owner-inventory-category-list"
+                  value={categoryInputEdit}
+                />
+                <datalist id="owner-inventory-category-list">
+                  {(categories || []).map((c) => (
+                    <option key={String(c.id)} value={c.name} />
                   ))}
-                </select>
+                </datalist>
               </label>
 
               <label className="portal-field">
@@ -3659,9 +3895,10 @@ export default function OwnerInventoryPage() {
             <span className="portal-label">Variant</span>
             <input
               className="portal-input"
-              placeholder="Variant name (optional)"
+              placeholder="Variant"
               value={lotEditForm.variantName}
-              onChange={(e) => setLotEditForm((p) => ({ ...p, variantName: e.target.value }))}
+              readOnly
+              disabled
             />
           </label>
 
@@ -3833,11 +4070,9 @@ export default function OwnerInventoryPage() {
           <b>{variantsTotalStock}</b>
         </div>
 
-        {Number(variantsTotalStock || 0) > Number(variantsProductStock ?? variantsFor?.qty ?? 0) ? (
-          <div className="portal-formError" role="alert" style={{ marginTop: 8 }}>
-            Insufficient stock
-          </div>
-        ) : null}
+        <div className="portal-pageSubtitle" style={{ marginTop: 6 }}>
+          Variant stock is derived from inventory lots. Saving stock here will create or consume lots (FIFO), not overwrite stock directly.
+        </div>
 
         <PortalCard title="Variant List">
           {variants.length === 0 ? <div className="portal-pageSubtitle">No variants yet.</div> : null}
@@ -3846,7 +4081,7 @@ export default function OwnerInventoryPage() {
               <thead>
                 <tr>
                   <th>Variant Name</th>
-                  <th>Stock</th>
+                  <th>Derived Stock (Lots)</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -3875,7 +4110,7 @@ export default function OwnerInventoryPage() {
                     <td style={{ width: 220 }}>
                       <div className="portal-rowActions">
                         <button type="button" className="portal-ghostBtn" onClick={() => onUpdateVariant(v)}>
-                          Save
+                          Adjust Stock
                         </button>
                         <button
                           type="button"
@@ -3916,6 +4151,7 @@ export default function OwnerInventoryPage() {
                   value={newVariant.stock}
                   onChange={(e) => setNewVariant((p) => ({ ...p, stock: digitsOnly(e.target.value) }))}
                 />
+                <span className="portal-helpText">Creates the initial lot quantity for this variant.</span>
               </label>
             </div>
 
@@ -4233,9 +4469,22 @@ export default function OwnerInventoryPage() {
                   const typeLabel = it.group === 'retail'
                     ? (isVariantRow ? 'Retail Variant' : 'Retail')
                     : 'Supplies'
+                  const lots = Array.isArray(it.lots) ? it.lots : []
                   const importPrice = resolveImportPrice(it)
                   const sellPrice = resolveSellPrice(it)
-                  const lots = Array.isArray(it.lots) ? it.lots : []
+                  const lotSellPrices = lots
+                    .map((lot) => resolveLotSellPrice(lot))
+                    .filter((price) => Number.isFinite(price) && Number(price) > 0)
+                  const distinctLotSellPrices = Array.from(new Set(lotSellPrices.map((price) => Number(price))))
+                  const itemSellDisplay = it.group === 'service'
+                    ? 'N/A'
+                    : distinctLotSellPrices.length > 1
+                      ? 'Multiple'
+                      : distinctLotSellPrices.length === 1
+                        ? `${formatVnd(distinctLotSellPrices[0])} VND`
+                        : sellPrice !== null
+                          ? `${formatVnd(sellPrice)} VND`
+                          : '-'
                   const totalQty = Number(it.totalQty || it.stock || 0)
                   const lotTotalCost = lots.reduce((sum, lot) => sum + Number(lot?.remaining || 0) * Number(lot?.price || 0), 0)
                   const total = lots.length
@@ -4274,7 +4523,7 @@ export default function OwnerInventoryPage() {
                             ? `${formatVnd(importPrice)} VND`
                             : '-'}
                       </td>
-                      <td>{it.group === 'service' ? 'N/A' : sellPrice !== null ? `${formatVnd(sellPrice)} VND` : '-'}</td>
+                      <td>{itemSellDisplay}</td>
                       <td>{total !== null ? `${formatVnd(total)} VND` : '-'}</td>
                       <td>{it.lastIn || '-'}</td>
                       <td>
@@ -4341,6 +4590,8 @@ export default function OwnerInventoryPage() {
                                           {it.group === 'service'
                                             ? 'N/A'
                                             : (() => {
+                                              const lotSell = resolveLotSellPrice(lot)
+                                              if (lotSell !== null) return `${formatVnd(lotSell)} VND`
                                               const lotVariantName = extractVariantFromLotNote(lot.note)
                                               if (lotVariantName) {
                                                 const productVariantId = String(it?.productId || '').trim()

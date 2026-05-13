@@ -8,8 +8,10 @@
         "predev": "npm run guard:optional-chaining",
         "prestart": "npm run guard:optional-chaining",
         "start": "node src/index.js",
-            "dev": "nodemon src/index.js",
-            "migrate": "node scripts/runMigrations.js"
+        "dev": "nodemon src/index.js",
+        "migrate": "node scripts/runMigrations.js",
+        "test": "jest --runInBand --testMatch \"**/tests/**/*.test.js\"",
+        "test:watch": "jest --watch --testMatch \"**/tests/**/*.test.js\""
     },
     "keywords": [],
     "author": "",
@@ -27,13 +29,14 @@
         "mssql": "^12.2.0",
         "multer": "^2.1.1",
         "node-fetch": "^3.3.2",
-        "nodemailer": "^6.9.4",
+        "nodemailer": "^8.0.5",
         "sharp": "^0.34.5",
         "socket.io": "^4.8.3",
         "socket.io-client": "^4.8.3",
         "xlsx": "^0.18.5"
     },
     "devDependencies": {
+        "jest": "^30.3.0",
         "nodemon": "^3.1.14"
     }
 }

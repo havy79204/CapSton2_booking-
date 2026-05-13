@@ -4,6 +4,7 @@ const { env } = require('../config/config')
 const { upsertPaymentRecord, resolveInvoiceIdForPayment } = require('../services/paymentPersistence.service')
 const { notifyCustomerEvent, notifyOwnerEvent, scheduleBookingReminders } = require('../services/notifications.service')
 const { getFrontendOriginForTxnRef, normalizeFrontendOrigin } = require('../services/vnpayFrontendReturnStore.service')
+const retailService = require('../services/retail.service')
 
 let _invoiceColumnsLowerCache = null
 
@@ -285,6 +286,15 @@ async function applyOrderPaymentResult(orderIdInput, isSuccess) {
   if (isSuccess) {
     if (currentStatus === 'pending' || currentStatus === 'awaiting' || currentStatus === 'c' || currentStatus === 'failed') {
       if (isOnlineOrder) {
+        await retailService.deductRetailOrderStock(orderId, {
+          actor: {
+            roleKey: 'customer',
+            userId,
+            name: null,
+            email: null,
+          },
+          referenceId: orderId,
+        })
         await finalizeOrderAfterSuccessfulPayment(orderId, userId)
       }
 
@@ -293,7 +303,7 @@ async function applyOrderPaymentResult(orderIdInput, isSuccess) {
          SET Status = @status
          WHERE OrderId = @orderId`,
         {
-          status: 'Pending',
+          status: isOnlineOrder ? 'Processing' : 'Pending',
           orderId,
         },
       )

@@ -8,6 +8,7 @@ const {
 } = require('../models/inventory.model')
 
 let _schemaInfoPromise = null
+let _legacyVariantShadowCleanupPromise = null
 const MAX_INVENTORY_QTY = 99999999
 const MAX_PRICE_VND = 9999999999
 const MAX_REFERENCE_ID_LEN = 50
@@ -67,8 +68,38 @@ async function tableExists(tableName) {
   return Boolean(result.recordset?.length)
 }
 
+async function cleanupLegacyVariantShadowRows() {
+  if (_legacyVariantShadowCleanupPromise) return _legacyVariantShadowCleanupPromise
+  _legacyVariantShadowCleanupPromise = (async () => {
+    try {
+      await query(
+        `UPDATE InventoryItems
+         SET ProductId = NULL
+         WHERE InventoryItemId LIKE 'retail_variant_%'
+           AND ProductId IS NOT NULL`
+      )
+    } catch (err) {
+      console.warn('[inventory] cleanupLegacyVariantShadowRows failed:', err?.message || err)
+    }
+  })()
+  return _legacyVariantShadowCleanupPromise
+}
+
+async function initializeInventoryService() {
+  // Run cleanup once at startup to fix any legacy data
+  console.log('[inventory] Running startup cleanup for legacy variant shadows...')
+  try {
+    await cleanupLegacyVariantShadowRows()
+    console.log('[inventory] Startup cleanup completed')
+  } catch (err) {
+    console.warn('[inventory] Startup cleanup failed:', err?.message || err)
+  }
+}
+
 async function getSchemaInfo() {
-  if (_schemaInfoPromise) return _schemaInfoPromise
+  if (_schemaInfoPromise) {
+    return _schemaInfoPromise
+  }
   _schemaInfoPromise = (async () => {
     const [
       productsHasCategoryId,
@@ -376,12 +407,74 @@ function formatDateOnly(value) {
   return `${y}-${m}-${d}`
 }
 
+function formatDateOnlyForImport(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return null
+  const y = value.getFullYear()
+  const m = String(value.getMonth() + 1).padStart(2, '0')
+  const d = String(value.getDate()).padStart(2, '0')
+  return `${m}-${d}-${y}`
+}
+
 function normalizeBase64Payload(value) {
   const raw = String(value || '').trim()
   if (!raw) return ''
   const idx = raw.indexOf('base64,')
   if (idx >= 0) return raw.slice(idx + 7)
   return raw
+}
+
+function normalizeExportGroup(value) {
+  const raw = String(value || '').trim().toLowerCase()
+  if (raw === 'service' || raw === 'supplies') return 'service'
+  if (raw === 'retail' || raw === 'product') return 'retail'
+  return 'all'
+}
+
+function normalizeHistoryTypeFilter(value) {
+  const raw = String(value || '').trim().toLowerCase()
+  if (!raw || raw === 'all') return 'all'
+  if (raw === 'stock in' || raw === 'in') return 'stock in'
+  if (raw === 'stock out' || raw === 'out') return 'stock out'
+  if (raw === 'lot adjust' || raw === 'adjust') return 'lot adjust'
+  if (raw === 'lot delete' || raw === 'delete') return 'lot delete'
+  return 'all'
+}
+
+function parseDateBoundary(value, endOfDay = false) {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return null
+
+  const y = Number(m[1])
+  const mon = Number(m[2])
+  const day = Number(m[3])
+  const d = new Date(y, mon - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0)
+  if (Number.isNaN(d.getTime())) return null
+  return d
+}
+
+function parseDmyDate(value) {
+  const raw = String(value || '').trim()
+  const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (!m) return null
+  const day = Number(m[1])
+  const mon = Number(m[2])
+  const y = Number(m[3])
+  const d = new Date(y, mon - 1, day, 12, 0, 0, 0)
+  if (Number.isNaN(d.getTime())) return null
+  return d
+}
+
+function safeExcelText(value) {
+  const text = String(value ?? '')
+  if (!text) return ''
+  if (/^[=+\-@]/.test(text)) return `'${text}`
+  return text
+}
+
+function isVariantInventoryItem(item) {
+  return String(item?.skuType || '').toLowerCase() === 'variant' || Boolean(item?.variantId)
 }
 
 async function findExistingItemByName(name, schema) {
@@ -614,6 +707,266 @@ async function getInventoryImportTemplateBuffer() {
   return Buffer.from(arr)
 }
 
+async function getInventorySnapshotExportBuffer(filters = {}) {
+  const data = await getInventory()
+  const queryText = String(filters?.q || filters?.query || '').trim().toLowerCase()
+  const categoryFilter = String(filters?.category || 'all').trim().toLowerCase()
+  const stockState = String(filters?.stockState || 'all').trim().toLowerCase()
+  const groupFilter = normalizeExportGroup(filters?.group)
+
+  let items = (Array.isArray(data?.items) ? data.items : []).filter((i) => !isVariantInventoryItem(i))
+  if (groupFilter !== 'all') {
+    items = items.filter((i) => String(i?.group || '').toLowerCase() === groupFilter)
+  }
+
+  if (queryText) {
+    items = items.filter((i) => {
+      const name = String(i?.name || '').toLowerCase()
+      const category = String(i?.category || '').toLowerCase()
+      return name.includes(queryText) || category.includes(queryText)
+    })
+  }
+
+  if (categoryFilter && categoryFilter !== 'all') {
+    items = items.filter((i) => String(i?.category || '').trim().toLowerCase() === categoryFilter)
+  }
+
+  if (stockState !== 'all') {
+    items = items.filter((i) => {
+      const stock = Number(i?.stock || 0)
+      const minQty = Number(i?.minQty || 0)
+      if (stockState === 'out') return stock <= 0
+      if (stockState === 'low') return stock > 0 && minQty > 0 && stock <= minQty
+      if (stockState === 'healthy') return stock > 0 && (minQty <= 0 || stock > minQty)
+      return true
+    })
+  }
+
+  items.sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { sensitivity: 'base' }))
+
+  const workbook = new ExcelJS.Workbook()
+  const ws = workbook.addWorksheet('Inventory Snapshot')
+  ws.columns = [
+    { header: 'No', key: 'no', width: 8 },
+    { header: 'ProductId', key: 'productId', width: 24 },
+    { header: 'ProductName', key: 'name', width: 34 },
+    { header: 'Type', key: 'type', width: 14 },
+    { header: 'Category', key: 'category', width: 24 },
+    { header: 'Unit', key: 'unit', width: 12 },
+    { header: 'CurrentStock', key: 'stock', width: 14 },
+    { header: 'MinStock', key: 'minQty', width: 12 },
+    { header: 'StockState', key: 'stockState', width: 14 },
+    { header: 'ImportPriceVnd', key: 'importPriceVnd', width: 16 },
+    { header: 'SellPriceVnd', key: 'sellPriceVnd', width: 14 },
+    { header: 'StockValueVnd', key: 'stockValueVnd', width: 16 },
+    { header: 'LastStockIn', key: 'lastIn', width: 16 },
+  ]
+
+  const now = new Date()
+  for (let idx = 0; idx < items.length; idx += 1) {
+    const item = items[idx]
+    const stock = Number(item?.stock || 0)
+    const minQty = Number(item?.minQty || 0)
+    const importPrice = Number(item?.priceVnd || 0)
+    const stockStateLabel = stock <= 0 ? 'Out' : (minQty > 0 && stock <= minQty ? 'Low' : 'Healthy')
+    ws.addRow({
+      no: idx + 1,
+      productId: safeExcelText(item?.productId || item?.id || ''),
+      name: safeExcelText(item?.name || ''),
+      type: String(item?.group || '').toLowerCase() === 'retail' ? 'Retail' : 'Supplies',
+      category: safeExcelText(item?.category || ''),
+      unit: safeExcelText(item?.unit || ''),
+      stock,
+      minQty,
+      stockState: stockStateLabel,
+      importPriceVnd: importPrice,
+      sellPriceVnd: item?.sellPriceVnd === null || item?.sellPriceVnd === undefined ? null : Number(item.sellPriceVnd),
+      stockValueVnd: Number.isFinite(importPrice) ? stock * importPrice : null,
+      lastIn: safeExcelText(item?.lastIn || ''),
+    })
+  }
+
+  ws.getRow(1).font = { bold: true }
+  ws.views = [{ state: 'frozen', ySplit: 1 }]
+  ws.getColumn('J').numFmt = '#,##0'
+  ws.getColumn('K').numFmt = '#,##0'
+  ws.getColumn('L').numFmt = '#,##0'
+  ws.getCell('A1').note = `Generated at ${now.toISOString()}`
+
+  const arr = await workbook.xlsx.writeBuffer()
+  return Buffer.from(arr)
+}
+
+async function getInventoryMovementExportBuffer(filters = {}) {
+  const data = await getInventory()
+  const allItems = Array.isArray(data?.items) ? data.items : []
+  const displayItems = allItems.filter((i) => !isVariantInventoryItem(i))
+
+  const groupFilter = normalizeExportGroup(filters?.group)
+  const queryText = String(filters?.q || filters?.query || '').trim().toLowerCase()
+  const typeFilter = normalizeHistoryTypeFilter(filters?.historyType || filters?.type)
+  const from = parseDateBoundary(filters?.fromDate, false)
+  const to = parseDateBoundary(filters?.toDate, true)
+
+  let history = Array.isArray(data?.history) ? data.history : []
+
+  if (groupFilter !== 'all') {
+    const allowedNameSet = new Set(
+      displayItems
+        .filter((i) => String(i?.group || '').toLowerCase() === groupFilter)
+        .map((i) => String(i?.name || '').trim().toLowerCase())
+        .filter(Boolean)
+    )
+    history = history.filter((h) => allowedNameSet.has(String(h?.product || '').trim().toLowerCase()))
+  }
+
+  if (queryText) {
+    history = history.filter((h) => {
+      const product = String(h?.product || '').toLowerCase()
+      const note = String(h?.note || '').toLowerCase()
+      return product.includes(queryText) || note.includes(queryText)
+    })
+  }
+
+  if (typeFilter !== 'all') {
+    history = history.filter((h) => String(h?.type || '').trim().toLowerCase() === typeFilter)
+  }
+
+  if (from || to) {
+    history = history.filter((h) => {
+      const d = parseDmyDate(h?.date)
+      if (!d) return false
+      if (from && d.getTime() < from.getTime()) return false
+      if (to && d.getTime() > to.getTime()) return false
+      return true
+    })
+  }
+
+  history.sort((a, b) => {
+    const da = parseDmyDate(a?.date)?.getTime() || 0
+    const db = parseDmyDate(b?.date)?.getTime() || 0
+    return db - da
+  })
+
+  const workbook = new ExcelJS.Workbook()
+  const ws = workbook.addWorksheet('Inventory Movement')
+  ws.columns = [
+    { header: 'No', key: 'no', width: 8 },
+    { header: 'Date', key: 'date', width: 14 },
+    { header: 'Type', key: 'type', width: 14 },
+    { header: 'Product', key: 'product', width: 34 },
+    { header: 'Quantity', key: 'qty', width: 12 },
+    { header: 'UnitCostVnd', key: 'unitCostVnd', width: 14 },
+    { header: 'TotalValueVnd', key: 'totalVnd', width: 16 },
+    { header: 'PerformedBy', key: 'by', width: 24 },
+    { header: 'Note', key: 'note', width: 42 },
+  ]
+
+  for (let idx = 0; idx < history.length; idx += 1) {
+    const row = history[idx]
+    const qty = Number(row?.qty || 0)
+    const unitCost = Number.isFinite(Number(row?.unitCost)) ? Number(row.unitCost) : null
+    const totalVnd = Number.isFinite(Number(row?.totalVnd))
+      ? Number(row.totalVnd)
+      : (Number.isFinite(unitCost) ? Math.abs(qty) * unitCost : null)
+
+    ws.addRow({
+      no: idx + 1,
+      date: safeExcelText(row?.date || ''),
+      type: safeExcelText(row?.type || ''),
+      product: safeExcelText(row?.product || ''),
+      qty,
+      unitCostVnd: unitCost,
+      totalVnd,
+      by: safeExcelText(row?.by || 'System'),
+      note: safeExcelText(row?.note || ''),
+    })
+  }
+
+  ws.getRow(1).font = { bold: true }
+  ws.views = [{ state: 'frozen', ySplit: 1 }]
+  ws.getColumn('F').numFmt = '#,##0'
+  ws.getColumn('G').numFmt = '#,##0'
+
+  const arr = await workbook.xlsx.writeBuffer()
+  return Buffer.from(arr)
+}
+
+async function getInventoryLowStockExportBuffer(filters = {}) {
+  const data = await getInventory()
+  const queryText = String(filters?.q || filters?.query || '').trim().toLowerCase()
+  const categoryFilter = String(filters?.category || 'all').trim().toLowerCase()
+  const groupFilter = normalizeExportGroup(filters?.group)
+
+  let items = (Array.isArray(data?.items) ? data.items : []).filter((i) => !isVariantInventoryItem(i))
+  if (groupFilter !== 'all') {
+    items = items.filter((i) => String(i?.group || '').toLowerCase() === groupFilter)
+  }
+
+  if (queryText) {
+    items = items.filter((i) => {
+      const name = String(i?.name || '').toLowerCase()
+      const category = String(i?.category || '').toLowerCase()
+      return name.includes(queryText) || category.includes(queryText)
+    })
+  }
+
+  if (categoryFilter && categoryFilter !== 'all') {
+    items = items.filter((i) => String(i?.category || '').trim().toLowerCase() === categoryFilter)
+  }
+
+  items = items.filter((i) => {
+    const stock = Number(i?.stock || 0)
+    const minQty = Number(i?.minQty || 0)
+    return stock <= 0 || (minQty > 0 && stock <= minQty)
+  })
+
+  items.sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { sensitivity: 'base' }))
+
+  const workbook = new ExcelJS.Workbook()
+  const ws = workbook.addWorksheet('Low Stock Alert')
+  ws.columns = [
+    { header: 'No', key: 'no', width: 8 },
+    { header: 'ProductId', key: 'productId', width: 24 },
+    { header: 'ProductName', key: 'name', width: 34 },
+    { header: 'Type', key: 'type', width: 14 },
+    { header: 'Category', key: 'category', width: 24 },
+    { header: 'CurrentStock', key: 'stock', width: 14 },
+    { header: 'MinStock', key: 'minQty', width: 12 },
+    { header: 'AlertLevel', key: 'alertLevel', width: 14 },
+    { header: 'GapToMin', key: 'gapToMin', width: 12 },
+    { header: 'LastStockIn', key: 'lastIn', width: 16 },
+  ]
+
+  for (let idx = 0; idx < items.length; idx += 1) {
+    const item = items[idx]
+    const stock = Number(item?.stock || 0)
+    const minQty = Number(item?.minQty || 0)
+    const isOut = stock <= 0
+    const alertLevel = isOut ? 'Out of stock' : 'Low stock'
+    const gapToMin = minQty > 0 ? (minQty - stock) : null
+
+    ws.addRow({
+      no: idx + 1,
+      productId: safeExcelText(item?.productId || item?.id || ''),
+      name: safeExcelText(item?.name || ''),
+      type: String(item?.group || '').toLowerCase() === 'retail' ? 'Retail' : 'Supplies',
+      category: safeExcelText(item?.category || ''),
+      stock,
+      minQty,
+      alertLevel,
+      gapToMin,
+      lastIn: safeExcelText(item?.lastIn || ''),
+    })
+  }
+
+  ws.getRow(1).font = { bold: true }
+  ws.views = [{ state: 'frozen', ySplit: 1 }]
+
+  const arr = await workbook.xlsx.writeBuffer()
+  return Buffer.from(arr)
+}
+
 async function importInventoryFromExcel(payload, { actor } = {}) {
   const schema = await getSchemaInfo()
   const duplicateModeRaw = String(payload?.duplicateMode || 'update').trim().toLowerCase()
@@ -735,8 +1088,8 @@ async function importInventoryFromExcel(payload, { actor } = {}) {
 
       const existing = await findExistingItemByName(productName, schema)
       if (!existing) {
-        const importDate = formatDateOnly(receivedDate)
-        const importExpiry = formatDateOnly(expiryDate)
+        const importDate = formatDateOnlyForImport(receivedDate)
+        const importExpiry = formatDateOnlyForImport(expiryDate)
         const effectiveVariant = type === 'retail'
           ? (variant || DEFAULT_RETAIL_VARIANT_NAME)
           : variant
@@ -806,8 +1159,8 @@ async function importInventoryFromExcel(payload, { actor } = {}) {
         throw new Error(`Existing product type is ${existing.type === 'service' ? 'Supplies' : 'Retail'}, but row type is ${String(valueByCol.Type)}`)
       }
 
-      const importDate = formatDateOnly(receivedDate)
-      const importExpiry = formatDateOnly(expiryDate)
+      const importDate = formatDateOnlyForImport(receivedDate)
+      const importExpiry = formatDateOnlyForImport(expiryDate)
       const effectiveVariant = type === 'retail'
         ? (variant || DEFAULT_RETAIL_VARIANT_NAME)
         : variant
@@ -1067,7 +1420,7 @@ async function getInventory() {
         txInfoVariant.LastAt AS LastAt,
         CAST('retail' AS NVARCHAR(20)) AS ItemGroup,
         COALESCE(TRY_CONVERT(DECIMAL(19,2), rv.PriceVnd), TRY_CONVERT(DECIMAL(19,2), r.PriceVnd), 0) AS PriceVnd,
-        COALESCE(TRY_CONVERT(DECIMAL(19,2), p.Price), 0) AS SellPriceVnd,
+        COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Price), TRY_CONVERT(DECIMAL(19,2), p.Price), 0) AS SellPriceVnd,
         CAST(NULL AS NVARCHAR(200)) AS Supplier,
         pv.VariantId AS VariantId
       FROM ProductVariants pv
@@ -1163,17 +1516,20 @@ async function getInventory() {
   if (inventoryItemIds.length) {
     const lotRes = await query(
       `SELECT
-         InventoryItemId,
-         LotId,
+         l.InventoryItemId,
+         l.LotId,
+         l.VariantId,
          COALESCE(TRY_CONVERT(DECIMAL(19,3), RemainingQty), 0) AS RemainingQty,
          COALESCE(TRY_CONVERT(DECIMAL(19,2), UnitCost), 0) AS UnitCost,
-         ReceivedAt,
-         CONVERT(NVARCHAR(10), ExpiryDate, 23) AS ExpiryDate,
-         Note
-       FROM InventoryLots
-       WHERE InventoryItemId IN (${inventoryItemIds.map((_, idx) => `@id${idx}`).join(', ')})
-         AND COALESCE(RemainingQty, 0) > 0
-       ORDER BY InventoryItemId, ExpiryDate ASC, ReceivedAt ASC, LotId ASC`,
+         COALESCE(TRY_CONVERT(DECIMAL(19,2), pv.Price), 0) AS SellPriceVnd,
+         l.ReceivedAt,
+         CONVERT(NVARCHAR(10), l.ExpiryDate, 23) AS ExpiryDate,
+         l.Note
+       FROM InventoryLots l
+       LEFT JOIN ProductVariants pv ON pv.VariantId = l.VariantId
+       WHERE l.InventoryItemId IN (${inventoryItemIds.map((_, idx) => `@id${idx}`).join(', ')})
+         AND COALESCE(l.RemainingQty, 0) > 0
+       ORDER BY l.InventoryItemId, l.ExpiryDate ASC, l.ReceivedAt ASC, l.LotId ASC`,
       Object.fromEntries(inventoryItemIds.map((id, idx) => [`id${idx}`, id]))
     )
 
@@ -1182,8 +1538,10 @@ async function getInventory() {
       const list = lotsByItemId.get(key) || []
       list.push({
         lotId: row.LotId,
+        variantId: row.VariantId || null,
         remaining: Number(row.RemainingQty || 0),
         price: Number(row.UnitCost || 0),
+        sellPriceVnd: row.SellPriceVnd === null || row.SellPriceVnd === undefined ? null : Number(row.SellPriceVnd),
         receivedAt: row.ReceivedAt,
         expiryDate: row.ExpiryDate,
         note: row.Note || '',
@@ -1536,6 +1894,7 @@ async function createInventoryItem(payload, { actor } = {}) {
           qty: Math.trunc(initialQty),
           supplier: supplier || null,
           importPrice: importPrice ?? null,
+          sellPriceVnd: sellPrice !== null && Number.isFinite(sellPrice) && sellPrice > 0 ? sellPrice : null,
           date: date || null,
           expiryDate: expiryDate || null,
           note: 'Initial stock setup',
@@ -1891,7 +2250,7 @@ async function updateItem(itemId, payload) {
 }
 
 async function stockIn(payload, { actor } = {}) {
-  const { inventoryItemId, product, qty, referenceId, supplier, importPrice, date, note, expiryDate } = payload || {}
+  const { inventoryItemId, product, qty, referenceId, supplier, importPrice, sellPriceVnd, date, note, expiryDate } = payload || {}
   const amount = Number(qty)
   if (!Number.isFinite(amount) || amount <= 0) {
     const err = new Error('Invalid qty')
@@ -1932,6 +2291,7 @@ async function stockIn(payload, { actor } = {}) {
 
   const when = validateNotFutureDate(date, 'date')
   const unitCost = parseMoneyVnd(importPrice)
+  const sellPrice = parseMoneyVnd(sellPriceVnd)
   if (unitCost === null || !Number.isFinite(unitCost) || unitCost <= 0) {
     const err = new Error('Invalid importPrice')
     err.status = 400
@@ -2050,7 +2410,13 @@ async function stockIn(payload, { actor } = {}) {
     const totalCost = amount * unitCost
     await query(
       `UPDATE ProductVariants
-       SET Stock = COALESCE(Stock, 0) + @qty
+       SET Stock = COALESCE(Stock, 0) + @qty,
+         Price = COALESCE(
+           @sellPrice,
+           NULLIF(TRY_CONVERT(DECIMAL(19,2), Price), 0),
+           (SELECT TOP 1 NULLIF(TRY_CONVERT(DECIMAL(19,2), p.Price), 0) FROM Products p WHERE p.ProductId = @productId),
+           Price
+         )
        WHERE VariantId = @variantId;
 
        UPDATE Products
@@ -2070,7 +2436,7 @@ async function stockIn(payload, { actor } = {}) {
            COALESCE(pv.Stock, 0),
            0,
            COALESCE(@unitCost, NULL),
-           'service'
+             'service'
          FROM ProductVariants pv
          INNER JOIN Products p ON p.ProductId = pv.ProductId
          WHERE pv.VariantId = @variantId;
@@ -2078,19 +2444,26 @@ async function stockIn(payload, { actor } = {}) {
 
        UPDATE InventoryItems
        SET
-         ProductId = NULL,
+           ProductId = NULL,
          CategoryId = COALESCE((SELECT TOP 1 CategoryId FROM Products WHERE ProductId = @productId), CategoryId),
+           Name = COALESCE(
+             (SELECT TOP 1 LEFT(CONCAT(p.Name, N' - ', pv.VariantName), 120)
+              FROM ProductVariants pv
+              INNER JOIN Products p ON p.ProductId = pv.ProductId
+              WHERE pv.VariantId = @variantId),
+             Name
+           ),
          Quantity = (SELECT COALESCE(Stock, 0) FROM ProductVariants WHERE VariantId = @variantId),
          PriceVnd = COALESCE(@unitCost, PriceVnd),
-         ItemGroup = 'service'
+           ItemGroup = 'service'
        WHERE InventoryItemId = @variantShadowId;
 
        INSERT INTO InventoryLots (
-         LotId, InventoryItemId, ReceivedAt, ExpiryDate, UnitCost,
+         LotId, InventoryItemId, VariantId, ReceivedAt, ExpiryDate, UnitCost,
          InitialQty, RemainingQty, Supplier, ReferenceId, Note, CreatedAt
        )
        VALUES (
-         @lotId, @variantShadowId, COALESCE(@receivedAt, GETDATE()), @expiryDate, @unitCost,
+         @lotId, @variantShadowId, @variantId, COALESCE(@receivedAt, GETDATE()), @expiryDate, @unitCost,
          @qty, @qty, @supplier, @referenceId, @note, COALESCE(@createdAt, SYSUTCDATETIME())
        );
 
@@ -2123,6 +2496,7 @@ async function stockIn(payload, { actor } = {}) {
         performedByName: actor?.name ?? null,
         performedByEmail: actor?.email ?? null,
         unitCost: unitCost !== null && Number.isFinite(unitCost) && unitCost > 0 ? unitCost : null,
+        sellPrice: Number.isFinite(sellPrice) && sellPrice > 0 ? sellPrice : null,
         totalCost: Number.isFinite(totalCost) ? totalCost : null,
       }
     )
@@ -2205,6 +2579,18 @@ async function stockIn(payload, { actor } = {}) {
         totalCost: Number.isFinite(totalCost) ? totalCost : null,
       }
     )
+
+    if (kind.kind === 'variant' && sellPrice !== undefined) {
+      await query(
+        `UPDATE ProductVariants
+         SET Price = COALESCE(@price, Price)
+         WHERE VariantId = @variantId`,
+        {
+          variantId: kind.id,
+          price: sellPrice,
+        }
+      )
+    }
   }
 
   return { id: txRef || newId() }
@@ -2506,10 +2892,10 @@ async function stockOut(payload, { actor } = {}) {
 
            UPDATE InventoryItems
            SET
-             ProductId = NULL,
+               ProductId = NULL,
              CategoryId = COALESCE((SELECT TOP 1 CategoryId FROM Products WHERE ProductId = @productId), CategoryId),
              Quantity = (SELECT COALESCE(Stock, 0) FROM ProductVariants WHERE VariantId = @variantId),
-             ItemGroup = 'service'
+               ItemGroup = 'service'
            WHERE InventoryItemId = @variantShadowId;
 
            INSERT INTO InventoryTransactions (
@@ -2860,6 +3246,7 @@ async function updateLot(lotId, payload, { actor } = {}) {
     `SELECT TOP 1
        l.LotId,
        l.InventoryItemId,
+       l.VariantId,
       l.InitialQty,
        l.RemainingQty,
        l.UnitCost,
@@ -2887,6 +3274,7 @@ async function updateLot(lotId, payload, { actor } = {}) {
   const hasPrice = payload && Object.prototype.hasOwnProperty.call(payload, 'price')
   const hasUnitCost = payload && Object.prototype.hasOwnProperty.call(payload, 'unitCost')
   const hasImportPrice = payload && Object.prototype.hasOwnProperty.call(payload, 'importPrice')
+  const hasSellPrice = payload && Object.prototype.hasOwnProperty.call(payload, 'sellPriceVnd')
   const hasReceivedAt = payload && Object.prototype.hasOwnProperty.call(payload, 'receivedAt')
   const hasDate = payload && Object.prototype.hasOwnProperty.call(payload, 'date')
   const hasExpiryDate = payload && Object.prototype.hasOwnProperty.call(payload, 'expiryDate')
@@ -2963,6 +3351,17 @@ async function updateLot(lotId, payload, { actor } = {}) {
     validateMaxNumber(unitCost, 'unitCost', MAX_PRICE_VND)
   }
 
+  let sellPrice = null
+  if (hasSellPrice) {
+    sellPrice = parseMoneyVnd(payload?.sellPriceVnd)
+    if (sellPrice === null || !Number.isFinite(sellPrice) || sellPrice <= 0) {
+      const err = new Error('Invalid sellPriceVnd')
+      err.status = 400
+      throw err
+    }
+    validateMaxNumber(sellPrice, 'sellPriceVnd', MAX_PRICE_VND)
+  }
+
   let receivedAt = null
   if (hasReceivedAt || hasDate) {
     receivedAt = validateNotFutureDate(hasReceivedAt ? payload?.receivedAt : payload?.date, 'receivedAt')
@@ -2975,11 +3374,6 @@ async function updateLot(lotId, payload, { actor } = {}) {
       expiryDate = parseOptionalDate(rawExpiry)
       if (!expiryDate) {
         const err = new Error('Invalid expiryDate')
-        err.status = 400
-        throw err
-      }
-      if (isRetail) {
-        const err = new Error('Retail lots do not support expiryDate')
         err.status = 400
         throw err
       }
@@ -3029,6 +3423,7 @@ async function updateLot(lotId, payload, { actor } = {}) {
       .input('lotId', normalizedLotId)
       .input('remainingQty', hasRemainingQty || hasQty ? nextRemaining : null)
       .input('unitCost', hasPrice || hasUnitCost || hasImportPrice ? unitCost : null)
+      .input('sellPrice', hasSellPrice ? sellPrice : null)
       .input('receivedAt', hasReceivedAt || hasDate ? receivedAt : null)
       .input('expiryDate', hasExpiryDate ? expiryDate : null)
       .input('supplier', hasSupplier ? supplier : null)
@@ -3044,6 +3439,20 @@ async function updateLot(lotId, payload, { actor } = {}) {
            Note = COALESCE(@note, Note)
          WHERE LotId = @lotId`
       )
+
+    if (hasSellPrice) {
+      const variantId = String(lot?.VariantId || parseVariantIdFromRetailShadowId(lot?.InventoryItemId) || '').trim()
+      if (variantId) {
+        await new sql.Request(transaction)
+          .input('variantId', variantId)
+          .input('sellPrice', sellPrice)
+          .query(
+            `UPDATE ProductVariants
+             SET Price = COALESCE(@sellPrice, Price)
+             WHERE VariantId = @variantId`
+          )
+      }
+    }
 
     if (delta !== 0) {
       await new sql.Request(transaction)
@@ -3274,7 +3683,11 @@ async function deleteLot(lotId, { actor } = {}) {
 }
 
 module.exports = {
+  initializeInventoryService,
   getInventory,
+  getInventorySnapshotExportBuffer,
+  getInventoryMovementExportBuffer,
+  getInventoryLowStockExportBuffer,
   fifoPreview,
   createInventoryItem,
   updateItem,

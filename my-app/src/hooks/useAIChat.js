@@ -55,7 +55,6 @@ export default function useAIChat() {
     const filtered = prev.filter((s) => String(s?.SessionId || s?.sessionId || s?.id) !== String(sid))
     setSessions(filtered)
     // If deleted session was active, clear messages/UI immediately
-    let reverted = false
     if (String(sid) === String(sessionId)) {
       if (filtered.length > 0) {
         const nextId = filtered[0]?.SessionId || filtered[0]?.sessionId || filtered[0]?.id

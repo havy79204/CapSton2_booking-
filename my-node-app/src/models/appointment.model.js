@@ -19,6 +19,8 @@ function toAppointmentListItem(row) {
 
     return {
         id: row.BookingId,
+        bookingCode: row.BookingCode || row.bookingCode || null,
+        createdAt: row.BookingCreatedAt || row.CreatedAt || row.createdAt || null,
         customerUserId: row.CustomerUserId,
         staffId: row.StaffIdResolved,
 

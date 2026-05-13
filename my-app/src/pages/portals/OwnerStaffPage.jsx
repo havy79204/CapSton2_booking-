@@ -14,15 +14,6 @@ import {
 } from '../../components/Layout portal/PortalIcons.jsx'
 import { api, resolveApiImageUrl } from '../../lib/api.js'
 
-function emitPortalToast({ type, message, timeoutMs }) {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(
-    new CustomEvent('portal:toast', {
-      detail: { type, message, timeoutMs },
-    })
-  )
-}
-
 const ADD_STAFF_NAME_MAX_LENGTH = 150
 const ADD_STAFF_PHONE_MAX_LENGTH = 15
 const ADD_STAFF_EMAIL_MAX_LENGTH = 254
@@ -1278,13 +1269,6 @@ export default function OwnerStaffPage() {
                     <td>{Number(m.totalBookings || 0)}</td>
                     <td>{formatMoney(m.salary)}</td>
                     <td>{formatMoney(m.totalCommission)}</td>
-                    <td>{formatMoney(m.totalRevenue)}</td>
-                    <td>
-                      {(() => {
-                        const ratingDisplay = formatRating(m.rating, m.ratingCount)
-                        return <span className={`staff-ratingValue ${ratingDisplay.hasValue ? '' : 'is-empty'}`.trim()}>{ratingDisplay.text}</span>
-                      })()}
-                    </td>
                     <td>
                       {(() => {
                         const ratingDisplay = formatRating(m.rating, m.ratingCount)

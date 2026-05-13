@@ -111,9 +111,17 @@
 }
 
 /* Inventory top actions: Stock In / Stock Out / Add Product / Add Category */
+.inventory-page .portal-pageHeader {
+  justify-content: flex-end;
+}
+
+.inventory-page .portal-pageHeaderLeft {
+  display: none;
+}
+
 .inventory-page .portal-headerActions {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 14px;
   width: 100%;
 }

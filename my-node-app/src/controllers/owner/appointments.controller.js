@@ -7,21 +7,11 @@ const { emitStaffDataUpdated } = require('../../realtime/socket')
 
 const getAppointments = asyncHandler(async (req, res) => {
 
-  console.log('[DEBUG CONTROLLER] getAppointments called')
-
   try {
 
-    const data = await appointmentsService.listAppointments()
-
-    console.log('[DEBUG CONTROLLER] Service returned data type:', typeof data)
-
-    console.log('[DEBUG CONTROLLER] Service returned data length:', Array.isArray(data) ? data.length : 'not array')
-
-    console.log('[DEBUG CONTROLLER] Sample service data:', Array.isArray(data) ? data.slice(0, 2) : data)
-
-    console.log('[DEBUG CONTROLLER] Sample item fields:', Array.isArray(data) && data.length > 0 ? Object.keys(data[0]) : 'no data')
-
-    console.log('[DEBUG CONTROLLER] About to send response:', { ok: true, data })
+    const data = await appointmentsService.listAppointments({
+      month: req.query?.month,
+    })
 
     res.json({ ok: true, data })
 
@@ -39,27 +29,20 @@ const getAppointments = asyncHandler(async (req, res) => {
 
 const postAppointment = asyncHandler(async (req, res) => {
 
-  console.log('[DEBUG CONTROLLER] postAppointment called')
-
-  console.log('[DEBUG CONTROLLER] Request body:', req.body)
-
   try {
 
-    const { customerUserId, serviceId, serviceIds, staffId, date, time } = req.body || {}
+    const { customerUserId, customerName, serviceId, serviceIds, staffId, date, time } = req.body || {}
+    const hasCustomer = Boolean(String(customerUserId || '').trim()) || Boolean(String(customerName || '').trim())
 
     const hasService = (serviceIds && Array.isArray(serviceIds) && serviceIds.length > 0) || serviceId;
 
-    console.log('[DEBUG CONTROLLER] Extracted request data:', { customerUserId, serviceId, serviceIds, staffId, date, time })
-
-    if (!customerUserId || !hasService || !staffId || !date || !time) {
-
-      console.log('[DEBUG CONTROLLER] Validation failed, sending error response')
+    if (!hasCustomer || !hasService || !staffId || !date || !time) {
 
       res.status(400).json({ 
 
         ok: false, 
 
-        error: 'Missing customerUserId/services/staffId/date/time' 
+        error: 'Missing customer info/services/staffId/date/time' 
 
       })
 
@@ -67,19 +50,11 @@ const postAppointment = asyncHandler(async (req, res) => {
 
     }
 
-    console.log('[DEBUG CONTROLLER] Validation passed, calling service')
-
     const data = await appointmentsService.createAppointment(req.body)
-
-    console.log('[DEBUG CONTROLLER] Service returned data:', data)
-
-    console.log('[DEBUG CONTROLLER] About to send response:', { ok: true, data })
 
     res.status(201).json({ ok: true, data })
 
   } catch (error) {
-
-    console.error('[DEBUG CONTROLLER] Error in postAppointment:', error)
 
     // Trả về status code từ error nếu có (ví dụ 400 cho conflict), nếu không thì 500
     const statusCode = error.status || 500

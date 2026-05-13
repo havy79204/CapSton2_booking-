@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
 import '../../../styles/schedule.css'
 import PortalCard from '../../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../../components/Layout portal/PortalModal.jsx'
@@ -38,71 +37,12 @@ function getWeekStartFromIsoDate(isoDate) {
   return formatIsoDateLocal(weekStart)
 }
 
-function parseTimeToMinutes(value) {
-  const m = String(value || '').match(/^(\d{1,2}):(\d{2})$/)
-  if (!m) return null
-  return Number(m[1]) * 60 + Number(m[2])
-}
-
-function minutesToTimeString(minutes) {
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-}
-
-function parseHourFromSetting(value, fallback) {
-  const minutes = parseTimeToMinutes(value)
-  if (minutes === null) return fallback
-  const hour = Math.floor(minutes / 60)
-  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return fallback
-  return hour
-}
-
 export default function StaffSchedulePage() {
-  const location = useLocation()
-  const navigate = useNavigate()
-
   const initialTodayIso = formatIsoDateLocal(new Date())
-  const [scheduleHoursByDay, setScheduleHoursByDay] = useState({
-    mon: { openingHour: 8, closingHour: 20 },
-    tue: { openingHour: 8, closingHour: 20 },
-    wed: { openingHour: 8, closingHour: 20 },
-    thu: { openingHour: 8, closingHour: 20 },
-    fri: { openingHour: 8, closingHour: 20 },
-    sat: { openingHour: 8, closingHour: 20 },
-    sun: { openingHour: 8, closingHour: 20 },
-  })
-  const defaultShiftDuration = 240
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const map = (await api.get('/api/staff/settings')) || {}
-        const defaultOpeningHour = parseHourFromSetting(map.ScheduleOpenTime || map.SalonOpenTime, 8)
-        const defaultClosingHour = parseHourFromSetting(map.ScheduleCloseTime || map.SalonCloseTime, 20)
-        if (!cancelled) {
-          setScheduleHoursByDay({
-            mon: { openingHour: defaultOpeningHour, closingHour: defaultClosingHour },
-            tue: { openingHour: defaultOpeningHour, closingHour: defaultClosingHour },
-            wed: { openingHour: defaultOpeningHour, closingHour: defaultClosingHour },
-            thu: { openingHour: defaultOpeningHour, closingHour: defaultClosingHour },
-            fri: { openingHour: defaultOpeningHour, closingHour: defaultClosingHour },
-            sat: { openingHour: defaultOpeningHour, closingHour: defaultClosingHour },
-            sun: { openingHour: defaultOpeningHour, closingHour: defaultClosingHour },
-          })
-        }
-      } catch (err) {
-        console.error(err)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [])
 
   const [open, setOpen] = useState(false)
   const [weekStart, setWeekStart] = useState(getWeekStartFromIsoDate(initialTodayIso))
   const [viewMode, setViewMode] = useState('week')
-  const [selectedDate, setSelectedDate] = useState('')
   const [form, setForm] = useState({ staffId: '', date: '', start: '08:00', end: '12:00', isEditing: false })
   const [weekRange, setWeekRange] = useState(null)
   const [columns, setColumns] = useState([])
@@ -124,7 +64,13 @@ export default function StaffSchedulePage() {
 
   useEffect(() => {
     if (!weekStart) return
-    refreshSchedule(weekStart)
+    let cancelled = false
+    Promise.resolve().then(() => {
+      if (!cancelled) refreshSchedule(weekStart)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [weekStart])
 
   const staffWorking = staffRows.length

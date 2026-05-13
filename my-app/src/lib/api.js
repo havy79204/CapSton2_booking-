@@ -2,8 +2,8 @@ import { getToken } from './auth.js'
 
 const RAW_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'
 
-// Enable detailed API debug logs when VITE_API_DEBUG is set to 'true'
-const API_DEBUG = String(import.meta.env.VITE_API_DEBUG || '').toLowerCase() === 'true' || import.meta.env.MODE === 'development'
+// Enable API debug logs only when explicitly requested.
+const API_DEBUG = String(import.meta.env.VITE_API_DEBUG || '').toLowerCase() === 'true'
 
 function normalizeBaseUrl(base) {
   return String(base || '').replace(/\/+$/, '')
@@ -128,10 +128,10 @@ async function request(path, options) {
   }
 
   if (json && typeof json === 'object' && Object.prototype.hasOwnProperty.call(json, 'data')) {
-    if (API_DEBUG) console.log('[DEBUG API] Response has data field, extracting:', Array.isArray(json.data) ? json.data.slice(0, 2) : json.data)
+    if (API_DEBUG) console.log('[DEBUG API] Extracted `data` from response:', path)
     return json.data
   }
-  if (API_DEBUG) console.log('[DEBUG API] Response has no data field, returning raw json:', Array.isArray(json) ? json.slice(0, 2) : json)
+  if (API_DEBUG) console.log('[DEBUG API] Returned raw response:', path)
   return json
 }
 

@@ -231,7 +231,7 @@ const ChatWidget = () => {
       {isOpen && (
         <div className="chat-window">
           <header className="chat-window-header">
-            <span>Cat with Shop</span>
+            <span>Chat with Shop</span>
             <button
               type="button"
               className="chat-close-btn"

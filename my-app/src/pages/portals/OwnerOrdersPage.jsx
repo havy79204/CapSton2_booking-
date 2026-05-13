@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import PortalCard from '../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../components/Layout portal/PortalModal.jsx'
 import ConfirmDeleteModal from '../../components/Layout portal/ConfirmDeleteModal.jsx'
@@ -16,7 +17,7 @@ function defaultFilters() {
     status: '',
     keyword: '',
     page: 1,
-    pageSize: 10,
+    pageSize: 12,
     sortBy: 'createdAt',
     sortDir: 'desc',
   }
@@ -43,6 +44,17 @@ function hasDangerousInput(value) {
   return false
 }
 
+const VN_PHONE_REGEX = /^0(3|5|7|8|9)\d{8}$/
+
+function normalizeVietnamPhone(value) {
+  const raw = String(value || '').replace(/[^\d+]/g, '').trim()
+  if (!raw) return ''
+  if (raw.startsWith('+84')) return `0${raw.slice(3).replace(/\D/g, '')}`
+  const digits = raw.replace(/\D/g, '')
+  if (digits.startsWith('84') && digits.length === 11) return `0${digits.slice(2)}`
+  return digits
+}
+
 function defaultCreateOrderForm() {
   return {
     customerName: '',
@@ -59,13 +71,29 @@ function normalizeDisplayStatus(status) {
   return status
 }
 
+function normalizeStatusForForm(status) {
+  const raw = String(status || '').trim().toLowerCase()
+  if (!raw || raw === '-') return 'PENDING'
+  if (raw.includes('cancel')) return 'CANCELLED'
+  if (raw.includes('complete')) return 'COMPLETED'
+  if (raw.includes('deliver')) return 'CONFIRMED'
+  if (raw.includes('confirm')) return 'CONFIRMED'
+  if (raw.includes('ship')) return 'SHIPPING'
+  if (raw.includes('process')) return 'PROCESSING'
+  if (raw.includes('pending') || raw === 'c' || raw.includes('await')) return 'PENDING'
+  return String(status || 'PENDING').trim().toUpperCase()
+}
+
 export default function OwnerOrdersPage() {
+  const location = useLocation()
+  const [pendingOpenOrderId, setPendingOpenOrderId] = useState('')
+  const [pendingOpenLookupDoneId, setPendingOpenLookupDoneId] = useState('')
   const [orderFilters, setOrderFilters] = useState(defaultFilters)
   const [debouncedKeyword, setDebouncedKeyword] = useState('')
   const [orderReport, setOrderReport] = useState({
     summary: { totalOrders: 0, totalRevenue: 0, totalDiscount: 0, totalQuantity: 0, fromDate: null, toDate: null },
     items: [],
-    pagination: { page: 1, pageSize: 10, totalRows: 0 },
+    pagination: { page: 1, pageSize: 12, totalRows: 0 },
   })
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [ordersError, setOrdersError] = useState('')
@@ -90,7 +118,8 @@ export default function OwnerOrdersPage() {
   const [products, setProducts] = useState([])
   const [openCreateOrderModal, setOpenCreateOrderModal] = useState(false)
   const [createOrderForm, setCreateOrderForm] = useState(defaultCreateOrderForm)
-  const [createItems, setCreateItems] = useState([{ productId: '', quantity: '1' }])
+  const [createItems, setCreateItems] = useState([{ productId: '', variantId: '', quantity: '1' }])
+  const [variantOptionsByProductId, setVariantOptionsByProductId] = useState({})
   const [createOrderSaving, setCreateOrderSaving] = useState(false)
 
   const loadOrders = useCallback(async (nextFilters) => {
@@ -145,6 +174,74 @@ export default function OwnerOrdersPage() {
   }, [orderFilters.keyword])
 
   useEffect(() => {
+    const params = new URLSearchParams(String(location.search || ''))
+    const orderId = String(params.get('orderId') || '').trim()
+    if (!orderId) {
+      setPendingOpenOrderId('')
+      setPendingOpenLookupDoneId('')
+      return
+    }
+
+    setOrderFilters((prev) => {
+      if (String(prev.keyword || '').trim() === orderId) return prev
+      return { ...prev, keyword: orderId, page: 1 }
+    })
+
+    setPendingOpenOrderId(orderId)
+    setPendingOpenLookupDoneId('')
+  }, [location.search])
+
+  useEffect(() => {
+    const targetId = String(pendingOpenOrderId || '').trim()
+    if (!targetId) return
+    if (openOrderModal) return
+
+    const matched = (orderReport.items || []).find((item) => {
+      const itemId = item?.Id || item?.id || item?.OrderId || item?.OrderCode
+      return String(itemId || '').trim() === targetId
+    })
+
+    if (matched) {
+      openEditOrder(matched)
+      setPendingOpenOrderId('')
+      setPendingOpenLookupDoneId('')
+    }
+  }, [pendingOpenOrderId, orderReport.items, openOrderModal])
+
+  useEffect(() => {
+    const targetId = String(pendingOpenOrderId || '').trim()
+    if (!targetId) return
+    if (openOrderModal) return
+    if (ordersLoading) return
+    if (pendingOpenLookupDoneId === targetId) return
+
+    const matched = (orderReport.items || []).some((item) => {
+      const itemId = item?.Id || item?.id || item?.OrderId || item?.OrderCode
+      return String(itemId || '').trim() === targetId
+    })
+    if (matched) return
+
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const direct = await api.get(`/api/owner/retail/orders/${encodeURIComponent(targetId)}`)
+        if (cancelled || !direct) return
+        openEditOrder(direct)
+        setPendingOpenOrderId('')
+        setPendingOpenLookupDoneId('')
+      } catch {
+        if (cancelled) return
+        setPendingOpenLookupDoneId(targetId)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [pendingOpenOrderId, pendingOpenLookupDoneId, ordersLoading, orderReport.items, openOrderModal])
+
+  useEffect(() => {
     loadOrders({ ...orderFilters, keyword: debouncedKeyword })
   }, [loadOrders, orderFilters, debouncedKeyword])
 
@@ -156,20 +253,62 @@ export default function OwnerOrdersPage() {
     return map
   }, [products])
 
+  useEffect(() => {
+    if (!openCreateOrderModal) return
+
+    const selectedProductIds = [...new Set(
+      (createItems || [])
+        .map((line) => String(line?.productId || '').trim())
+        .filter(Boolean)
+    )]
+
+    const missingProductIds = selectedProductIds.filter((id) => !(id in variantOptionsByProductId))
+    if (!missingProductIds.length) return
+
+    let cancelled = false
+
+    Promise.all(
+      missingProductIds.map(async (productId) => {
+        try {
+          const variants = await api.get(`/api/owner/retail/products/${productId}/variants`)
+          return [productId, Array.isArray(variants) ? variants : []]
+        } catch (err) {
+          console.error(err)
+          return [productId, []]
+        }
+      })
+    ).then((entries) => {
+      if (cancelled) return
+      setVariantOptionsByProductId((prev) => {
+        const next = { ...prev }
+        for (const [productId, variants] of entries) {
+          next[productId] = variants
+        }
+        return next
+      })
+    }).catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [openCreateOrderModal, createItems, variantOptionsByProductId])
+
   const createOrderTotal = useMemo(() => {
     return createItems.reduce((sum, line) => {
       const qty = Number(line.quantity || 0)
       const product = productsById.get(String(line.productId || ''))
-      const price = Number(product?.price || 0)
+      const variants = variantOptionsByProductId[String(line.productId || '')] || []
+      const variant = variants.find((v) => String(v?.id || '') === String(line.variantId || ''))
+      const price = Number(variant?.price ?? product?.price ?? 0)
       if (!product || !Number.isFinite(qty) || qty <= 0) return sum
       return sum + qty * price
     }, 0)
-  }, [createItems, productsById])
+  }, [createItems, productsById, variantOptionsByProductId])
 
 
   function resetCreateOrder() {
     setCreateOrderForm(defaultCreateOrderForm())
-    setCreateItems([{ productId: '', quantity: '1' }])
+    setCreateItems([{ productId: '', variantId: '', quantity: '1' }])
   }
 
   // Edit-items helpers for Update Order modal
@@ -190,7 +329,7 @@ export default function OwnerOrdersPage() {
   }
 
   function addCreateItemLine() {
-    setCreateItems((prev) => [...prev, { productId: '', quantity: '1' }])
+    setCreateItems((prev) => [...prev, { productId: '', variantId: '', quantity: '1' }])
   }
 
   function removeCreateItemLine(index) {
@@ -207,20 +346,26 @@ export default function OwnerOrdersPage() {
   function openEditOrder(order) {
     const realId = order?.Id || order?.id || order?.OrderId || order?.OrderCode
     if (!realId) return
-    setOrderEditing({ ...order, OrderId: realId })
+    // Always get the latest order data from orderReport.items if available
+    const latestOrder = (orderReport.items || []).find((item) => {
+      const id = item?.Id || item?.id || item?.OrderId || item?.OrderCode
+      return String(id || '') === String(realId)
+    }) || order
+    setOrderEditing({ ...latestOrder, OrderId: realId })
     setOrderForm({
-      customerName: order.CustomerName || '',
-      customerPhone: order.CustomerPhone || '',
-      customerAddress: order.CustomerAddress || '',
-      paymentMethod: order.PaymentMethod || 'COD',
-      status: normalizeDisplayStatus(order.Status) === '-' ? 'Pending' : normalizeDisplayStatus(order.Status),
+      customerName: latestOrder.CustomerName || '',
+      customerPhone: latestOrder.CustomerPhone || '',
+      customerAddress: latestOrder.CustomerAddress || '',
+      paymentMethod: latestOrder.PaymentMethod || 'COD',
+      status: normalizeStatusForForm(latestOrder.Status),
     })
-    // initialize editable items from order items
     setEditItems(
-      (order.Items || []).map((it) => ({
+      (latestOrder.Items || []).map((it) => ({
         orderItemId: it.OrderItemId || '',
         productId: String(it.ProductId || ''),
         productName: it.ProductName || '',
+        variantId: String(it.VariantId || ''),
+        variantName: it.VariantName || '',
         quantity: String(Number(it.Quantity || 0) || 0),
       }))
     )
@@ -231,8 +376,29 @@ export default function OwnerOrdersPage() {
     e.preventDefault()
     if (!orderEditing?.OrderId) return
 
+      const customerName = String(orderForm.customerName || '').trim()
+      const customerPhone = normalizeVietnamPhone(orderForm.customerPhone)
+
+      if (!customerName) {
+        setOrdersError('Customer name is required')
+        return
+      }
+      if (!customerPhone) {
+        setOrdersError('Phone number is required')
+        return
+      }
+      if (!VN_PHONE_REGEX.test(customerPhone)) {
+        setOrdersError('Phone number must be a valid Vietnamese phone number')
+        return
+      }
+      if (hasDangerousInput(customerName) || hasDangerousInput(orderForm.customerAddress)) {
+        setOrdersError('Invalid customer information')
+        return
+      }
+
     try {
       setOrderSaving(true)
+        setOrdersError('')
       // prepare items payload: include orderItemId when present so backend can update existing lines
       const itemsPayload = (editItems || [])
         .map((l) => ({
@@ -243,13 +409,36 @@ export default function OwnerOrdersPage() {
         .filter((l) => l.productId && Number.isFinite(l.quantity) && l.quantity > 0)
 
       await api.put(`/api/owner/retail/orders/${orderEditing.OrderId}`, {
-        customerName: orderForm.customerName,
-        customerPhone: orderForm.customerPhone,
+        customerName,
+        customerPhone,
         customerAddress: orderForm.customerAddress,
         paymentMethod: orderForm.paymentMethod,
         status: orderForm.status,
         items: itemsPayload,
       })
+
+      // Fetch latest order data after update
+      const updatedOrder = await api.get(`/api/owner/retail/orders/${orderEditing.OrderId}`)
+      if (updatedOrder) {
+        setOrderEditing({ ...updatedOrder, OrderId: orderEditing.OrderId })
+        setOrderForm({
+          customerName: updatedOrder.CustomerName || '',
+          customerPhone: updatedOrder.CustomerPhone || '',
+          customerAddress: updatedOrder.CustomerAddress || '',
+          paymentMethod: updatedOrder.PaymentMethod || 'COD',
+          status: normalizeStatusForForm(updatedOrder.Status),
+        })
+        setEditItems(
+          (updatedOrder.Items || []).map((it) => ({
+            orderItemId: it.OrderItemId || '',
+            productId: String(it.ProductId || ''),
+            productName: it.ProductName || '',
+            variantId: String(it.VariantId || ''),
+            variantName: it.VariantName || '',
+            quantity: String(Number(it.Quantity || 0) || 0),
+          }))
+        )
+      }
 
       window.dispatchEvent(new CustomEvent('portal:success-modal', { 
         detail: { message: 'Order updated successfully', title: 'Completed' } 
@@ -262,15 +451,16 @@ export default function OwnerOrdersPage() {
           if (String(id || '') !== String(orderEditing.OrderId)) return item
           return {
             ...item,
-            CustomerName: orderForm.customerName,
-            CustomerPhone: orderForm.customerPhone,
+            CustomerName: customerName,
+            CustomerPhone: customerPhone,
             CustomerAddress: orderForm.customerAddress,
             PaymentMethod: orderForm.paymentMethod,
             Status: orderForm.status,
           }
         }),
       }))
-      setOpenOrderModal(false)
+      // Optionally, keep modal open to show updated status, or close as before
+      // setOpenOrderModal(false)
       refreshOrdersInBackground(orderFilters)
     } catch (err) {
       console.error(err)
@@ -283,32 +473,93 @@ export default function OwnerOrdersPage() {
   async function onCreateOrder(e) {
     e.preventDefault()
 
-    if (hasDangerousInput(createOrderForm.customerName) || hasDangerousInput(createOrderForm.customerAddress)) {
+      const customerName = String(createOrderForm.customerName || '').trim()
+      const customerPhone = normalizeVietnamPhone(createOrderForm.customerPhone)
+      const paymentMethod = String(createOrderForm.paymentMethod || '').trim()
+      const status = String(createOrderForm.status || '').trim()
+
+      if (!customerName) {
+        setOrdersError('Customer name is required')
+        return
+      }
+      if (!customerPhone) {
+        setOrdersError('Phone number is required')
+        return
+      }
+      if (!VN_PHONE_REGEX.test(customerPhone)) {
+        setOrdersError('Phone number must be a valid Vietnamese phone number')
+        return
+      }
+
+      if (!paymentMethod) {
+        setOrdersError('Please select payment method')
+        return
+      }
+
+      if (!status) {
+        setOrdersError('Please select order status')
+        return
+      }
+
+      if (hasDangerousInput(customerName) || hasDangerousInput(createOrderForm.customerAddress)) {
       setOrdersError('Invalid customer information')
       return
     }
 
-    const lines = createItems
-      .map((line) => ({
-        productId: String(line.productId || '').trim(),
-        quantity: Number(line.quantity || 0),
-      }))
-      .filter((line) => line.productId && Number.isFinite(line.quantity) && line.quantity > 0)
+    const rawLines = createItems.map((line, index) => ({
+      index,
+      productId: String(line.productId || '').trim(),
+      variantId: String(line.variantId || '').trim(),
+      quantity: Math.trunc(Number(line.quantity || 0)),
+    }))
 
-    if (!lines.length) {
-      setOrdersError('Please add at least one product with valid quantity')
+    const hasAnySelected = rawLines.some((line) => Boolean(line.productId))
+    if (!hasAnySelected) {
+      setOrdersError('Please select at least one product')
       return
     }
+
+    for (const line of rawLines) {
+      if (!line.productId) {
+        setOrdersError(`Product line ${line.index + 1}: please select a product`)
+        return
+      }
+
+      const variants = variantOptionsByProductId[line.productId] || []
+      if (variants.length > 0 && !line.variantId) {
+        setOrdersError(`Product line ${line.index + 1}: please select a variant`)
+        return
+      }
+
+      if (line.variantId) {
+        const matchedVariant = variants.find((v) => String(v?.id || '') === line.variantId)
+        if (!matchedVariant) {
+          setOrdersError(`Product line ${line.index + 1}: invalid variant selection`)
+          return
+        }
+      }
+
+      if (!Number.isFinite(line.quantity) || line.quantity <= 0) {
+        setOrdersError(`Product line ${line.index + 1}: quantity must be greater than 0`)
+        return
+      }
+    }
+
+    const lines = rawLines.map((line) => ({
+      productId: line.productId,
+      variantId: line.variantId || undefined,
+      quantity: line.quantity,
+    }))
 
     try {
       setCreateOrderSaving(true)
       setOrdersError('')
       await api.post('/api/owner/retail/orders', {
-        customerName: createOrderForm.customerName,
-        customerPhone: createOrderForm.customerPhone,
+        customerName,
+        customerPhone,
         customerAddress: createOrderForm.customerAddress,
-        paymentMethod: createOrderForm.paymentMethod,
-        status: createOrderForm.status,
+        paymentMethod,
+        status,
         items: lines,
       })
 
@@ -394,9 +645,9 @@ export default function OwnerOrdersPage() {
               <option value="Pending">Pending</option>
               <option value="Processing">Processing</option>
               <option value="Shipping">Shipping</option>
+              <option value="Confirmed">Confirmed</option>
               <option value="Completed">Completed</option>
               <option value="Cancelled">Cancelled</option>
-              <option value="Failed">Failed</option>
             </select>
           </label>
 
@@ -574,12 +825,12 @@ export default function OwnerOrdersPage() {
             <label className="portal-field">
               <span className="portal-label">Order status</span>
               <select className="portal-select" value={orderForm.status} onChange={(e) => setOrderForm((p) => ({ ...p, status: e.target.value }))}>
-                <option value="Pending">Pending</option>
-                <option value="Processing">Processing</option>
-                <option value="Shipping">Shipping</option>
-                <option value="Completed">Completed</option>
-                <option value="Cancelled">Cancelled</option>
-                <option value="Failed">Failed</option>
+                <option value="PENDING">PENDING</option>
+                <option value="PROCESSING">PROCESSING</option>
+                <option value="SHIPPING">SHIPPING</option>
+                <option value="CONFIRMED">CONFIRMED</option>
+                <option value="COMPLETED">COMPLETED</option>
+                <option value="CANCELLED">CANCELLED</option>
               </select>
             </label>
           </div>
@@ -626,6 +877,11 @@ export default function OwnerOrdersPage() {
                                 ))}
                               </select>
                             </div>
+                            {line.variantName ? (
+                              <div style={{ marginTop: 4, fontSize: 12, opacity: 0.75 }}>
+                                Variant: {line.variantName}
+                              </div>
+                            ) : null}
                           </td>
                           <td>
                             <input
@@ -758,6 +1014,7 @@ export default function OwnerOrdersPage() {
                   <thead>
                     <tr>
                       <th>Product</th>
+                      <th>Variant</th>
                       <th>Qty</th>
                       <th>Unit price</th>
                       <th>Line total</th>
@@ -767,8 +1024,10 @@ export default function OwnerOrdersPage() {
                   <tbody>
                     {createItems.map((line, idx) => {
                       const product = productsById.get(String(line.productId || ''))
+                      const variants = variantOptionsByProductId[String(line.productId || '')] || []
+                      const selectedVariant = variants.find((v) => String(v?.id || '') === String(line.variantId || ''))
                       const qty = Number(line.quantity || 0)
-                      const unitPrice = Number(product?.price || 0)
+                      const unitPrice = Number(selectedVariant?.price ?? product?.price ?? 0)
                       const lineTotal = product && Number.isFinite(qty) && qty > 0 ? qty * unitPrice : 0
                       return (
                         <tr key={`line-${idx}`}>
@@ -777,7 +1036,7 @@ export default function OwnerOrdersPage() {
                               <select
                                 className="portal-select visually-hidden-select"
                                 value={line.productId}
-                                onChange={(e) => patchCreateItemLine(idx, { productId: e.target.value })}
+                                onChange={(e) => patchCreateItemLine(idx, { productId: e.target.value, variantId: '' })}
                                 aria-label="Select product"
                               >
                                 <option value="">Select product</option>
@@ -791,6 +1050,30 @@ export default function OwnerOrdersPage() {
                               </select>
                             </div>
                           </td>
+                            <td>
+                              <select
+                                className="portal-select"
+                                value={line.variantId || ''}
+                                onChange={(e) => patchCreateItemLine(idx, { variantId: e.target.value })}
+                                disabled={!line.productId || variants.length === 0}
+                                aria-label="Select variant"
+                              >
+                                {variants.length > 0 ? (
+                                  <>
+                                    <option value="">Select variant</option>
+                                    {variants
+                                      .filter((v) => Number(v?.stock || 0) > 0)
+                                      .map((v) => (
+                                        <option key={v.id} value={v.id}>
+                                          {v.name}{Number(v?.stock || 0) > 0 ? ` (${Number(v.stock)} in stock)` : ''}
+                                        </option>
+                                      ))}
+                                  </>
+                                ) : (
+                                  <option value="">No variants</option>
+                                )}
+                              </select>
+                            </td>
                           <td>
                             <input
                               className="orders-createQtyInput"

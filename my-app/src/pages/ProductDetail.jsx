@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { 
   IoStar, 
@@ -18,7 +18,7 @@ import {
 import { useProductReviews, useProducts } from '../hooks/useHomepage';
 import { useAuthMe } from '../hooks/useAuthMe';
 import PortalModal from '../components/Layout portal/PortalModal.jsx';
-import { resolveApiImageUrl } from '../lib/api.js';
+import { api, resolveApiImageUrl } from '../lib/api.js';
 import { useCustomerCart } from '../hooks/useCustomerCommerce';
 import { formatVnd } from '../lib/currency';
 import '../styles/ProductDetail.css';
@@ -31,15 +31,27 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
   const { addItem, updateItem, cart, busy: cartBusy } = useCustomerCart();
   const [cartModalOpen, setCartModalOpen] = useState(false);
   const [cartMessage, setCartMessage] = useState('');
-  
-  const productVariants = Array.isArray(product?.Variants)
-    ? product.Variants
-    : Array.isArray(product?.ProductVariants)
-      ? product.ProductVariants
-      : [];
+
+  const productVariants = useMemo(() => {
+    const rawVariants = Array.isArray(product?.Variants)
+      ? product.Variants
+      : Array.isArray(product?.ProductVariants)
+        ? product.ProductVariants
+        : [];
+
+    return rawVariants.map((variant) => ({
+      VariantId: variant?.VariantId ?? variant?.variantId ?? '',
+      ProductId: variant?.ProductId ?? variant?.productId ?? product?.ProductId ?? '',
+      VariantName: variant?.VariantName ?? variant?.name ?? '',
+      Stock: Number(variant?.Stock ?? variant?.stock ?? 0),
+      Price: variant?.Price ?? variant?.price ?? null,
+      PriceVnd: variant?.PriceVnd ?? variant?.priceVnd ?? null,
+      SellPriceVnd: variant?.SellPriceVnd ?? variant?.sellPriceVnd ?? null,
+    }));
+  }, [product]);
   
   const [selectedVariant, setSelectedVariant] = useState(
-    productVariants.find((v) => Number(v?.Stock || 0) > 0) || productVariants[0] || null
+    () => productVariants.find((variant) => Number(variant?.Stock || 0) > 0) || productVariants[0] || null,
   );
 
   const galleryImages = (() => {
@@ -73,19 +85,39 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
     setSelectedImage(index);
   };
 
+  const baseUnitPriceRaw = Number(product.DisplayPrice ?? product.Price ?? 0);
+  const baseUnitPrice = Number.isFinite(baseUnitPriceRaw) ? baseUnitPriceRaw : 0;
+  const variantUnitPriceRaw = Number(selectedVariant?.PriceVnd ?? selectedVariant?.SellPriceVnd ?? selectedVariant?.Price);
+  const currentUnitPrice = Number.isFinite(variantUnitPriceRaw) && variantUnitPriceRaw > 0
+    ? variantUnitPriceRaw
+    : baseUnitPrice;
+
   const handleQuantityChange = (change) => {
-    const newQuantity = quantity + change;
-    const maxQuantity = selectedVariant ? selectedVariant.Stock : product.Stock;
+    const currentQuantity = Number(quantity || 1);
+    const newQuantity = currentQuantity + change;
+    const maxQuantity = Number(selectedVariant ? selectedVariant.Stock : product.Stock || 0);
     
     if (newQuantity >= 1 && newQuantity <= maxQuantity) {
       setQuantity(newQuantity);
     }
   };
 
+  const handleQuantityInputChange = (event) => {
+    const nextValue = Number(event.target.value);
+    const maxQuantity = Number(selectedVariant ? selectedVariant.Stock : product.Stock || 0);
+
+    if (!Number.isFinite(nextValue)) {
+      return;
+    }
+
+    setQuantity(Math.max(1, Math.min(nextValue, maxQuantity)));
+  };
+
   const handleAddToCart = async () => {
     const rawStock = selectedVariant ? selectedVariant.Stock : product.Stock;
     const currentStock = Number(rawStock || 0);
     const qty = Number(quantity || 1);
+    const variantId = String(selectedVariant?.VariantId || '').trim();
     
     if (!product.ProductId) {
       setCartMessage('Error: Product ID is missing. Cannot add to cart.');
@@ -99,7 +131,11 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
       return;
     }
     
-    const existingItem = cart?.Items?.find(item => String(item.ProductId) === String(product.ProductId));
+    const existingItem = cart?.Items?.find((item) => {
+      const sameProduct = String(item.ProductId) === String(product.ProductId);
+      const sameVariant = String(item.VariantId || '') === variantId;
+      return sameProduct && sameVariant;
+    });
     
     if (existingItem) {
       const currentQty = Number(existingItem.Quantity || 0);
@@ -131,6 +167,7 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
       try {
         await addItem({
           productId: product.ProductId,
+          variantId: variantId || undefined,
           quantity: qty,
         });
         setCartMessage(`Added ${qty} ${product.Name} to cart!`);
@@ -147,6 +184,7 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
     try {
       await addItem({
         productId: product.ProductId,
+        variantId: String(selectedVariant?.VariantId || '').trim() || undefined,
         quantity,
       });
       navigate('/cart');
@@ -176,7 +214,7 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
   const currentStock = selectedVariant ? selectedVariant.Stock : product.Stock;
   const isOutOfStock = currentStock === 0;
 
-  const totalPrice = product.Price * quantity;
+  const totalPrice = currentUnitPrice * quantity;
 
   return (
     <section className="product-detail-section">
@@ -239,6 +277,14 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
             <div className="product-price-section">
               <div className="price-details">
                 <span className="product-price">{formatVnd(totalPrice)}</span>
+                {selectedVariant ? (
+                  <span className="selected-variant-name">
+                    {selectedVariant.VariantName}
+                  </span>
+                ) : null}
+                <span className="selected-variant-name">
+                  Unit: {formatVnd(currentUnitPrice)}
+                </span>
               </div>
               <div className="product-stock-info">
                 <IoCubeOutline />
@@ -259,11 +305,15 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
                     <button
                       key={variant.VariantId}
                       className={`variant-btn ${selectedVariant?.VariantId === variant.VariantId ? 'active' : ''} ${variant.Stock === 0 ? 'disabled' : ''}`}
-                      onClick={() => variant.Stock > 0 && setSelectedVariant(variant)}
+                      onClick={() => {
+                        if (variant.Stock > 0) {
+                          setSelectedVariant(variant)
+                          setQuantity(1)
+                        }
+                      }}
                       disabled={variant.Stock === 0}
                     >
-                      {variant.VariantName}
-                      {variant.Stock === 0 && <span className="variant-out">Out</span>}
+                      <span className="variant-name">{variant.VariantName}</span>
                     </button>
                   ))}
                 </div>
@@ -282,9 +332,12 @@ const ProductDetailSection = ({ product, ratingSummary, isOwnerMode = false }) =
                     -
                   </button>
                   <input 
-                    type="text" 
+                    type="number" 
+                    min="1"
+                    max={currentStock}
+                    step="1"
                     value={quantity} 
-                    readOnly 
+                    onChange={handleQuantityInputChange}
                     className="qty-input"
                   />
                   <button 
@@ -827,9 +880,18 @@ const RelatedProductsSection = ({ products, currentProductId, categoryId }) => {
                       >
                         <div className="related-product-image">
                           {product.ImageUrl || product.Images?.[0] ? (
-                            <img src={product.ImageUrl || product.Images?.[0]} alt={product.Name} />
+                            <>
+                              <div className="related-image-fallback" aria-hidden="true" />
+                              <img
+                                src={resolveApiImageUrl(product.ImageUrl || product.Images?.[0])}
+                                alt={product.Name}
+                                onError={(event) => {
+                                  event.currentTarget.style.display = 'none'
+                                }}
+                              />
+                            </>
                           ) : (
-                            <div className="service-image-placeholder"></div>
+                            <div className="related-image-fallback" aria-hidden="true" />
                           )}
                           {product.Stock === 0 && (
                             <span className="out-of-stock-badge-small">Out of Stock</span>
@@ -839,7 +901,7 @@ const RelatedProductsSection = ({ products, currentProductId, categoryId }) => {
                           <h3>{product.Name}</h3>
                           <p className="product-brief">{product.Description}</p>
                           <div className="product-footer">
-                            <span className="product-price-small">{formatVnd(product.Price || 0)}</span>
+                            <span className="product-price-small">{formatVnd(product.DisplayPrice ?? product.Price ?? 0)}</span>
                             <span className="product-stock-small">{product.Stock} in stock</span>
                           </div>
                           <button className="view-details-btn-small">
@@ -875,7 +937,7 @@ const ProductDetail = ({ ownerMode = false }) => {
   const location = useLocation();
   const isOwnerMode = ownerMode || location.pathname.startsWith('/portals/owner/')
   const passedProduct = location.state?.product;
-  const { products: apiProducts, loading: productsLoading, error: productsError } = useProducts();
+  const { products: apiProducts, error: productsError } = useProducts();
   const {
     reviews: productReviews,
     ratingSummary,
@@ -889,37 +951,36 @@ const ProductDetail = ({ ownerMode = false }) => {
   const [loading, setLoading] = useState(!passedProduct);
 
   useEffect(() => {
+    let active = true;
+
     const fetchProduct = async () => {
       try {
-        // If product was passed through navigation state, use it
+        setLoading(true);
+        const detail = await api.get(`/api/homepage/products/${encodeURIComponent(String(id || '').trim())}`);
+        if (!active) return;
+        setProduct(detail || passedProduct || null);
+      } catch (error) {
+        if (!active) return;
+        console.error('Error fetching product:', error);
         if (passedProduct) {
           setProduct(passedProduct);
-          setLoading(false);
-          return;
+        } else {
+          const products = Array.isArray(apiProducts) ? apiProducts : [];
+          const foundProduct = products.find((p) => String(p.ProductId) === String(id));
+          setProduct(foundProduct || null);
         }
+      }
 
-        // Otherwise, find from apiProducts
-        const products = Array.isArray(apiProducts) ? apiProducts : [];
-        const foundProduct = products.find(p => String(p.ProductId) === String(id));
-        
-        if (!foundProduct) {
-          console.error('Product not found');
-        }
-
-        setProduct(foundProduct);
-        setLoading(false);
-      } catch (error) {
-        console.error('Error fetching product:', error);
+      if (active) {
         setLoading(false);
       }
     };
 
     fetchProduct();
+    return () => {
+      active = false;
+    };
   }, [id, apiProducts, passedProduct]);
-
-  if (productsLoading) {
-    return <div className="loading">Loading product details...</div>;
-  }
 
   if (productsError) {
     return <div className="error">Error loading products: {productsError}</div>;
@@ -944,7 +1005,7 @@ const ProductDetail = ({ ownerMode = false }) => {
 
   return (
     <div className={`product-detail-page ${isOwnerMode ? 'owner-product-detail-page' : ''}`.trim()}>
-      <ProductDetailSection product={product} ratingSummary={ratingSummary} isOwnerMode={isOwnerMode} />
+      <ProductDetailSection key={String(product?.ProductId || '')} product={product} ratingSummary={ratingSummary} isOwnerMode={isOwnerMode} />
       <ReviewSection
         productId={product.ProductId}
         reviews={Array.isArray(productReviews) ? productReviews : []}

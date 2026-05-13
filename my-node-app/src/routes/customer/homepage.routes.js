@@ -1,9 +1,11 @@
 const express = require('express')
-const { requireAuth } = require('../../middleware/auth')
+const { requireAuth, optionalAuth } = require('../../middleware/auth')
 const {
   getHomepage,
   getServices,
+  getServiceCategories,
   getProducts,
+  getProductDetail,
   getRecommendations,
   getServiceReviews,
   createServiceReview,
@@ -20,6 +22,9 @@ const {
 
 const router = express.Router()
 
+// Attach user info when available, without enforcing login.
+router.use(optionalAuth)
+
 /**
  * Public routes - no authentication required
  */
@@ -30,8 +35,14 @@ router.get('/', getHomepage)
 // GET /api/homepage/services - Get services list
 router.get('/services', getServices)
 
+// GET /api/homepage/service-categories - Get service category list
+router.get('/service-categories', getServiceCategories)
+
 // GET /api/homepage/products - Get products list
 router.get('/products', getProducts)
+
+// GET /api/homepage/products/:productId - Get product detail with variants
+router.get('/products/:productId', getProductDetail)
 
 // GET /api/homepage/recommendations - Get personalized recommendations
 router.get('/recommendations', getRecommendations)

@@ -24,6 +24,13 @@ function formatRatingWithCount(ratingValue, countValue) {
   return `${rating}(${safeCount})`
 }
 
+function normalizeProductType(value) {
+  const raw = String(value || '').trim().toLowerCase()
+  if (raw === 'service') return 'supplies'
+  if (raw === 'supplies') return 'supplies'
+  return 'retail'
+}
+
 function digitsOnly(value) {
   const raw = String(value ?? '').trim()
   if (!raw) return ''
@@ -80,10 +87,11 @@ export default function OwnerProductsPage() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
   const [sortBy, setSortBy] = useState('name')
   const [sortOrder, setSortOrder] = useState('asc')
   const [page, setPage] = useState(1)
-  const pageSize = 10
+  const pageSize = 12
 
   const [openCat, setOpenCat] = useState(false)
   const [catError, setCatError] = useState('')
@@ -93,18 +101,25 @@ export default function OwnerProductsPage() {
   const [variantsFor, setVariantsFor] = useState(null)
   const [variantsError, setVariantsError] = useState('')
   const [variants, setVariants] = useState([])
-  const [newVariant, setNewVariant] = useState({ name: '', stock: '0' })
-
-  const variantsTotalStock = useMemo(() => {
-    return variants.reduce((sum, v) => sum + Number(digitsOnly(v?.stock ?? 0) || 0), 0)
-  }, [variants])
+  const variantsTotalStock = useMemo(
+    () => variants.reduce((sum, v) => sum + Number(digitsOnly(v?.stock ?? 0) || 0), 0),
+    [variants]
+  )
 
   const [open, setOpen] = useState(false)
+    const [variantEditing, setVariantEditing] = useState(null)
+    const [variantForm, setVariantForm] = useState({ name: '' })
+    const [variantAdding, setVariantAdding] = useState(false)
+    const [variantAddForm, setVariantAddForm] = useState({ name: '' })
   const [error, setError] = useState('')
   const [editing, setEditing] = useState(null)
+  const [categoryInput, setCategoryInput] = useState('')
   const [form, setForm] = useState({
     name: '',
     categoryId: '',
+    type: 'retail',
+    unit: '',
+    minQty: '',
     kind: '',
     status: '',
     supplier: 'Default',
@@ -112,9 +127,9 @@ export default function OwnerProductsPage() {
     description: '',
   })
   const [selectedImageIdx, setSelectedImageIdx] = useState(-1)
-  const hasRestoredUiRef = useRef(false)
 
   const imageInputRef = useRef(null)
+  const hasRestoredUiRef = useRef(false)
 
   function onToggleSort(field) {
     if (sortBy === field) {
@@ -218,6 +233,9 @@ export default function OwnerProductsPage() {
       setStatusFilter(saved.statusFilter)
     }
     if (typeof saved.categoryFilter === 'string') setCategoryFilter(saved.categoryFilter)
+    if (saved.typeFilter === 'all' || saved.typeFilter === 'retail' || saved.typeFilter === 'supplies') {
+      setTypeFilter(saved.typeFilter)
+    }
     if (typeof saved.sortBy === 'string') setSortBy(saved.sortBy)
     if (saved.sortOrder === 'asc' || saved.sortOrder === 'desc') setSortOrder(saved.sortOrder)
     if (saved.openCat === true || saved.openCat === false) setOpenCat(saved.openCat)
@@ -240,12 +258,6 @@ export default function OwnerProductsPage() {
       })
     }
     if (Number.isInteger(saved.selectedImageIdx)) setSelectedImageIdx(saved.selectedImageIdx)
-    if (saved.newVariant && typeof saved.newVariant === 'object') {
-      setNewVariant({
-        name: String(saved.newVariant.name || ''),
-        stock: String(saved.newVariant.stock || '0'),
-      })
-    }
     hasRestoredUiRef.current = true
   }, [])
 
@@ -255,6 +267,7 @@ export default function OwnerProductsPage() {
       query,
       statusFilter,
       categoryFilter,
+      typeFilter,
       sortBy,
       sortOrder,
       openCat,
@@ -262,9 +275,8 @@ export default function OwnerProductsPage() {
       open,
       form,
       selectedImageIdx,
-      newVariant,
     })
-  }, [query, statusFilter, categoryFilter, sortBy, sortOrder, openCat, catForm, open, form, selectedImageIdx, newVariant])
+  }, [query, statusFilter, categoryFilter, typeFilter, sortBy, sortOrder, openCat, catForm, open, form, selectedImageIdx])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -273,13 +285,15 @@ export default function OwnerProductsPage() {
       const kind = String(p.kind || p.categoryName || '').toLowerCase()
       const status = String(p.status || '').toLowerCase()
       const category = String(p.categoryId || '')
+      const type = normalizeProductType(p?.type || p?.group)
       const queryMatched = !q || name.includes(q) || kind.includes(q)
       const statusMatched = statusFilter === 'all' || status === statusFilter
       const categoryMatched = categoryFilter === 'all' || category === categoryFilter
-      return queryMatched && statusMatched && categoryMatched
+      const typeMatched = typeFilter === 'all' || type === typeFilter
+      return queryMatched && statusMatched && categoryMatched && typeMatched
     })
     return searched
-  }, [items, query, statusFilter, categoryFilter])
+  }, [items, query, statusFilter, categoryFilter, typeFilter])
 
   const sortedFiltered = useMemo(() => {
     const sorted = [...filtered]
@@ -334,16 +348,6 @@ export default function OwnerProductsPage() {
     [filtered]
   )
 
-  const categoriesById = useMemo(() => {
-    const map = new Map()
-    for (const c of meta.categories || []) {
-      if (c && (c.id !== undefined && c.id !== null)) {
-        map.set(String(c.id), c)
-      }
-    }
-    return map
-  }, [meta.categories])
-
   function close() {
     setOpen(false)
     setError('')
@@ -352,7 +356,7 @@ export default function OwnerProductsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [query, statusFilter, categoryFilter, sortBy, sortOrder])
+  }, [query, statusFilter, categoryFilter, typeFilter, sortBy, sortOrder])
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages)
@@ -363,7 +367,10 @@ export default function OwnerProductsPage() {
     setVariantsFor(null)
     setVariantsError('')
     setVariants([])
-    setNewVariant({ name: '', stock: '0' })
+    setVariantEditing(null)
+    setVariantForm({ name: '' })
+    setVariantAdding(false)
+    setVariantAddForm({ name: '' })
   }
 
   function closeCreateCategory() {
@@ -405,7 +412,12 @@ export default function OwnerProductsPage() {
       api.get(`/api/owner/retail/products/${productId}/variants`),
       api.get(`/api/owner/retail/products/${productId}`),
     ])
-    setVariants(Array.isArray(v) ? v : [])
+    const normalized = (Array.isArray(v) ? v : []).map((item) => ({
+      id: item?.id,
+      name: String(item?.name || ''),
+      stock: String(digitsOnly(item?.stock ?? '0') || '0'),
+    }))
+    setVariants(normalized)
     if (p && typeof p === 'object') {
       setVariantsFor((prev) => (prev?.id === productId ? { ...prev, ...p } : prev))
     }
@@ -415,6 +427,10 @@ export default function OwnerProductsPage() {
     if (!product?.id) return
     setVariantsError('')
     setVariantsFor(product)
+    setVariantEditing(null)
+    setVariantForm({ name: '' })
+    setVariantAdding(false)
+    setVariantAddForm({ name: '' })
     setOpenVariants(true)
     Promise.resolve()
       .then(() => refreshVariantsAndProduct(product.id))
@@ -424,18 +440,98 @@ export default function OwnerProductsPage() {
       })
   }
 
+  function openVariantEditing(variant) {
+    setVariantAdding(false)
+    setVariantAddForm({ name: '' })
+    setVariantEditing(variant?.id || null)
+    setVariantForm({ name: String(variant?.name || '') })
+  }
+
+  function closeVariantEditing() {
+    setVariantEditing(null)
+    setVariantForm({ name: '' })
+  }
+
+  function openVariantAdding() {
+    setVariantEditing(null)
+    setVariantForm({ name: '' })
+    setVariantAdding(true)
+    setVariantAddForm({ name: '' })
+  }
+
+  async function onAddVariant(e) {
+    e.preventDefault()
+    if (!variantsFor?.id) return
+    const name = String(variantAddForm.name || '').trim()
+    if (!name) {
+      setVariantsError('Variant name is required')
+      return
+    }
+
+    try {
+      setVariantsError('')
+      await api.post(`/api/owner/retail/products/${variantsFor.id}/variants`, { name, stock: 0 })
+      setVariantAdding(false)
+      setVariantAddForm({ name: '' })
+      await refreshVariantsAndProduct(variantsFor.id)
+    } catch (err) {
+      console.error(err)
+      setVariantsError(err?.message || 'Unable to add variant')
+    }
+  }
+
+  async function onEditVariant(variantId) {
+    if (!variantId) return
+    const name = String(variantForm.name || '').trim()
+    if (!name) {
+      setVariantsError('Variant name is required')
+      return
+    }
+
+    try {
+      setVariantsError('')
+      await api.put(`/api/owner/retail/variants/${variantId}`, { name })
+      closeVariantEditing()
+      if (variantsFor?.id) {
+        await refreshVariantsAndProduct(variantsFor.id)
+      }
+    } catch (err) {
+      console.error(err)
+      setVariantsError(err?.message || 'Unable to update variant')
+    }
+  }
+
+  async function onDeleteVariant(variantId) {
+    if (!variantId) return
+    if (!window.confirm('Delete this variant?')) return
+    try {
+      setVariantsError('')
+      await api.delete(`/api/owner/retail/variants/${variantId}`)
+      if (variantsFor?.id) {
+        await refreshVariantsAndProduct(variantsFor.id)
+      }
+    } catch (err) {
+      console.error(err)
+      setVariantsError(err?.message || 'Unable to delete variant')
+    }
+  }
+
   function openCreate() {
     setEditing(null)
     setError('')
     setForm({
       name: '',
       categoryId: '',
+      type: 'retail',
+      unit: '',
+      minQty: '',
       kind: '',
       status: '',
       supplier: 'Default',
       images: [],
       description: '',
     })
+    setCategoryInput('')
     setSelectedImageIdx(-1)
     setOpen(true)
   }
@@ -455,12 +551,16 @@ export default function OwnerProductsPage() {
     setForm({
       name: item?.name || '',
       categoryId: fallbackCategoryId,
+      type: normalizeProductType(item?.type || item?.group),
+      unit: item?.unit || '',
+      minQty: String(item?.minQty ?? ''),
       kind: item?.kind || item?.categoryName || '',
       status: item?.status || '',
       supplier: item?.supplier || 'Default',
       images: Array.isArray(item?.images) ? item.images : item?.imageUrl ? [item.imageUrl] : [],
       description: item?.description || '',
     })
+    setCategoryInput(String(item?.kind || item?.categoryName || '').trim())
     setSelectedImageIdx(-1)
     setOpen(true)
   }
@@ -491,6 +591,9 @@ export default function OwnerProductsPage() {
       setError('')
       const payload = {
         name: normalizedName,
+        type: normalizeProductType(form.type),
+        unit: String(form.unit || '').trim(),
+        minQty: digitsOnly(form.minQty) || undefined,
         ...(form.categoryId ? { categoryId: form.categoryId } : {}),
         status: form.status,
         supplier: String(form.supplier || 'Default').trim() || 'Default',
@@ -513,114 +616,6 @@ export default function OwnerProductsPage() {
   }
 
   // Delete functionality removed — products should be deactivated via Edit -> Status
-
-  async function onCreateVariant(e) {
-    e.preventDefault()
-    if (!variantsFor?.id) return
-    const variantName = String(newVariant.name || '').trim()
-    if (!variantName) {
-      setVariantsError('Variant name is required')
-      return
-    }
-    if (hasDangerousInput(variantName)) {
-      setVariantsError('Invalid variant name')
-      return
-    }
-
-    const normalizedStock = Number(digitsOnly(newVariant.stock) || 0)
-    if (!Number.isFinite(normalizedStock) || normalizedStock < 0) {
-      setVariantsError('Invalid stock')
-      return
-    }
-
-    // fetch authoritative product and variants totals from server to avoid race conditions
-    try {
-      const [serverVariants, serverProduct] = await Promise.all([
-        api.get(`/api/owner/retail/products/${variantsFor.id}/variants`),
-        api.get(`/api/owner/retail/products/${variantsFor.id}`),
-      ])
-
-      const serverTotal = Array.isArray(serverVariants)
-        ? serverVariants.reduce((s, v) => s + Number(digitsOnly(v?.stock ?? 0) || 0), 0)
-        : 0
-      const serverCap = Number(serverProduct?.stock ?? 0)
-      if (serverTotal + normalizedStock > serverCap) {
-        setVariantsError('Insufficient stock')
-        return
-      }
-    } catch (err) {
-      // if we can't validate server-side, continue but warn in console
-      console.error('Failed to validate stock with server', err)
-    }
-
-    try {
-      setVariantsError('')
-      await api.post(`/api/owner/retail/products/${variantsFor.id}/variants`, {
-        name: variantName,
-        stock: String(normalizedStock),
-      })
-      await refreshVariantsAndProduct(variantsFor.id)
-      setNewVariant({ name: '', stock: '0' })
-      await load()
-    } catch (err) {
-      console.error(err)
-      setVariantsError(err?.message || 'Unable to create variant')
-    }
-  }
-
-  async function onUpdateVariant(variant) {
-    if (!variant?.id) return
-
-    const normalizedName = String(variant.name || '').trim()
-    if (!normalizedName) {
-      setVariantsError('Variant name is required')
-      return
-    }
-    if (hasDangerousInput(normalizedName)) {
-      setVariantsError('Invalid variant name')
-      return
-    }
-
-    const normalizedStock = Number(digitsOnly(variant.stock) || 0)
-    if (!Number.isFinite(normalizedStock) || normalizedStock < 0) {
-      setVariantsError('Invalid stock')
-      return
-    }
-
-    const cap = Number(variantsFor?.stock ?? 0)
-    if (Number(variantsTotalStock || 0) > cap) {
-      setVariantsError('Insufficient stock')
-      return
-    }
-    try {
-      setVariantsError('')
-      await api.put(`/api/owner/retail/variants/${variant.id}`, {
-        name: normalizedName,
-        stock: String(normalizedStock),
-      })
-      if (variantsFor?.id) {
-        await refreshVariantsAndProduct(variantsFor.id)
-      }
-      await load()
-    } catch (err) {
-      console.error(err)
-      setVariantsError(err?.message || 'Unable to update variant')
-    }
-  }
-
-  async function onDeleteVariant(variant) {
-    if (!variant?.id) return
-    if (!variantsFor?.id) return
-    try {
-      setVariantsError('')
-      await api.del(`/api/owner/retail/variants/${variant.id}`)
-      await refreshVariantsAndProduct(variantsFor.id)
-      await load()
-    } catch (err) {
-      console.error(err)
-      setVariantsError(err?.message || 'Unable to delete variant')
-    }
-  }
 
   function openDetail(product) {
     if (!product?.id) return
@@ -740,6 +735,13 @@ export default function OwnerProductsPage() {
             </span>
             Add Product
           </button>
+
+          <button type="button" className="portal-primaryBtn" onClick={() => setOpenCat(true)}>
+            <span className="portal-primaryBtnIcon" aria-hidden="true">
+              +
+            </span>
+            Add Catalog
+          </button>
         </div>
       </div>
 
@@ -765,8 +767,17 @@ export default function OwnerProductsPage() {
           </select>
         </label>
 
+        <label className="portal-field products-filterField">
+          <span className="portal-label">Filter by type</span>
+          <select className="portal-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            <option value="all">All types</option>
+            <option value="retail">Retail</option>
+            <option value="supplies">Supplies</option>
+          </select>
+        </label>
+
       </div>
-      <PortalCard className="portal-invTableCard" title="Retail Product List">
+      <PortalCard className="portal-invTableCard" title="Product List">
         <div className="portal-tableWrap">
           <table className="portal-table">
             <thead>
@@ -777,10 +788,16 @@ export default function OwnerProductsPage() {
                     {renderSortToggle('name', 'name')}
                   </div>
                 </th>
+                <th>
+                  <div className="products-sortHeader">
+                    <span>Type</span>
+                    {renderSortToggle('type', 'type')}
+                  </div>
+                </th>
                 <th>Category</th>
                 <th>
                   <div className="products-sortHeader">
-                    <span>Price</span>
+                    <span>Sell Price</span>
                     {renderSortToggle('price', 'price')}
                   </div>
                 </th>
@@ -812,14 +829,35 @@ export default function OwnerProductsPage() {
                 const isLowStock = stockNum > 0 && stockNum <= 10
                 const ratingNum = Number(p?.averageRating || 0)
                 const isLowRating = ratingNum > 0 && ratingNum < 3
+                const productType = normalizeProductType(p?.type || p?.group)
 
                 return (
                   <tr key={p.id}>
-                    <td className="portal-invName">{p.name}</td>
+                    <td className="portal-invName" title={p.name || ''}>
+                      <span className="products-nameText">{p.name}</span>
+                    </td>
+                    <td>
+                      <span className="portal-invPill">{normalizeProductType(p?.type || p?.group)}</span>
+                    </td>
                     <td>
                         <span className="portal-invPill">{p.categoryName || p.kind || '-'}</span>
                     </td>
-                    <td>{formatVnd(p.price)} ₫</td>
+                    <td>
+                      {(() => {
+                        const type = normalizeProductType(p?.type || p?.group)
+                        if (type === 'supplies') return '-'
+                        const minVariantPrice = Number(p?.minVariantSellPrice || 0)
+                        const variantPriceCount = Number(p?.variantPriceCount || 0)
+                        const sellPrice = Number(p?.sellPriceVnd ?? p?.price ?? 0)
+                        if (variantPriceCount > 1 && minVariantPrice > 0) {
+                          return `From ${formatVnd(minVariantPrice)} ₫`
+                        }
+                        if (sellPrice > 0) {
+                          return `${formatVnd(sellPrice)} ₫`
+                        }
+                        return 'N/A'
+                      })()}
+                    </td>
                     <td style={{ color: isOutOfStock ? '#dc2626' : isLowStock ? '#f59e0b' : 'inherit' }}>
                       {stockNum}
                       {(isOutOfStock || isLowStock) && (
@@ -852,7 +890,7 @@ export default function OwnerProductsPage() {
               })}
               {pagedItems.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="products-emptyRow">No products found</td>
+                  <td colSpan={8} className="products-emptyRow">No products found</td>
                 </tr>
               ) : null}
             </tbody>
@@ -931,32 +969,77 @@ export default function OwnerProductsPage() {
 
           <div className="portal-modalGrid2">
             <label className="portal-field" style={{ marginTop: 12 }}>
-              <span className="portal-label">Category <span className="products-required">*</span></span>
+              <span className="portal-label">Type <span className="products-required">*</span></span>
               <select
                 className="portal-select"
-                value={form.categoryId || ''}
+                value={normalizeProductType(form.type)}
+                onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}
+              >
+                <option value="retail">Retail</option>
+                <option value="supplies">Supplies</option>
+              </select>
+            </label>
+
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Category <span className="products-required">*</span></span>
+              <input
+                className="portal-input"
+                placeholder="Search category..."
+                list="owner-products-category-list"
+                value={categoryInput}
                 onChange={(e) => {
-                  const nextId = e.target.value
-                  const cat = categoriesById.get(nextId)
+                  const value = e.target.value
+                  setCategoryInput(value)
+                  const matched = (meta.categories || []).find(
+                    (c) => String(c?.name || '').trim().toLowerCase() === String(value || '').trim().toLowerCase()
+                  )
                   setForm((p) => ({
                     ...p,
-                    categoryId: nextId,
-                    kind: cat?.name || p.kind,
+                    categoryId: matched?.id !== undefined && matched?.id !== null ? String(matched.id) : '',
+                    kind: matched?.name || p.kind,
                   }))
                 }}
-                disabled={!Array.isArray(meta.categories) || meta.categories.length === 0}
-              >
-                <option value="">
-                  {Array.isArray(meta.categories) && meta.categories.length > 0
-                    ? '-- Select category --'
-                    : 'No categories available'}
-                </option>
+              />
+              <datalist id="owner-products-category-list">
                 {(meta.categories || []).map((c) => (
-                  <option key={String(c.id)} value={String(c.id)}>
-                    {c.name}
-                  </option>
+                  <option key={String(c.id)} value={c.name} />
                 ))}
-              </select>
+              </datalist>
+            </label>
+          </div>
+
+          <div className="portal-modalGrid2">
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Unit</span>
+              <input
+                className="portal-input"
+                placeholder="sp, bottle, box..."
+                value={form.unit || ''}
+                onChange={(e) => setForm((p) => ({ ...p, unit: e.target.value }))}
+              />
+            </label>
+
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Minimum Stock</span>
+              <input
+                className="portal-input"
+                inputMode="numeric"
+                placeholder="0"
+                value={form.minQty || ''}
+                onChange={(e) => setForm((p) => ({ ...p, minQty: digitsOnly(e.target.value) }))}
+              />
+            </label>
+          </div>
+
+          <div className="portal-modalGrid2">
+            <label className="portal-field" style={{ marginTop: 12 }}>
+              <span className="portal-label">Supplier</span>
+              <input
+                className="portal-input"
+                placeholder="Default"
+                value={form.supplier || ''}
+                onChange={(e) => setForm((p) => ({ ...p, supplier: e.target.value }))}
+              />
             </label>
 
             <label className="portal-field" style={{ marginTop: 12 }}>
@@ -975,18 +1058,6 @@ export default function OwnerProductsPage() {
               </select>
             </label>
           </div>
-
-
-
-          <label className="portal-field" style={{ marginTop: 12 }}>
-            <span className="portal-label">Supplier</span>
-            <input
-              className="portal-input"
-              placeholder="Default"
-              value={form.supplier || ''}
-              onChange={(e) => setForm((p) => ({ ...p, supplier: e.target.value }))}
-            />
-          </label>
 
           <label className="portal-field" style={{ marginTop: 12 }}>
             <span className="portal-label">Images</span>
@@ -1097,12 +1168,13 @@ export default function OwnerProductsPage() {
         open={openVariants}
         title={variantsFor?.name ? `Variants - ${variantsFor.name}` : 'Variants'}
         onClose={closeVariants}
+        showIcon={false}
+        modalClassName="products-variantsModal"
+        bodyClassName="products-variantsModalBody"
         footer={
-          <>
-            <button type="button" className="portal-modalBtn" onClick={closeVariants}>
-              Close
-            </button>
-          </>
+          <button type="button" className="portal-modalBtn portal-modalBtnPrimary" onClick={closeVariants}>
+            Close
+          </button>
         }
       >
         {variantsError ? (
@@ -1111,99 +1183,80 @@ export default function OwnerProductsPage() {
           </div>
         ) : null}
 
-        <div className="portal-pageSubtitle">
-          Product stock: <b>{variantsFor?.stock ?? 0}</b> | Total variant stock: <b>{variantsTotalStock}</b>
+        <div className="products-variantsSummary">
+          <div className="products-variantsSummaryItem">
+            <span className="products-variantsSummaryLabel">Variant count</span>
+            <strong>{variants.length}</strong>
+          </div>
+          <div className="products-variantsSummaryItem">
+            <span className="products-variantsSummaryLabel">Total stock</span>
+            <strong>{variantsTotalStock}</strong>
+          </div>
         </div>
 
-        {Number(variantsTotalStock || 0) > Number(variantsFor?.stock ?? 0) ? (
-          <div className="portal-formError" role="alert" style={{ marginTop: 8 }}>
-            Insufficient stock
-          </div>
-        ) : null}
-
-        <PortalCard title="Variant List">
-          {variants.length === 0 ? <div className="portal-pageSubtitle">No variants yet.</div> : null}
-          <div className="portal-tableWrap">
-            <table className="portal-table">
-              <thead>
+        <div className="products-variantsTableWrap">
+          <table className="portal-table products-variantsTable">
+            <thead>
+              <tr>
+                <th>Variant Name</th>
+                <th>Stock</th>
+                <th className="products-variantActionsHeader">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {variants.length === 0 ? (
                 <tr>
-                  <th>Variant Name</th>
-                  <th>Stock</th>
-                  <th>Actions</th>
+                  <td colSpan={3} className="products-emptyRow">
+                    No variants yet.
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {variants.map((v) => (
-                  <tr key={v.id}>
-                    <td>
-                      <input
-                        className="portal-input"
-                        value={v.name || ''}
-                        onChange={(e) =>
-                          setVariants((prev) => prev.map((x) => (x.id === v.id ? { ...x, name: e.target.value } : x)))
-                        }
-                      />
-                    </td>
-                    <td style={{ width: 140 }}>
-                      <input
-                        className="portal-input"
-                        inputMode="numeric"
-                        value={String(v.stock ?? '0')}
-                        onChange={(e) =>
-                          setVariants((prev) =>
-                            prev.map((x) => (x.id === v.id ? { ...x, stock: digitsOnly(e.target.value) } : x))
-                          )
-                        }
-                      />
-                    </td>
-                    <td style={{ width: 220 }}>
-                      <div className="portal-rowActions">
-                        <button type="button" className="portal-ghostBtn" onClick={() => onUpdateVariant(v)}>
-                          Save
-                        </button>
-                        <button type="button" className="portal-ghostBtn danger" onClick={() => onDeleteVariant(v)}>
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </PortalCard>
-
-        <PortalCard title="Add Variant" style={{ marginTop: 12 }}>
-          <form onSubmit={onCreateVariant}>
-            <div className="portal-modalGrid2">
-              <label className="portal-field" style={{ marginTop: 12 }}>
-                <span className="portal-label">Variant Name</span>
-                <input
-                  className="portal-input"
-                  placeholder="e.g. Blue / Red..."
-                  value={newVariant.name}
-                  onChange={(e) => setNewVariant((p) => ({ ...p, name: e.target.value }))}
-                />
-              </label>
-
-              <label className="portal-field" style={{ marginTop: 12 }}>
-                <span className="portal-label">Stock</span>
-                <input
-                  className="portal-input"
-                  inputMode="numeric"
-                  value={newVariant.stock}
-                  onChange={(e) => setNewVariant((p) => ({ ...p, stock: digitsOnly(e.target.value) }))}
-                />
-              </label>
-            </div>
-
-            <div className="portal-rowActions" style={{ marginTop: 12 }}>
-              <button type="submit" className="portal-modalBtn portal-modalBtnPrimary">
-                Add Variant
-              </button>
-            </div>
-          </form>
-        </PortalCard>
+              ) : (
+                variants.map((v) => {
+                  const stock = Number(digitsOnly(v.stock) || 0)
+                  const isEditing = variantEditing === v.id
+                  return (
+                    <tr key={v.id}>
+                      <td className="products-variantNameCell">
+                        {isEditing ? (
+                          <input
+                            className="portal-input"
+                            value={variantForm.name}
+                            onChange={(e) => setVariantForm((p) => ({ ...p, name: e.target.value }))}
+                            autoFocus
+                          />
+                        ) : (
+                          v.name || '-'
+                        )}
+                      </td>
+                      <td className="products-variantStockCell">{stock}</td>
+                      <td className="products-variantActionsCell">
+                        {isEditing ? (
+                          <>
+                            <button type="button" className="portal-ghostBtn" onClick={() => onEditVariant(v.id)}>Save</button>
+                            <button type="button" className="portal-ghostBtn danger" onClick={closeVariantEditing}>Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button type="button" className="portal-ghostBtn" onClick={() => openVariantEditing(v)}>Edit</button>
+                            <button
+                              type="button"
+                              className="portal-ghostBtn danger"
+                              disabled={stock > 0}
+                              onClick={() => onDeleteVariant(v.id)}
+                              title={stock > 0 ? 'Cannot delete variant with stock > 0' : ''}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </PortalModal>
     </div>
   )

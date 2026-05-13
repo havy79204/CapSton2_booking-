@@ -1,4 +1,5 @@
 const aiChatService = require('../../services/aiChat.service')
+const { sanitizeCustomerResponse } = require('./responseSanitizer')
 
 function extractUserId(rawUser) {
   if (!rawUser) return null
@@ -25,7 +26,7 @@ async function listSessions(req, res, next) {
     const rawUser = req.user
     const userId = extractUserId(rawUser)
     const data = await aiChatService.listSessions(userId)
-    res.json(data)
+    res.json({ data: sanitizeCustomerResponse(data) })
   } catch (err) {
     next(err)
   }
@@ -44,7 +45,7 @@ async function createSession(req, res, next) {
     }
     const finalTitle = title && String(title).trim() ? String(title).trim() : null
     const data = await aiChatService.createSession(userId, finalTitle)
-    res.json(data)
+    res.json({ data: sanitizeCustomerResponse(data) })
   } catch (err) {
     next(err)
   }
@@ -55,7 +56,7 @@ async function getMessages(req, res, next) {
     const sessionId = Number(req.params.sessionId || req.query.sessionId)
     if (!sessionId) return res.status(400).json({ message: 'Missing sessionId' })
     const data = await aiChatService.getMessages(sessionId)
-    res.json(data)
+    res.json({ data: sanitizeCustomerResponse(data) })
   } catch (err) {
     next(err)
   }
@@ -69,7 +70,7 @@ async function postMessage(req, res, next) {
     const { content, messageType } = req.body || {}
     if (!sessionId || !content) return res.status(400).json({ message: 'Missing required fields' })
     const result = await aiChatService.postUserMessage(sessionId, userId, content, messageType)
-    res.json(result)
+    res.json({ data: sanitizeCustomerResponse(result) })
   } catch (err) {
     next(err)
   }
@@ -90,7 +91,7 @@ async function postImageMessage(req, res, next) {
     if (images.length > 3) return res.status(400).json({ message: 'Maximum 3 images per request' })
 
     const result = await aiChatService.postUserImageMessage(sessionId, userId, { imageDataUrls: images, caption })
-    res.json(result)
+    res.json({ data: sanitizeCustomerResponse(result) })
   } catch (err) {
     next(err)
   }
@@ -108,7 +109,7 @@ async function renameSession(req, res, next) {
       : (rawUser?.userId || rawUser?.UserId) ? String(rawUser?.userId || rawUser?.UserId) : null
     if (!sessionId || !title) return res.status(400).json({ message: 'Missing required fields' })
     const data = await aiChatService.renameSession(sessionId, userId, String(title).trim())
-    res.json(data)
+    res.json({ data: sanitizeCustomerResponse(data) })
   } catch (err) {
     next(err)
   }
@@ -123,7 +124,7 @@ async function deleteSession(req, res, next) {
       : (rawUser?.userId || rawUser?.UserId) ? String(rawUser?.userId || rawUser?.UserId) : null
     if (!sessionId) return res.status(400).json({ message: 'Missing sessionId' })
     const data = await aiChatService.deleteSession(sessionId, userId)
-    res.json(data)
+    res.json({ data: sanitizeCustomerResponse(data) })
   } catch (err) {
     next(err)
   }

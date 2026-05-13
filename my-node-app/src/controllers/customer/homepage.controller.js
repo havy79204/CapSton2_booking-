@@ -1,5 +1,6 @@
 const { asyncHandler } = require('../../utils/asyncHandler')
 const homepageService = require('../../services/homepage.service')
+const { sanitizeCustomerResponse } = require('./responseSanitizer')
 
 /**
  * GET /api/homepage
@@ -9,7 +10,7 @@ const getHomepage = asyncHandler(async (req, res) => {
   const opts = { ...(req.query || {}) }
   if (req.user && req.user.sub) opts.userId = String(req.user.sub)
   const data = await homepageService.getHomepageData(opts)
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 /**
@@ -20,7 +21,22 @@ const getServices = asyncHandler(async (req, res) => {
   const opts = { ...(req.query || {}) }
   if (req.user && req.user.sub) opts.userId = String(req.user.sub)
   const data = await homepageService.getServices(opts)
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
+})
+
+/**
+ * GET /api/homepage/service-categories
+ * Get service categories list (optional query: q)
+ */
+const getServiceCategories = asyncHandler(async (req, res) => {
+  const q = String(req.query?.q || '').trim().toLowerCase()
+  const categories = await homepageService.getServiceCategories()
+
+  const data = q
+    ? categories.filter((item) => String(item?.Name || '').toLowerCase().includes(q))
+    : categories
+
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 /**
@@ -32,7 +48,21 @@ const getProducts = asyncHandler(async (req, res) => {
   // include authenticated user id for personalization when available
   if (req.user && req.user.sub) opts.userId = String(req.user.sub)
   const data = await homepageService.getProducts(opts)
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
+})
+
+/**
+ * GET /api/homepage/products/:productId
+ * Get product detail with variants
+ */
+const getProductDetail = asyncHandler(async (req, res) => {
+  const { productId } = req.params
+  const data = await homepageService.getProductDetail(productId)
+  if (!data) {
+    res.status(404).json({ error: 'Product not found' })
+    return
+  }
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 /**
@@ -48,7 +78,7 @@ const getServiceReviews = asyncHandler(async (req, res) => {
     homepageService.getServiceReviews(serviceId, limit),
   ])
 
-  res.json({ ok: true, data: { ratingSummary, reviews } })
+  res.json({ data: sanitizeCustomerResponse({ ratingSummary, reviews }) })
 })
 
 /**
@@ -62,14 +92,14 @@ const createServiceReview = asyncHandler(async (req, res) => {
     ...(req.body || {}),
     userId,
   })
-  res.status(201).json({ ok: true, data })
+  res.status(201).json({ data: sanitizeCustomerResponse(data) })
 })
 
 const deleteServiceReview = asyncHandler(async (req, res) => {
   const { serviceId, reviewId } = req.params
   const userId = String(req.user?.sub || '').trim()
   const data = await homepageService.deleteServiceReview(serviceId, reviewId, userId)
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 /**
@@ -79,7 +109,7 @@ const deleteServiceReview = asyncHandler(async (req, res) => {
 const getProductRating = asyncHandler(async (req, res) => {
   const { productId } = req.params
   const data = await homepageService.getProductRating(productId)
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 /**
@@ -95,7 +125,7 @@ const getProductReviews = asyncHandler(async (req, res) => {
     homepageService.getProductReviews(productId, limit),
   ])
 
-  res.json({ ok: true, data: { ratingSummary, reviews } })
+  res.json({ data: sanitizeCustomerResponse({ ratingSummary, reviews }) })
 })
 
 /**
@@ -109,14 +139,14 @@ const createProductReview = asyncHandler(async (req, res) => {
     ...(req.body || {}),
     userId,
   })
-  res.status(201).json({ ok: true, data })
+  res.status(201).json({ data: sanitizeCustomerResponse(data) })
 })
 
 const deleteProductReview = asyncHandler(async (req, res) => {
   const { productId, reviewId } = req.params
   const userId = String(req.user?.sub || '').trim()
   const data = await homepageService.deleteProductReview(productId, reviewId, userId)
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 /**
@@ -126,7 +156,7 @@ const deleteProductReview = asyncHandler(async (req, res) => {
 const getReviews = asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 10, 50)
   const data = await homepageService.getTopReviews(limit)
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 /**
@@ -141,7 +171,7 @@ const getMyReviews = asyncHandler(async (req, res) => {
     throw err
   }
   const data = await homepageService.getUserReviews(userId, Math.min(parseInt(req.query.limit) || 200, 200))
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 /**
@@ -150,12 +180,17 @@ const getMyReviews = asyncHandler(async (req, res) => {
  */
 const getStats = asyncHandler(async (req, res) => {
   const data = await homepageService.getSalonStats()
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 const getSalonContact = asyncHandler(async (req, res) => {
-  const data = await homepageService.getSalonContactInfo()
-  res.json({ ok: true, data })
+  const raw = await homepageService.getSalonContactInfo()
+  const data = {
+    name: raw?.name || '',
+    address: raw?.address || '',
+    website: raw?.website || '',
+  }
+  res.json({ data })
 })
 
 /**
@@ -169,13 +204,15 @@ const getRecommendations = asyncHandler(async (req, res) => {
   opts.limit = limit
 
   const data = await homepageService.getRecommendations(opts)
-  res.json({ ok: true, data })
+  res.json({ data: sanitizeCustomerResponse(data) })
 })
 
 module.exports = {
   getHomepage,
   getServices,
+  getServiceCategories,
   getProducts,
+  getProductDetail,
   getServiceReviews,
   createServiceReview,
   deleteServiceReview,

@@ -209,7 +209,7 @@ export default function OwnerDashboardPage() {
 
   const bookingStatusParts = [
     { label: 'Pending', value: bookingStatusSummary.pending, color: '#f59e0b' },
-    { label: 'Booked', value: bookingStatusSummary.booked, color: '#3b82f6' },
+    { label: 'Confirmed', value: bookingStatusSummary.booked, color: '#3b82f6' },
     { label: 'Completed', value: bookingStatusSummary.completed, color: '#22c55e' },
     { label: 'Cancelled', value: bookingStatusSummary.cancelled, color: '#ef4444' },
   ]

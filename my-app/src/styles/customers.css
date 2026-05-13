@@ -50,12 +50,105 @@
   min-width: 200px;
 }
 
+.customers-page .customers-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: nowrap;
+  width: 100%;
+}
+
+.customers-page .customers-toolbarSearch {
+  flex: 1 1 auto;
+  max-width: none;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+}
+
+.customers-page .customers-toolbar .portal-searchFull {
+  width: 100%;
+  display: flex;
+  margin-top: 0;
+}
+
+.customers-page .customers-toolbar .portal-primaryBtn {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.customers-page .customers-dateFilter {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.customers-page .customers-dateLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: #301103;
+  white-space: nowrap;
+  margin-bottom: 6px;
+}
+
+.customers-page .customers-dateInput {
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid #d4af86;
+  font-size: 12px;
+  background-color: #fff;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.customers-page .customers-clearDateBtn {
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: none;
+  background-color: #f0f0f0;
+  color: #666;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  flex: 0 0 auto;
+}
+
+.customers-page .customers-clearDateBtn:hover {
+  background-color: #e0e0e0;
+}
+
 /* Table responsive */
 @media (max-width: 768px) {
+  .customers-page .customers-toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .customers-page .customers-toolbarSearch {
+    min-width: 100%;
+  }
+
+  .customers-page .customers-dateFilter,
+  .customers-page .customers-clearDateBtn,
+  .customers-page .customers-toolbar .portal-primaryBtn {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .customers-page .portal-customerActions {
     flex-direction: column;
     gap: 4px;
     align-items: stretch;
+  }
+}
+
+@media (max-width: 1100px) {
+  .customers-page .customers-toolbar {
+    flex-wrap: wrap;
   }
 }
 
@@ -165,7 +258,12 @@
 }
 
 .portal-back-btn {
-  background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(250,248,245,0.85) 50%, rgba(245,230,211,0.8) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(250, 248, 245, 0.85) 50%,
+    rgba(245, 230, 211, 0.8) 100%
+  );
   border: none;
   border-radius: 10px;
   padding: 10px 16px;
@@ -174,15 +272,20 @@
   color: #5d4037;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 6px rgba(245,230,211,0.3);
+  box-shadow: 0 2px 6px rgba(245, 230, 211, 0.3);
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
 .portal-back-btn:hover {
-  background: linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(252,250,247,0.9) 50%, rgba(248,235,215,0.85) 100%);
-  box-shadow: 0 4px 12px rgba(245,230,211,0.4);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(252, 250, 247, 0.9) 50%,
+    rgba(248, 235, 215, 0.85) 100%
+  );
+  box-shadow: 0 4px 12px rgba(245, 230, 211, 0.4);
   transform: translateY(-1px);
 }
 
@@ -191,17 +294,27 @@
   padding: 48px;
   color: #8d6e63;
   font-size: 16px;
-  background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(250,248,245,0.85) 50%, rgba(245,230,211,0.8) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(250, 248, 245, 0.85) 50%,
+    rgba(245, 230, 211, 0.8) 100%
+  );
   border-radius: 16px;
-  box-shadow: 0 2px 8px rgba(245,230,211,0.2);
+  box-shadow: 0 2px 8px rgba(245, 230, 211, 0.2);
 }
 
 /* Details Container */
 .portal-detailsContainer {
-  background: linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(250,248,245,0.9) 50%, rgba(245,230,211,0.85) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(250, 248, 245, 0.9) 50%,
+    rgba(245, 230, 211, 0.85) 100%
+  );
   border-radius: 20px;
   padding: 32px;
-  box-shadow: 0 4px 20px rgba(245,230,211,0.3);
+  box-shadow: 0 4px 20px rgba(245, 230, 211, 0.3);
 }
 
 /* Page Header */
@@ -211,7 +324,7 @@
   gap: 20px;
   margin-bottom: 32px;
   padding-bottom: 24px;
-  border-bottom: 1px solid rgba(245,230,211,0.5);
+  border-bottom: 1px solid rgba(245, 230, 211, 0.5);
 }
 
 .portal-detailsPageAvatar {
@@ -225,7 +338,7 @@
   justify-content: center;
   font-size: 28px;
   font-weight: 700;
-  box-shadow: 0 4px 12px rgba(255,107,53,0.3);
+  box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
 }
 
 .portal-detailsPageInfo {
@@ -255,12 +368,12 @@
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(255,107,53,0.3);
+  box-shadow: 0 2px 8px rgba(255, 107, 53, 0.3);
 }
 
 .portal-primaryBtn:hover {
   background: linear-gradient(135deg, #ff6b35 0%, #ff5722 100%);
-  box-shadow: 0 4px 14px rgba(255,107,53,0.4);
+  box-shadow: 0 4px 14px rgba(255, 107, 53, 0.4);
   transform: translateY(-1px);
 }
 
@@ -273,10 +386,15 @@
 }
 
 .portal-detailsSection {
-  background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(250,248,245,0.85) 50%, rgba(245,230,211,0.8) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(250, 248, 245, 0.85) 50%,
+    rgba(245, 230, 211, 0.8) 100%
+  );
   border-radius: 16px;
   padding: 24px;
-  box-shadow: 0 2px 8px rgba(245,230,211,0.2);
+  box-shadow: 0 2px 8px rgba(245, 230, 211, 0.2);
 }
 
 .portal-detailsSectionHeader {
@@ -285,7 +403,7 @@
   color: #3e2723;
   margin: 0 0 20px 0;
   padding-bottom: 12px;
-  border-bottom: 1px solid rgba(245,230,211,0.5);
+  border-bottom: 1px solid rgba(245, 230, 211, 0.5);
 }
 
 /* Contact Info */
@@ -305,7 +423,11 @@
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: linear-gradient(135deg, rgba(255,138,80,0.1) 0%, rgba(255,107,53,0.1) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 138, 80, 0.1) 0%,
+    rgba(255, 107, 53, 0.1) 100%
+  );
   color: #ff6b35;
   display: flex;
   align-items: center;
@@ -341,11 +463,16 @@
 }
 
 .portal-statCard {
-  background: linear-gradient(135deg, rgba(255,255,255,0.8) 0%, rgba(250,248,245,0.75) 50%, rgba(245,230,211,0.7) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.8) 0%,
+    rgba(250, 248, 245, 0.75) 50%,
+    rgba(245, 230, 211, 0.7) 100%
+  );
   border-radius: 12px;
   padding: 16px;
   text-align: center;
-  box-shadow: 0 2px 6px rgba(245,230,211,0.15);
+  box-shadow: 0 2px 6px rgba(245, 230, 211, 0.15);
 }
 
 .portal-statLabel {
@@ -363,7 +490,7 @@
 
 .portal-ghostBtn {
   background: transparent;
-  border: 1px solid rgba(245,230,211,0.6);
+  border: 1px solid rgba(245, 230, 211, 0.6);
   border-radius: 8px;
   padding: 8px 16px;
   font-size: 13px;
@@ -374,8 +501,8 @@
 }
 
 .portal-ghostBtn:hover {
-  background: rgba(245,230,211,0.3);
-  border-color: rgba(245,230,211,0.8);
+  background: rgba(245, 230, 211, 0.3);
+  border-color: rgba(245, 230, 211, 0.8);
 }
 
 /* Booking Section */
@@ -408,7 +535,12 @@
 }
 
 .portal-tabBtn {
-  background: linear-gradient(135deg, rgba(255,255,255,0.8) 0%, rgba(250,248,245,0.75) 50%, rgba(245,230,211,0.7) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.8) 0%,
+    rgba(250, 248, 245, 0.75) 50%,
+    rgba(245, 230, 211, 0.7) 100%
+  );
   border: none;
   border-radius: 8px;
   padding: 10px 16px;
@@ -417,18 +549,23 @@
   color: #8d6e63;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 1px 3px rgba(245,230,211,0.2);
+  box-shadow: 0 1px 3px rgba(245, 230, 211, 0.2);
 }
 
 .portal-tabBtn:hover {
-  background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(252,250,247,0.85) 50%, rgba(248,235,215,0.8) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(252, 250, 247, 0.85) 50%,
+    rgba(248, 235, 215, 0.8) 100%
+  );
   color: #5d4037;
 }
 
 .portal-tabBtn.active {
   background: linear-gradient(135deg, #ff8a50 0%, #ff6b35 100%);
   color: white;
-  box-shadow: 0 2px 8px rgba(255,107,53,0.3);
+  box-shadow: 0 2px 8px rgba(255, 107, 53, 0.3);
 }
 
 /* Booking & Order Lists */
@@ -444,7 +581,12 @@
   padding: 40px;
   color: #8d6e63;
   font-size: 14px;
-  background: linear-gradient(135deg, rgba(255,255,255,0.6) 0%, rgba(250,248,245,0.55) 50%, rgba(245,230,211,0.5) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.6) 0%,
+    rgba(250, 248, 245, 0.55) 50%,
+    rgba(245, 230, 211, 0.5) 100%
+  );
   border-radius: 12px;
 }
 
@@ -454,17 +596,22 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(250,248,245,0.85) 50%, rgba(245,230,211,0.8) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(250, 248, 245, 0.85) 50%,
+    rgba(245, 230, 211, 0.8) 100%
+  );
   border-radius: 12px;
   padding: 16px;
-  box-shadow: 0 2px 6px rgba(245,230,211,0.15);
+  box-shadow: 0 2px 6px rgba(245, 230, 211, 0.15);
   transition: all 0.2s ease;
 }
 
 .portal-bookingListCard:hover,
 .portal-orderListCard:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(245,230,211,0.25);
+  box-shadow: 0 4px 12px rgba(245, 230, 211, 0.25);
 }
 
 .portal-bookingDate {
@@ -590,35 +737,35 @@
   .portal-detailsPage {
     padding: 16px;
   }
-  
+
   .portal-detailsContainer {
     padding: 20px;
   }
-  
+
   .portal-detailsPageHeader {
     flex-direction: column;
     text-align: center;
   }
-  
+
   .portal-detailsGrid {
     grid-template-columns: 1fr;
   }
-  
+
   .portal-statsGrid {
     grid-template-columns: 1fr;
   }
-  
+
   .portal-bookingListCard,
   .portal-orderListCard {
     flex-direction: column;
     text-align: center;
   }
-  
+
   .portal-bookingStatusBox,
   .portal-orderStatusBox {
     text-align: center;
   }
-  
+
   .portal-bookingTabs,
   .portal-orderTabs {
     justify-content: center;
@@ -629,13 +776,13 @@
   .portal-detailsPageName {
     font-size: 22px;
   }
-  
+
   .portal-detailsPageAvatar {
     width: 56px;
     height: 56px;
     font-size: 22px;
   }
-  
+
   .portal-sectionTitle {
     font-size: 18px;
   }

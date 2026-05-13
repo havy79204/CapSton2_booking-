@@ -5,7 +5,17 @@ const postLogin = asyncHandler(async(req, res) => {
     const { email, password } = req.body || {}
     try {
         const { user, token } = await authService.login({ email, password })
-        res.json({ success: true, token, user: { id: user.id, email: user.email, name: user.name } })
+        res.json({
+            success: true,
+            token,
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                roleKey: user.roleKey,
+                status: user.status,
+            },
+        })
     } catch (err) {
         const status = err.statusCode || err.status || 401
         const message = err && err.message ? err.message : 'Sai tài khoản hoặc mật khẩu'

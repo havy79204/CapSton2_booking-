@@ -318,6 +318,34 @@ export default function OwnerSettingsPage() {
     return errors
   }
 
+  function applyGeneralScheduleTimeChange(field, nextValue) {
+    setSchedule((prev) => {
+      const currentGeneral = String(prev?.[field] || '').trim()
+      const target = String(nextValue || '').trim()
+      if (!target) return prev
+
+      const weekdayField = field === 'openTime' ? 'openTime' : 'closeTime'
+      const nextWeekdays = { ...(prev.weekdays || {}) }
+
+      for (const item of WEEKDAY_FIELDS) {
+        const currentDay = { ...(nextWeekdays[item.key] || {}) }
+        const dayValue = String(currentDay[weekdayField] || '').trim()
+        const shouldSyncWithGeneral = !dayValue || dayValue === currentGeneral
+
+        if (shouldSyncWithGeneral) {
+          currentDay[weekdayField] = target
+          nextWeekdays[item.key] = currentDay
+        }
+      }
+
+      return {
+        ...prev,
+        [field]: target,
+        weekdays: nextWeekdays,
+      }
+    })
+  }
+
   // Promotion validation
   function validatePromotions() {
     const errors = {}
@@ -914,7 +942,7 @@ export default function OwnerSettingsPage() {
               <TimeInputGroup
                 label="Opening Time"
                 value={schedule.openTime}
-                onChange={(value) => setSchedule((p) => ({ ...p, openTime: value }))}
+                onChange={(value) => applyGeneralScheduleTimeChange('openTime', value)}
                 required
                 error={validateScheduleTimes().closeTime && schedule.openTime >= schedule.closeTime ? 'Opening time must be before closing time' : null}
               />
@@ -922,7 +950,7 @@ export default function OwnerSettingsPage() {
               <TimeInputGroup
                 label="Closing Time"
                 value={schedule.closeTime}
-                onChange={(value) => setSchedule((p) => ({ ...p, closeTime: value }))}
+                onChange={(value) => applyGeneralScheduleTimeChange('closeTime', value)}
                 required
                 error={validateScheduleTimes().closeTime}
                 hideIcon={true}

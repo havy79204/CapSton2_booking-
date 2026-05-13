@@ -156,7 +156,8 @@ export default function ScheduleScreen() {
 
   const handleDeleteLeaveRequest = async (leaveItem: any, date: Date) => {
     const offScheduleId = leaveItem?.meta?.offScheduleId;
-    if (!offScheduleId) return;
+    const shiftType = leaveItem?.meta?.leaveType || 'full';
+    const dateIso = toLocalIso(date);
 
     Alert.alert('Xóa đơn xin nghỉ', 'Bạn chắc chắn muốn hủy đơn xin nghỉ đang chờ duyệt?', [
       { text: 'Không', style: 'cancel' },
@@ -166,9 +167,9 @@ export default function ScheduleScreen() {
         onPress: async () => {
           try {
             await del('/staff/schedule/shifts', {
-              offScheduleId,
-              date: toLocalIso(date),
-              shiftType: leaveItem?.meta?.leaveType || 'full',
+              ...(offScheduleId ? { offScheduleId } : {}),
+              date: dateIso,
+              shiftType,
             });
             await loadSchedule(false);
           } catch (error: any) {

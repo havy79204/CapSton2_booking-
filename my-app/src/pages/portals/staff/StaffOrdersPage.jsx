@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import PortalCard from '../../../components/Layout portal/PortalCard.jsx'
 import PortalModal from '../../../components/Layout portal/PortalModal.jsx'
 import { api } from '../../../lib/api.js'
@@ -39,6 +39,17 @@ function normalizeDisplayStatus(status) {
   return status
 }
 
+const VN_PHONE_REGEX = /^0(3|5|7|8|9)\d{8}$/
+
+function normalizeVietnamPhone(value) {
+  const raw = String(value || '').replace(/[^\d+]/g, '').trim()
+  if (!raw) return ''
+  if (raw.startsWith('+84')) return `0${raw.slice(3).replace(/\D/g, '')}`
+  const digits = raw.replace(/\D/g, '')
+  if (digits.startsWith('84') && digits.length === 11) return `0${digits.slice(2)}`
+  return digits
+}
+
 export default function StaffOrdersPage() {
   const [orderFilters, setOrderFilters] = useState(defaultFilters)
   const [debouncedKeyword, setDebouncedKeyword] = useState('')
@@ -60,7 +71,6 @@ export default function StaffOrdersPage() {
   })
   const [orderSaving, setOrderSaving] = useState(false)
   const [editItems, setEditItems] = useState([])
-  const [products, setProducts] = useState([])
 
   const loadOrders = useCallback(async (nextFilters) => {
     try {
@@ -81,20 +91,6 @@ export default function StaffOrdersPage() {
     }
   }, [])
 
-  const loadProducts = useCallback(async () => {
-    try {
-      const data = await api.get('/api/staff/products')
-      setProducts(Array.isArray(data) ? data : [])
-    } catch (err) {
-      console.error(err)
-      setProducts([])
-    }
-  }, [])
-
-  useEffect(() => {
-    loadProducts()
-  }, [loadProducts])
-
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedKeyword(orderFilters.keyword || '')
@@ -105,14 +101,6 @@ export default function StaffOrdersPage() {
   useEffect(() => {
     loadOrders({ ...orderFilters, keyword: debouncedKeyword })
   }, [loadOrders, orderFilters, debouncedKeyword])
-
-  const productsById = useMemo(() => {
-    const map = new Map()
-    for (const p of products) {
-      if (p?.id) map.set(String(p.id), p)
-    }
-    return map
-  }, [products])
 
   function openEditOrder(order) {
     const realId = order?.Id || order?.id || order?.OrderId || order?.OrderCode
@@ -130,6 +118,8 @@ export default function StaffOrdersPage() {
         orderItemId: it.OrderItemId || '',
         productId: String(it.ProductId || ''),
         productName: it.ProductName || '',
+        variantId: String(it.VariantId || ''),
+        variantName: String(it.VariantName || ''),
         quantity: String(Number(it.Quantity || 0) || 0),
       }))
     )
@@ -140,8 +130,24 @@ export default function StaffOrdersPage() {
     e.preventDefault()
     if (!orderEditing?.OrderId) return
 
+    const customerName = String(orderForm.customerName || '').trim()
+    const customerPhone = normalizeVietnamPhone(orderForm.customerPhone)
+    if (!customerName) {
+      setOrdersError('Customer name is required')
+      return
+    }
+    if (!customerPhone) {
+      setOrdersError('Phone number is required')
+      return
+    }
+    if (!VN_PHONE_REGEX.test(customerPhone)) {
+      setOrdersError('Phone number must be a valid Vietnamese phone number')
+      return
+    }
+
     try {
       setOrderSaving(true)
+      setOrdersError('')
       const itemsPayload = (editItems || [])
         .map((l) => ({
           orderItemId: l.orderItemId || undefined,
@@ -151,8 +157,8 @@ export default function StaffOrdersPage() {
         .filter((l) => l.productId && Number.isFinite(l.quantity) && l.quantity > 0)
 
       await api.put(`/api/staff/orders/${orderEditing.OrderId}`, {
-        customerName: orderForm.customerName,
-        customerPhone: orderForm.customerPhone,
+        customerName,
+        customerPhone,
         customerAddress: orderForm.customerAddress,
         paymentMethod: orderForm.paymentMethod,
         status: orderForm.status,

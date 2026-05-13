@@ -3,6 +3,9 @@ const { toAppointmentListItem } = require('../models/appointment.model')
 const { getSettingsMap } = require('./settings.service')
 const { notifyCustomerEvent, notifyOwnerEvent } = require('./notifications.service')
 
+const _tableExistsCache = new Map()
+const _columnExistsCache = new Map()
+
 function calculateCommission(revenue, tiers = {}) {
   const tierLow = tiers.CommissionTierLow !== undefined && tiers.CommissionTierLow !== null ? Number(tiers.CommissionTierLow) : (tiers.commissionTierLow !== undefined && tiers.commissionTierLow !== null ? Number(tiers.commissionTierLow) : 500000)
   const rateLow = tiers.CommissionRateLow !== undefined && tiers.CommissionRateLow !== null ? Number(tiers.CommissionRateLow) : (tiers.commissionRateLow !== undefined && tiers.commissionRateLow !== null ? Number(tiers.commissionRateLow) : 0.10)
@@ -22,9 +25,39 @@ function normalizeAppointmentStatus(status) {
   const normalizedStatusInput = String(status || '').trim().toLowerCase()
   if (normalizedStatusInput === 'c' || normalizedStatusInput === 'pending') return 'Pending'
   if (normalizedStatusInput === 'completed' || normalizedStatusInput === 'complete' || normalizedStatusInput === 'done') return 'Completed'
-  if (normalizedStatusInput === 'cancelled' || normalizedStatusInput === 'cancelled' || normalizedStatusInput === 'delete' || normalizedStatusInput === 'deleted') return 'Cancelled'
-  if (normalizedStatusInput === 'booked' || normalizedStatusInput === 'confirmed' || normalizedStatusInput === 'confirm') return 'Booked'
+  if (normalizedStatusInput === 'cancelled' || normalizedStatusInput === 'canceled' || normalizedStatusInput === 'cancel' || normalizedStatusInput === 'canceller' || normalizedStatusInput === 'delete' || normalizedStatusInput === 'deleted') return 'Cancelled'
+  if (normalizedStatusInput === 'booked' || normalizedStatusInput === 'booker') return 'Booked'
+  if (normalizedStatusInput === 'confirmed' || normalizedStatusInput === 'confirm') return 'Confirmed'
   return status || 'Pending'
+}
+
+async function columnExists(tableName, columnName) {
+  const cacheKey = `${tableName}.${columnName}`
+  if (_columnExistsCache.has(cacheKey)) return _columnExistsCache.get(cacheKey)
+
+  try {
+    const res = await query(
+      `SELECT 1 AS ok
+       FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_NAME = @tableName
+         AND COLUMN_NAME = @columnName`,
+      { tableName, columnName }
+    )
+    const exists = Boolean(res.recordset?.length)
+    _columnExistsCache.set(cacheKey, exists)
+    return exists
+  } catch {
+    _columnExistsCache.set(cacheKey, false)
+    return false
+  }
+}
+
+async function getServiceCategoryId(serviceId) {
+  const res = await query(
+    'SELECT TOP 1 CategoryId FROM Services WHERE ServiceId = @serviceId',
+    { serviceId }
+  ).catch(() => ({ recordset: [] }))
+  return String(res.recordset?.[0]?.CategoryId || '').trim()
 }
 
 async function applyCommissionForCompletedBooking(bookingId, staffId) {
@@ -119,19 +152,62 @@ async function applyCommissionForCompletedBooking(bookingId, staffId) {
   }
 }
 
-async function listAppointments() {
-  console.log('[DEBUG] listAppointments: Fetching real data...');
+async function listAppointments(options = {}) {
+  console.log('[DEBUG] listAppointments: Fetching real data...')
+
+  const month = String(options?.month || '').trim()
+  const staffId = String(options?.staffId || '').trim()
+  const params = {}
+  const whereParts = []
+
+  if (/^\d{4}-\d{2}$/.test(month)) {
+    params.monthStart = `${month}-01`
+    whereParts.push('CAST(b.BookingTime AS DATE) >= @monthStart')
+    whereParts.push('CAST(b.BookingTime AS DATE) < DATEADD(MONTH, 1, @monthStart)')
+  }
+
+  if (staffId) {
+    params.staffId = staffId
+    whereParts.push(`EXISTS (
+      SELECT 1
+      FROM BookingServices bsFilter
+      WHERE bsFilter.BookingId = b.BookingId
+        AND CONVERT(NVARCHAR(100), bsFilter.StaffId) = CONVERT(NVARCHAR(100), @staffId)
+    )`)
+  }
+
+  const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : ''
+  const topSql = /^\d{4}-\d{2}$/.test(month) ? '' : 'TOP 300'
+  const hasBookingCodeColumn = await columnExists('Bookings', 'BookingCode')
+  const hasCreatedAtColumn = await columnExists('Bookings', 'CreatedAt')
+  const hasCustomerNameColumn = await columnExists('Bookings', 'CustomerName')
+  const hasCustomerPhoneColumn = await columnExists('Bookings', 'Phone')
+  const bookingCodeSelect = hasBookingCodeColumn
+    ? 'b.BookingCode AS BookingCode,'
+    : 'CAST(NULL AS NVARCHAR(100)) AS BookingCode,'
+  const bookingCreatedAtSelect = hasCreatedAtColumn
+    ? 'b.CreatedAt AS BookingCreatedAt,'
+    : 'b.BookingTime AS BookingCreatedAt,'
+  const bookingCustomerNameExpr = hasCustomerNameColumn
+    ? "NULLIF(LTRIM(RTRIM(b.CustomerName)), '')"
+    : 'NULL'
+  const bookingCustomerPhoneExpr = hasCustomerPhoneColumn
+    ? "NULLIF(LTRIM(RTRIM(b.Phone)), '')"
+    : 'NULL'
 
   try {
     // Query chính - dùng subquery để lấy thông tin tổng hợp
     const result = await query(
-      `SELECT TOP 100
+      `SELECT ${topSql}
           b.BookingId,
+          ${bookingCodeSelect}
+          ${bookingCreatedAtSelect}
           b.CustomerUserId,
           b.BookingTime,
           b.Status AS BookingStatus,
           b.Notes,
-          cu.Name AS CustomerName,
+          COALESCE(NULLIF(LTRIM(RTRIM(cu.Name)), ''), ${bookingCustomerNameExpr}, N'Khách hàng') AS CustomerName,
+          COALESCE(NULLIF(LTRIM(RTRIM(cu.Phone)), ''), ${bookingCustomerPhoneExpr}, '') AS CustomerPhone,
           -- Lấy danh sách dịch vụ qua subquery
           ISNULL((
             SELECT STRING_AGG(COALESCE(sv.Name, 'Unknown'), ', ') 
@@ -173,8 +249,9 @@ async function listAppointments() {
           ) AS TotalPrice
        FROM Bookings b
        LEFT JOIN Users cu ON cu.UserId = b.CustomerUserId
+         ${whereSql}
        ORDER BY b.BookingTime DESC`
-    );
+       , params)
 
     // Mapping dữ liệu chuẩn để Frontend nhận diện được biến 'discount'
     return (result.recordset || []).map(row => {
@@ -186,10 +263,13 @@ async function listAppointments() {
       
       return {
         ...mapped,
+        bookingCode: String(row.BookingCode || '').trim() || null,
+        createdAt: row.BookingCreatedAt || null,
         serviceIds: serviceIdsArray, // Giữ lại cho edit form
         service: row.FirstService || 'No Service', // Tên dịch vụ đã join
         duration: Number(row.TotalDuration || 30), // Duration tổng
         customerName: row.CustomerName,
+        customerPhone: row.CustomerPhone || '',
         staffName: row.StaffName,
         price: Number(row.Price || 0),
         discount: Number(row.Discount || 0),
@@ -204,24 +284,47 @@ async function listAppointments() {
 }
 
 async function staffSupportsService(staffId, serviceId) {
-  console.log(`[DEBUG] Checking if staff ${staffId} supports service ${serviceId}`)
+  if (!staffId || !serviceId) return false
+
+  const hasServiceIdColumn = await columnExists('StaffSkills', 'ServiceId')
+  if (hasServiceIdColumn) {
+    const res = await query(
+      `SELECT 1 FROM StaffSkills 
+       WHERE StaffId = @staffId AND ServiceId = @serviceId`,
+      { staffId, serviceId }
+    ).catch(() => ({ recordset: [] }))
+    return Boolean(res.recordset?.length)
+  }
+
+  const hasCategoryIdColumn = await columnExists('StaffSkills', 'CategoryId')
+  if (!hasCategoryIdColumn) return false
+
+  const categoryId = await getServiceCategoryId(serviceId)
+  if (!categoryId) return false
+
   const res = await query(
     `SELECT 1 FROM StaffSkills 
-     WHERE StaffId = @staffId AND ServiceId = @serviceId`,
-    { staffId, serviceId }
-  )
-  const hasSkill = res.recordset?.length > 0
-  console.log(`[DEBUG] Result: ${hasSkill ? 'YES' : 'NO'}`)
-  return hasSkill
+     WHERE StaffId = @staffId AND CategoryId = @categoryId`,
+    { staffId, categoryId }
+  ).catch(() => ({ recordset: [] }))
+  return Boolean(res.recordset?.length)
 }
 
 async function createAppointment(payload) {
-  const { customerUserId, serviceIds, staffId, date, time, notes, status, promotionCode } = payload || {}
+  const { customerUserId, serviceIds, staffId, date, time, notes, status, promotionCode, customerName, customerPhone, phone } = payload || {}
   const statusToSave = normalizeAppointmentStatus(status)
+  const resolvedCustomerUserId = String(customerUserId || '').trim() || null
+  const resolvedCustomerName = String(customerName || '').trim()
+  const resolvedCustomerPhone = String(customerPhone || phone || '').trim()
 
 if (!Array.isArray(serviceIds) || serviceIds.length === 0) {
   throw new Error('At least one service is required')
 }
+  if (!resolvedCustomerUserId && !resolvedCustomerName) {
+    const err = new Error('Missing customer info: provide customerUserId or customerName')
+    err.status = 400
+    throw err
+  }
   const when = new Date(`${date}T${time}:00`)
   if (Number.isNaN(when.getTime())) {
     const err = new Error('Invalid datetime')
@@ -297,16 +400,34 @@ for (let row of conflict.recordset) {
   const bookingId = newId()
   const bookingServiceId = newId()
 
-await query(
-  `INSERT INTO Bookings (BookingId, CustomerUserId, BookingTime, Status, Notes)
-   VALUES (@bookingId, @customerUserId, @bookingTime, @status, @notes);`,
-  {
+  const hasCustomerNameColumn = await columnExists('Bookings', 'CustomerName')
+  const hasCustomerPhoneColumn = await columnExists('Bookings', 'Phone')
+  const bookingInsertColumns = ['BookingId', 'CustomerUserId', 'BookingTime', 'Status', 'Notes']
+  const bookingInsertValues = ['@bookingId', '@customerUserId', '@bookingTime', '@status', '@notes']
+  const bookingInsertParams = {
     bookingId,
-    customerUserId,
+    customerUserId: resolvedCustomerUserId,
     bookingTime: when,
     status: statusToSave,
     notes: notes || null,
   }
+
+  if (hasCustomerNameColumn) {
+    bookingInsertColumns.push('CustomerName')
+    bookingInsertValues.push('@customerName')
+    bookingInsertParams.customerName = resolvedCustomerName || null
+  }
+
+  if (hasCustomerPhoneColumn) {
+    bookingInsertColumns.push('Phone')
+    bookingInsertValues.push('@customerPhone')
+    bookingInsertParams.customerPhone = resolvedCustomerPhone || null
+  }
+
+await query(
+  `INSERT INTO Bookings (${bookingInsertColumns.join(', ')})
+   VALUES (${bookingInsertValues.join(', ')});`,
+  bookingInsertParams
 )
 
 // Loop insert services
@@ -316,24 +437,32 @@ let resolvedPromotionId = null
   if (promotionCode) {
     console.log('[DEBUG] Processing promotion code:', promotionCode)
     try {
-      const promoResult = await query(
-        `SELECT PromotionId, DiscountValue, DiscountType, Status 
-         FROM Promotions 
-         WHERE Code = @code AND Status = 'ACTIVE' 
-         AND GETDATE() BETWEEN StartDate AND EndDate`,
-        { code: promotionCode }
-      )
+      const hasPromotionsTable = await columnExists('Promotions', 'Code')
+      const hasPromotionIdColumn = await columnExists('Promotions', 'PromotionId')
+      if (hasPromotionsTable && hasPromotionIdColumn) {
+        const promoResult = await query(
+          `SELECT PromotionId, DiscountValue, DiscountType, Status 
+           FROM Promotions 
+           WHERE Code = @code AND Status = 'ACTIVE' 
+           AND GETDATE() BETWEEN StartDate AND EndDate`,
+          { code: promotionCode }
+        )
       
-      if (promoResult.recordset?.length > 0) {
-        resolvedPromotionId = promoResult.recordset[0].PromotionId
-        console.log('[DEBUG] Found valid promotion:', promoResult.recordset[0])
+        if (promoResult.recordset?.length > 0) {
+          resolvedPromotionId = promoResult.recordset[0].PromotionId
+          console.log('[DEBUG] Found valid promotion:', promoResult.recordset[0])
+        } else {
+          console.log('[DEBUG] No valid promotion found for code:', promotionCode)
+        }
       } else {
-        console.log('[DEBUG] No valid promotion found for code:', promotionCode)
+        console.log('[DEBUG] Promotions schema has no PromotionId/Code support, skipping promotion code')
       }
     } catch (err) {
       console.error('[DEBUG] Error processing promotion code:', err.message)
     }
   }
+
+  const hasBookingServicePromotionId = await columnExists('BookingServices', 'PromotionId')
   
 for (let serviceId of serviceIds) {
   const svc = await query(
@@ -341,18 +470,27 @@ for (let serviceId of serviceIds) {
     { serviceId }
   )
 
+  const insertColumns = ['BookingServiceId', 'BookingId', 'ServiceId', 'StaffId', 'Price']
+  const insertValues = ['@id', '@bookingId', '@serviceId', '@staffId', '@price']
+  const insertParams = {
+    id: newId(),
+    bookingId,
+    serviceId,
+    staffId,
+    price: svc.recordset?.[0]?.Price ?? 0,
+  }
+
+  if (hasBookingServicePromotionId && resolvedPromotionId !== null && resolvedPromotionId !== undefined) {
+    insertColumns.push('PromotionId')
+    insertValues.push('@promotionId')
+    insertParams.promotionId = resolvedPromotionId
+  }
+
   await query(
     `INSERT INTO BookingServices 
-     (BookingServiceId, BookingId, ServiceId, StaffId, Price, PromotionId)
-     VALUES (@id, @bookingId, @serviceId, @staffId, @price, @promotionId)`,
-    {
-      id: newId(),
-      bookingId,
-      serviceId,
-      staffId,
-      price: svc.recordset?.[0]?.Price ?? 0,
-      promotionId: resolvedPromotionId
-    }
+     (${insertColumns.join(', ')})
+     VALUES (${insertValues.join(', ')})`,
+    insertParams
   )
 }
 
@@ -365,13 +503,29 @@ return { id: bookingId }
 }
 
 async function getAppointmentById(bookingId) {
+  const hasBookingCodeColumn = await columnExists('Bookings', 'BookingCode')
+  const hasCustomerNameColumn = await columnExists('Bookings', 'CustomerName')
+  const hasCustomerPhoneColumn = await columnExists('Bookings', 'Phone')
+  const whereByIdOrCode = hasBookingCodeColumn
+    ? 'b.BookingId = @bookingId OR b.BookingCode = @bookingId'
+    : 'b.BookingId = @bookingId'
+  const bookingCustomerNameExpr = hasCustomerNameColumn
+    ? "NULLIF(LTRIM(RTRIM(b.CustomerName)), '')"
+    : 'NULL'
+  const bookingCustomerPhoneExpr = hasCustomerPhoneColumn
+    ? "NULLIF(LTRIM(RTRIM(b.Phone)), '')"
+    : 'NULL'
+
   const result = await query(
     `SELECT TOP 1
         b.BookingId,
+        ${hasBookingCodeColumn ? 'b.BookingCode,' : 'CAST(NULL AS NVARCHAR(100)) AS BookingCode,'}
         b.CustomerUserId,
         b.BookingTime,
         b.Status AS BookingStatus,
         b.Notes,
+        COALESCE(NULLIF(LTRIM(RTRIM(cu.Name)), ''), ${bookingCustomerNameExpr}, N'Khách hàng') AS CustomerName,
+        COALESCE(NULLIF(LTRIM(RTRIM(cu.Phone)), ''), ${bookingCustomerPhoneExpr}, '') AS CustomerPhone,
         bs.BookingServiceId,
         bs.ServiceId,
         bs.StaffId,
@@ -384,7 +538,8 @@ async function getAppointmentById(bookingId) {
         ORDER BY x.BookingServiceId
       ) bs
       LEFT JOIN Services sv ON sv.ServiceId = bs.ServiceId
-      WHERE b.BookingId = @bookingId`,
+      LEFT JOIN Users cu ON cu.UserId = b.CustomerUserId
+      WHERE ${whereByIdOrCode}`,
     { bookingId }
   )
 
@@ -398,7 +553,10 @@ async function getAppointmentById(bookingId) {
 
   return {
     id: row.BookingId,
+    bookingCode: row.BookingCode || null,
     customerUserId: row.CustomerUserId,
+    customerName: row.CustomerName || 'Khách hàng',
+    customerPhone: row.CustomerPhone || '',
     serviceId: row.ServiceId,
     staffId: row.StaffId,
     bookingTime: iso,
@@ -415,7 +573,7 @@ async function updateAppointment(bookingId, payload) {
   console.log(`[APPT UPDATE] BookingId: ${bookingId}`)
   console.log(`[APPT UPDATE] Payload:`, JSON.stringify(payload, null, 2))
   
-  const { customerUserId, serviceIds, staffId, date, time, notes, status } = payload || {}
+  const { customerUserId, serviceIds, staffId, date, time, notes, status, customerName, customerPhone, phone } = payload || {}
   const normalizedStatusInput = String(status || '').trim().toLowerCase()
   const statusToSave = normalizeAppointmentStatus(status)
   
@@ -453,26 +611,48 @@ async function updateAppointment(bookingId, payload) {
   }
 
   const currentBooking = exists.recordset?.[0] || null
+  const hasCustomerNameColumn = await columnExists('Bookings', 'CustomerName')
+  const hasCustomerPhoneColumn = await columnExists('Bookings', 'Phone')
+  const resolvedCustomerUserId = String(customerUserId || '').trim() || null
+  const hasCustomerNameInPayload = Object.prototype.hasOwnProperty.call(payload || {}, 'customerName')
+  const hasCustomerPhoneInPayload = Object.prototype.hasOwnProperty.call(payload || {}, 'customerPhone') || Object.prototype.hasOwnProperty.call(payload || {}, 'phone')
+  const resolvedCustomerName = hasCustomerNameInPayload ? (String(customerName || '').trim() || null) : undefined
+  const resolvedCustomerPhone = hasCustomerPhoneInPayload ? (String(customerPhone || phone || '').trim() || null) : undefined
   const previousBookingTime = currentBooking?.BookingTime ? new Date(currentBooking.BookingTime) : null
   const previousTimeMs = previousBookingTime && !Number.isNaN(previousBookingTime.getTime())
     ? previousBookingTime.getTime()
     : null
 
   // ===== UPDATE BOOKING =====
+  const bookingUpdateParts = [
+    'CustomerUserId = @customerUserId',
+    'BookingTime = @bookingTime',
+    'Notes = @notes',
+    'Status = @status',
+  ]
+  const bookingUpdateParams = {
+    bookingId,
+    customerUserId: resolvedCustomerUserId,
+    bookingTime: when,
+    notes: notes || null,
+    status: statusToSave,
+  }
+
+  if (hasCustomerNameColumn && resolvedCustomerName !== undefined) {
+    bookingUpdateParts.push('CustomerName = @customerName')
+    bookingUpdateParams.customerName = resolvedCustomerName
+  }
+
+  if (hasCustomerPhoneColumn && resolvedCustomerPhone !== undefined) {
+    bookingUpdateParts.push('Phone = @customerPhone')
+    bookingUpdateParams.customerPhone = resolvedCustomerPhone
+  }
+
   await query(
     `UPDATE Bookings
-     SET CustomerUserId = @customerUserId,
-         BookingTime = @bookingTime,
-         Notes = @notes,
-         Status = @status
+     SET ${bookingUpdateParts.join(', ')}
      WHERE BookingId = @bookingId`,
-    {
-      bookingId,
-      customerUserId,
-      bookingTime: when,
-      notes: notes || null,
-      status: statusToSave,
-    }
+    bookingUpdateParams
   )
 
   // ================= FIX MULTIPLE SERVICES =================
@@ -701,30 +881,112 @@ async function recalculateAllCommissions() {
 }
 async function listAppointmentMeta({ staffId } = {}) {
   // Return quick lookup lists used by staff UI: recent customers and available services
+  const out = { customers: [], services: [], staffCategoryIds: [] }
+
   try {
+    const hasCustomerNameColumn = await columnExists('Bookings', 'CustomerName')
+    const hasCustomerPhoneColumn = await columnExists('Bookings', 'Phone')
+    const bookingCustomerNameExpr = hasCustomerNameColumn
+      ? "NULLIF(LTRIM(RTRIM(b.CustomerName)), '')"
+      : 'NULL'
+    const bookingCustomerPhoneExpr = hasCustomerPhoneColumn
+      ? "NULLIF(LTRIM(RTRIM(b.Phone)), '')"
+      : 'NULL'
+    const bookingCustomerNameGroup = hasCustomerNameColumn
+      ? 'b.CustomerName'
+      : 'CAST(NULL AS NVARCHAR(255))'
+    const bookingCustomerPhoneGroup = hasCustomerPhoneColumn
+      ? 'b.Phone'
+      : 'CAST(NULL AS NVARCHAR(50))'
+
     const customersRes = await query(
-      `SELECT DISTINCT b.CustomerUserId AS Id, u.Name, u.Phone
+      `SELECT TOP 150
+          NULLIF(CONVERT(NVARCHAR(100), b.CustomerUserId), '') AS UserId,
+          COALESCE(NULLIF(LTRIM(RTRIM(u.Name)), ''), ${bookingCustomerNameExpr}, N'Khách lẻ') AS Name,
+          COALESCE(NULLIF(LTRIM(RTRIM(u.Phone)), ''), ${bookingCustomerPhoneExpr}, '') AS Phone,
+          MAX(b.BookingTime) AS LatestBookingTime
        FROM Bookings b
        LEFT JOIN Users u ON u.UserId = b.CustomerUserId
        JOIN BookingServices bs ON bs.BookingId = b.BookingId
        WHERE bs.StaffId = @staffId
-       ORDER BY b.BookingTime DESC`,
+       GROUP BY b.CustomerUserId, u.Name, u.Phone, ${bookingCustomerNameGroup}, ${bookingCustomerPhoneGroup}
+       ORDER BY MAX(b.BookingTime) DESC`,
       { staffId }
     )
 
-    const customers = (customersRes.recordset || []).map(r => ({ id: String(r.Id || ''), name: r.Name || '', phone: r.Phone || '' }))
+    out.customers = (customersRes.recordset || [])
+      .map((r) => ({
+        id: String(r.UserId || '').trim(),
+        name: String(r.Name || '').trim(),
+        phone: String(r.Phone || '').trim(),
+      }))
+      .filter((r) => Boolean(r.id) || Boolean(r.name) || Boolean(r.phone))
+  } catch (err) {
+    console.error('[appointments.service] listAppointmentMeta customers error:', err.message)
+  }
+
+  // If staff has no booking history, fallback to global customer accounts.
+  if (!out.customers.length) {
+    try {
+      const fallbackCustomersRes = await query(
+        `SELECT TOP 150
+            CONVERT(NVARCHAR(100), u.UserId) AS UserId,
+            COALESCE(NULLIF(LTRIM(RTRIM(u.Name)), ''), N'Khách hàng') AS Name,
+            COALESCE(NULLIF(LTRIM(RTRIM(u.Phone)), ''), '') AS Phone
+         FROM Users u
+         WHERE LOWER(LTRIM(RTRIM(COALESCE(u.Role, '')))) = 'customer'
+            OR LOWER(LTRIM(RTRIM(COALESCE(u.Role, '')))) = 'client'
+         ORDER BY u.Name ASC`,
+        {}
+      )
+
+      out.customers = (fallbackCustomersRes.recordset || []).map((r) => ({
+        id: String(r.UserId || '').trim(),
+        name: String(r.Name || '').trim(),
+        phone: String(r.Phone || '').trim(),
+      }))
+    } catch (err) {
+      console.error('[appointments.service] listAppointmentMeta fallback customers error:', err.message)
+    }
+  }
+
+  try {
+    try {
+      const skillRes = await query(
+        `SELECT DISTINCT ss.CategoryId
+         FROM StaffSkills ss
+         WHERE ss.StaffId = @staffId
+           AND ss.CategoryId IS NOT NULL`,
+        { staffId }
+      )
+      out.staffCategoryIds = (skillRes.recordset || [])
+        .map((r) => String(r.CategoryId || '').trim())
+        .filter(Boolean)
+    } catch {
+      out.staffCategoryIds = []
+    }
 
     const servicesRes = await query(
-      `SELECT ServiceId AS Id, Name, Price, DurationMinutes FROM Services WHERE IsActive = 1 OR IsActive IS NULL ORDER BY Name`,
+      `SELECT s.ServiceId AS Id, s.Name, s.Price, s.DurationMinutes, s.CategoryId
+       FROM Services s
+       ORDER BY s.Name`,
       {}
     )
-    const services = (servicesRes.recordset || []).map(r => ({ id: String(r.Id || ''), name: r.Name || '', price: Number(r.Price || 0), durationMinutes: Number(r.DurationMinutes || 0) }))
 
-    return { customers, services }
+    const servicesRows = servicesRes.recordset || []
+
+    out.services = servicesRows.map((r) => ({
+      id: String(r.Id || '').trim(),
+      name: String(r.Name || '').trim(),
+      price: Number(r.Price || 0),
+      durationMinutes: Number(r.DurationMinutes || 0),
+      categoryId: String(r.CategoryId || '').trim(),
+    }))
   } catch (err) {
-    console.error('[appointments.service] listAppointmentMeta error:', err.message)
-    return { customers: [], services: [] }
+    console.error('[appointments.service] listAppointmentMeta services error:', err.message)
   }
+
+  return out
 }
 
 module.exports = {
@@ -735,4 +997,111 @@ module.exports = {
   cancelAppointment,
   recalculateAllCommissions,
   listAppointmentMeta,
+  searchCustomersFromBookings,
+}
+
+async function searchCustomersFromBookings({ staffId, q } = {}) {
+  const out = []
+  try {
+    const hasCustomerNameColumn = await columnExists('Bookings', 'CustomerName')
+    const hasCustomerPhoneColumn = await columnExists('Bookings', 'Phone')
+    const bookingCustomerNameExpr = hasCustomerNameColumn
+      ? "NULLIF(LTRIM(RTRIM(b.CustomerName)), '')"
+      : 'NULL'
+    const bookingCustomerPhoneExpr = hasCustomerPhoneColumn
+      ? "NULLIF(LTRIM(RTRIM(b.Phone)), '')"
+      : 'NULL'
+
+    const qParam = String(q || '').trim()
+    const qFilter = qParam
+      ? `AND (
+          LOWER(CONVERT(NVARCHAR(400), COALESCE(u.Name, ${bookingCustomerNameExpr}, ''))) LIKE '%' + LOWER(@q) + '%'
+          OR LOWER(CONVERT(NVARCHAR(200), COALESCE(u.Phone, ${bookingCustomerPhoneExpr}, ''))) LIKE '%' + LOWER(@q) + '%'
+          OR CONVERT(NVARCHAR(100), b.CustomerUserId) LIKE '%' + @q + '%'
+        )`
+      : ''
+
+    const sql = `SELECT TOP 200
+        NULLIF(CONVERT(NVARCHAR(100), b.CustomerUserId), '') AS CustomerUserId,
+        COALESCE(NULLIF(LTRIM(RTRIM(u.Name)), ''), ${bookingCustomerNameExpr}, N'') AS CustomerName,
+        COALESCE(NULLIF(LTRIM(RTRIM(u.Phone)), ''), ${bookingCustomerPhoneExpr}, '') AS Phone,
+        MAX(b.BookingTime) AS LatestBookingTime
+      FROM Bookings b
+      LEFT JOIN Users u ON u.UserId = b.CustomerUserId
+      WHERE 1 = 1
+      ${qFilter}
+      GROUP BY b.CustomerUserId, u.Name, u.Phone, ${bookingCustomerNameExpr}, ${bookingCustomerPhoneExpr}
+      ORDER BY MAX(b.BookingTime) DESC`
+
+    const res = await query(sql, { q: qParam })
+    const bookings = (res.recordset || []).map(r => ({
+      customerUserId: String(r.CustomerUserId || '').trim(),
+      customerName: String(r.CustomerName || '').trim(),
+      phone: String(r.Phone || '').trim(),
+      latestBookingTime: r.LatestBookingTime || null,
+    }))
+
+    // Also search global Users (account customers) when a query is provided — merge results.
+    let users = []
+    try {
+      if (qParam) {
+        const usersSql = `SELECT TOP 200
+            CONVERT(NVARCHAR(100), u.UserId) AS UserId,
+            COALESCE(NULLIF(LTRIM(RTRIM(u.Name)), ''), N'') AS Name,
+            COALESCE(NULLIF(LTRIM(RTRIM(u.Phone)), ''), N'') AS Phone
+          FROM Users u
+          WHERE (LOWER(LTRIM(RTRIM(COALESCE(u.Role, '')))) = 'customer' OR LOWER(LTRIM(RTRIM(COALESCE(u.Role, '')))) = 'client')
+            AND (
+              LOWER(u.Name) LIKE '%' + LOWER(@q) + '%'
+              OR LOWER(u.Phone) LIKE '%' + LOWER(@q) + '%'
+              OR CONVERT(NVARCHAR(100), u.UserId) LIKE '%' + @q + '%'
+            )
+          ORDER BY u.Name ASC`
+
+        const ures = await query(usersSql, { q: qParam })
+        users = (ures.recordset || []).map(u => ({
+          userId: String(u.UserId || '').trim(),
+          name: String(u.Name || '').trim(),
+          phone: String(u.Phone || '').trim(),
+        }))
+      }
+    } catch (uerr) {
+      // ignore user search errors
+    }
+
+    // Merge bookings + users, dedupe by userId (prefer user data), then include walk-ins (no userId)
+    const mergedMap = new Map()
+    // Add user accounts first
+    for (const u of users) {
+      if (!u.userId) continue
+      mergedMap.set(u.userId, {
+        customerUserId: u.userId,
+        customerName: u.name || '',
+        phone: u.phone || '',
+        latestBookingTime: null,
+      })
+    }
+
+    // Merge booking-derived entries (will not overwrite existing user entries)
+    let walkinIdx = 0
+    for (const b of bookings) {
+      if (b.customerUserId) {
+        if (mergedMap.has(b.customerUserId)) {
+          const existing = mergedMap.get(b.customerUserId)
+          existing.latestBookingTime = existing.latestBookingTime || b.latestBookingTime
+          mergedMap.set(b.customerUserId, existing)
+        } else {
+          mergedMap.set(b.customerUserId, b)
+        }
+      } else {
+        const key = `__walkin_${walkinIdx++}`
+        mergedMap.set(key, b)
+      }
+    }
+
+    return Array.from(mergedMap.values()).slice(0, 200)
+  } catch (err) {
+    console.error('[appointments.service] searchCustomersFromBookings error:', err.message)
+    return out
+  }
 }

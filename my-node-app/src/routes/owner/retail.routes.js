@@ -14,14 +14,19 @@ router.put('/retail/products/:productId', requireAuth, controller.putRetailProdu
 router.delete('/retail/products/:productId', requireAuth, controller.deleteRetailProduct)
 
 router.get('/retail/products/:productId/variants', requireAuth, controller.getVariants)
-router.post('/retail/products/:productId/variants', requireAuth, controller.postVariant)
-router.put('/retail/variants/:variantId', requireAuth, controller.putVariant)
-router.delete('/retail/variants/:variantId', requireAuth, controller.deleteVariant)
+	router.post('/retail/products/:productId/variants', requireAuth, controller.postVariant)
+	router.put('/retail/variants/:variantId', requireAuth, controller.putVariant)
+	router.delete('/retail/variants/:variantId', requireAuth, controller.deleteVariant)
 
 router.get('/retail/orders', requireAuth, controller.getRetailOrders)
 router.post('/retail/orders', requireAuth, controller.postRetailOrder)
 router.get('/retail/orders/:orderId', requireAuth, controller.getRetailOrder)
 router.put('/retail/orders/:orderId', requireAuth, controller.putRetailOrder)
+router.patch('/retail/orders/:orderId/process', requireAuth, controller.patchRetailOrderProcess)
+router.patch('/retail/orders/:orderId/ship', requireAuth, controller.patchRetailOrderShip)
+router.patch('/retail/orders/:orderId/confirm', requireAuth, controller.patchRetailOrderConfirm)
+router.patch('/retail/orders/:orderId/complete', requireAuth, controller.patchRetailOrderComplete)
+router.patch('/retail/orders/:orderId/cancel', requireAuth, controller.patchRetailOrderCancel)
 router.delete('/retail/orders/:orderId', requireAuth, controller.deleteRetailOrder)
 
 router.post('/retail/uploads/image', requireAuth, controller.postRetailUploadImage)
